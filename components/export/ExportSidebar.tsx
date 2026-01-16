@@ -2,15 +2,52 @@
 
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Printer, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PdfPreview } from "@/components/export/PdfPreview";
 
 export function ExportSidebar() {
-    const { activeFileId, toggleRightSidebar, rightSidebarExpanded } = useStore();
+    const { activeFileId, files, toggleRightSidebar, rightSidebarExpanded, activeTemplateId, templates, setActiveTemplate } = useStore();
 
-    const handlePrint = () => {
-        window.print();
+    const activeTemplate = templates.find(t => t.id === activeTemplateId);
+
+    const handlePrint = async () => {
+        if (!activeFileId) return;
+
+        const activeFile = files.find(f => f.id === activeFileId);
+        if (!activeFile) return;
+
+        try {
+            const response = await fetch('/api/export-pdf', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    markdown: activeFile.content,
+                    title: activeFile.name.replace(/\.[^/.]+$/, ""),
+                    css: activeTemplate?.css || '',
+                    settings: activeTemplate?.settings,
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to export PDF');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${activeFile.name.replace(/\.[^/.]+$/, "")}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Error exporting PDF. Please try again.');
+        }
     };
 
     if (!rightSidebarExpanded) {
@@ -45,32 +82,28 @@ export function ExportSidebar() {
                 </Button>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
-                <div className="space-y-6">
-                    <div className="space-y-3">
+            <div className="flex-1 flex flex-col p-4 min-h-0 h-full">
+                <div className="flex-1 flex flex-col min-h-0 h-full">
+                    <div className="flex items-center justify-between shrink-0 mb-3">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">PDF Preview</h3>
-                        <div className="aspect-[3/4] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center p-4">
-                            <p className="text-[10px] text-muted-foreground text-center">
-                                PDF Live Preview Coming Soon
-                            </p>
-                        </div>
+                        <select
+                            className="text-[10px] bg-muted/50 border border-border rounded px-2 py-1 outline-none font-medium hover:bg-muted transition-colors"
+                            value={activeTemplateId || ''}
+                            onChange={(e) => setActiveTemplate(e.target.value)}
+                        >
+                            {templates.map(t => (
+                                <option key={t.id} value={t.id}>{t.name} Template</option>
+                            ))}
+                        </select>
                     </div>
-
-
-
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Information</h3>
-                        <p className="text-xs text-muted-foreground italic">
-                            Select a template from the left sidebar to change the look of your PDF.
-                        </p>
-                    </div>
+                    <PdfPreview />
                 </div>
-            </ScrollArea>
+            </div>
 
             <div className="p-4 bg-background shrink-0">
                 <Button className="w-full shadow-sm" onClick={handlePrint} disabled={!activeFileId}>
-                    <Printer size={16} className="mr-2" />
-                    Export PDF
+                    <SquareArrowOutUpRight size={16} className="mr-2" />
+                    Export
                 </Button>
             </div>
         </div>

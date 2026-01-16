@@ -3,6 +3,7 @@
 import { useMemo, useEffect, useRef } from 'react';
 import { createPlateEditor, Plate, usePlateEditor } from 'platejs/react';
 import { useStore } from '@/lib/store';
+import { useMounted } from '@/hooks/use-mounted';
 
 import { EditorKit } from '@/components/plate-editor/editor-kit';
 import { SettingsDialog } from '@/components/plate-editor/settings-dialog';
@@ -18,6 +19,7 @@ interface PlateEditorProps {
 
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode } = useStore();
+  const mounted = useMounted();
 
   // Use a ref to track if we're currently updating from Plate to avoid infinite loops
   const isUpdatingFromPlate = useRef(false);
@@ -40,6 +42,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     }
   }, [content, editor]);
 
+  if (!mounted) {
+    return (
+      <div className="h-full w-full bg-background" />
+    );
+  }
+
   return (
     <Plate
       editor={editor}
@@ -49,7 +57,11 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         if (md !== content) {
           onChange(md);
         }
-        isUpdatingFromPlate.current = false;
+        // Defer resetting the flag to allow the useEffect to see it as true
+        // This prevents the effect from resetting the editor and losing focus
+        setTimeout(() => {
+          isUpdatingFromPlate.current = false;
+        }, 0);
       }}
     >
       <div className="h-full flex flex-col relative w-full overflow-hidden">

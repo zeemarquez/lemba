@@ -71,22 +71,31 @@ export function ExportToolbarButton(props: DropdownMenuProps) {
   };
 
   const exportToPdf = async () => {
-    const canvas = await getCanvas();
+    const md = editor.getApi(MarkdownPlugin).markdown.serialize();
+    try {
+      const response = await fetch('/api/export-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          markdown: md,
+        }),
+      });
 
-    const PDFLib = await import('pdf-lib');
-    const pdfDoc = await PDFLib.PDFDocument.create();
-    const page = pdfDoc.addPage([canvas.width, canvas.height]);
-    const imageEmbed = await pdfDoc.embedPng(canvas.toDataURL('PNG'));
-    const { height, width } = imageEmbed.scale(1);
-    page.drawImage(imageEmbed, {
-      height,
-      width,
-      x: 0,
-      y: 0,
-    });
-    const pdfBase64 = await pdfDoc.saveAsBase64({ dataUri: true });
+      if (!response.ok) throw new Error('Failed to export PDF');
 
-    await downloadFile(pdfBase64, 'plate.pdf');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'export.pdf';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Error exporting PDF');
+    }
   };
 
   const exportToImage = async () => {

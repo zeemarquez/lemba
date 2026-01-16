@@ -47,14 +47,7 @@ export function FixedToolbarButtons() {
           </ToolbarGroup>
 
           <ToolbarGroup>
-            <AIToolbarButton tooltip="AI commands">
-              <WandSparklesIcon />
-            </AIToolbarButton>
-          </ToolbarGroup>
-
-          <ToolbarGroup>
             <TurnIntoToolbarButton />
-            <FontSizeToolbarButton />
             <InsertToolbarButton />
           </ToolbarGroup>
 
@@ -70,34 +63,17 @@ export function FixedToolbarButtons() {
 
           <ToolbarGroup>
             <BulletedListToolbarButton />
-            <NumberedListToolbarButton />
-            <TodoListToolbarButton />
-            <ToggleToolbarButton />
-          </ToolbarGroup>
-
-          <ToolbarGroup>
-            <AlignToolbarButton />
             <LinkToolbarButton />
+            <AlignToolbarButton />
           </ToolbarGroup>
 
           <ToolbarGroup>
-            <FontColorToolbarButton nodeType={KEYS.color} tooltip="Text color">
-              <BaselineIcon size={18} />
-            </FontColorToolbarButton>
-
-            <FontColorToolbarButton
-              nodeType={KEYS.backgroundColor}
-              tooltip="Background color"
-            >
-              <PaintBucketIcon size={18} />
-            </FontColorToolbarButton>
-          </ToolbarGroup>
-
-          <ToolbarGroup>
+            <AIToolbarButton tooltip="AI commands">
+              <WandSparklesIcon size={18} />
+            </AIToolbarButton>
             <ExportToolbarButton>
               <ArrowUpToLineIcon size={18} />
             </ExportToolbarButton>
-            <ImportToolbarButton />
           </ToolbarGroup>
         </>
       )}
@@ -105,13 +81,7 @@ export function FixedToolbarButtons() {
       <div className="grow" />
 
       <ToolbarGroup>
-        <MarkToolbarButton nodeType={KEYS.highlight} tooltip="Highlight">
-          <HighlighterIcon size={18} />
-        </MarkToolbarButton>
         <CommentToolbarButton />
-      </ToolbarGroup>
-
-      <ToolbarGroup>
         <ModeToolbarButton />
       </ToolbarGroup>
     </div>

@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, X } from "lucide-react";
+import { FileText, X, LayoutGrid } from "lucide-react";
 import { ExportSidebar } from "@/components/export/ExportSidebar";
 import { PrintStyles } from "@/components/export/PrintStyles";
 import { useRef, useEffect } from "react";
@@ -20,10 +20,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         leftSidebarExpanded,
         rightSidebarExpanded,
         openTabs,
-        activeFileId,
         openFile,
+        openTemplate,
         closeTab,
         files,
+        templates,
+        activeFileId,
+        activeTemplateId,
+        currentView,
         toggleLeftSidebar,
         toggleRightSidebar
     } = useStore();
@@ -73,30 +77,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <ResizableHandle id="sidebar-handle" />
 
                 {/* Main Content */}
-                <ResizablePanel id="editor-panel" defaultSize={50} className="flex flex-col h-full bg-background min-w-0">
+                <ResizablePanel id="editor-panel" defaultSize={50} className="flex flex-col h-full bg-background min-w-0 min-h-0">
                     {/* Tab Bar Container */}
                     <div className="flex items-end bg-muted/20 h-11 overflow-x-auto overflow-y-hidden no-scrollbar scroll-smooth shrink-0 relative">
                         {/* Prefix line (before first tab) */}
                         <div className="w-2 h-full border-b border-border shrink-0" />
-                        {openTabs.map(tabId => {
-                            const file = files.find(f => f.id === tabId);
-                            if (!file) return null;
-                            const isActive = activeFileId === tabId;
+                        {openTabs.map(tab => {
+                            const isFile = tab.type === 'file';
+                            const data = isFile
+                                ? files.find(f => f.id === tab.id)
+                                : templates.find(t => t.id === tab.id);
+
+                            if (!data) return null;
+                            const isActive = isFile
+                                ? (currentView === 'file' && activeFileId === tab.id)
+                                : (currentView === 'template' && activeTemplateId === tab.id);
+
                             return (
                                 <div
-                                    key={tabId}
+                                    key={`${tab.type}-${tab.id}`}
                                     className={cn(
                                         "group relative flex items-center gap-2 px-4 h-9 text-xs transition-all cursor-pointer select-none min-w-[140px] max-w-[220px]",
                                         isActive
                                             ? "bg-background border-x border-t border-border rounded-t-[10px] text-foreground font-semibold z-20"
                                             : "bg-transparent border-b border-border text-muted-foreground hover:bg-muted/30"
                                     )}
-                                    onClick={() => openFile(tabId)}
+                                    onClick={() => isFile ? openFile(tab.id) : openTemplate(tab.id)}
                                 >
                                     {/* Inverted Radius Shoulders (Seamless Junction) */}
                                     {isActive && (
                                         <>
-                                            {/* Left side scoop SVG - Draws the curve from the horizontal line to the tab's vertical wall */}
+                                            {/* Left side scoop SVG */}
                                             <div className="absolute -left-[10px] bottom-0 w-[10px] h-[10px] pointer-events-none z-20">
                                                 <svg className="w-full h-full text-background fill-current overflow-visible" viewBox="0 0 10 10">
                                                     <path d="M 0 10 L 10 10 L 10 0 Q 10 10 0 10 Z" />
@@ -114,8 +125,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                         </>
                                     )}
 
-                                    <FileText size={12} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
-                                    <span className="truncate flex-1 lowercase font-medium">{file.name}</span>
+                                    {isFile ? (
+                                        <FileText size={12} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                    ) : (
+                                        <LayoutGrid size={12} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                    )}
+                                    <span className="truncate flex-1 lowercase font-medium">{data.name}</span>
                                     <button
                                         className={cn(
                                             "p-0.5 rounded-full hover:bg-muted transition-colors opacity-0 group-hover:opacity-100",
@@ -123,7 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                         )}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            closeTab(tabId);
+                                            closeTab(tab.id);
                                         }}
                                     >
                                         <X size={12} />
@@ -135,9 +150,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <div className="flex-1 h-full border-b border-border shrink-0" />
                     </div>
 
-                    <div className="flex-1 overflow-hidden relative">
+                    <div className="flex-1 min-h-0 relative flex flex-col">
                         {openTabs.length > 0 ? (
-                            children
+                            <div className="flex-1 h-full flex flex-col overflow-hidden">
+                                {children}
+                            </div>
                         ) : (
                             <div className="flex items-center justify-center h-full text-muted-foreground bg-muted/5">
                                 <div className="text-center animate-in fade-in zoom-in duration-500">
@@ -169,6 +186,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </ResizablePanel>
             </ResizablePanelGroup>
             <PrintStyles />
-        </div>
+        </div >
     );
 }

@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TEMPLATES } from "@/lib/constants";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
@@ -30,7 +29,10 @@ export function Sidebar() {
         setSidebarView,
         toggleLeftSidebar,
         leftSidebarExpanded,
-        setActiveTemplateCss
+        templates,
+        activeTemplateId,
+        addTemplate,
+        openTemplate
     } = useStore();
     const { theme, setTheme } = useTheme();
     const [mounted, setMounted] = useState(false);
@@ -48,6 +50,25 @@ export function Sidebar() {
             language: 'markdown'
         });
         openFile(newId);
+    };
+
+    const handleCreateTemplate = () => {
+        const newId = (Math.random() * 10000).toString();
+        addTemplate({
+            id: newId,
+            name: `Template-${templates.length}`,
+            css: '',
+            settings: {
+                fontFamily: 'Inter, sans-serif',
+                fontSize: '16px',
+                textColor: '#000000',
+                backgroundColor: '#ffffff',
+                h1: { fontSize: '2.5em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none' },
+                h2: { fontSize: '2em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none' },
+                margins: '20mm'
+            }
+        });
+        openTemplate(newId);
     };
 
     if (!leftSidebarExpanded) {
@@ -144,15 +165,22 @@ export function Sidebar() {
                     <div className="p-3">
                         <div className="flex items-center justify-between mb-2 px-1">
                             <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Export Templates</span>
+                            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleCreateTemplate}>
+                                <Plus size={12} />
+                            </Button>
                         </div>
-                        <div className="space-y-1">
-                            {TEMPLATES.map((t) => (
+                        <div className="space-y-0.5">
+                            {templates.map((template) => (
                                 <div
-                                    key={t.id}
-                                    onClick={() => setActiveTemplateCss(t.css)}
-                                    className="px-3 py-2 text-sm rounded-md cursor-pointer hover:bg-accent transition-colors border border-transparent hover:border-border"
+                                    key={template.id}
+                                    onClick={() => openTemplate(template.id)}
+                                    className={cn(
+                                        "flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors group",
+                                        activeTemplateId === template.id && "bg-accent text-accent-foreground font-medium"
+                                    )}
                                 >
-                                    {t.name}
+                                    <LayoutGrid size={14} className={cn("opacity-40", activeTemplateId === template.id && "opacity-100 text-primary")} />
+                                    <span className="truncate">{template.name}</span>
                                 </div>
                             ))}
                         </div>

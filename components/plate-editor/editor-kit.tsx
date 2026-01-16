@@ -37,12 +37,17 @@ import { SuggestionKit } from '@/components/plate-editor/plugins/suggestion-kit'
 import { TableKit } from '@/components/plate-editor/plugins/table-kit';
 import { TocKit } from '@/components/plate-editor/plugins/toc-kit';
 import { ToggleKit } from '@/components/plate-editor/plugins/toggle-kit';
+import { PageBreakPlugin } from '@/components/plate-editor/plugins/page-break-plugin';
+import { PageBreakElement } from '@/components/plate-ui/page-break-element';
 
 export const EditorKit = [
   ...CopilotKit,
   ...AIKit,
 
   // Elements
+  PageBreakPlugin.configure({
+    node: { component: PageBreakElement },
+  }),
   ...BasicBlocksKit,
   ...CodeBlockKit,
   ...TableKit,

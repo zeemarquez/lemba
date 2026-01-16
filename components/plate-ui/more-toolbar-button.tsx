@@ -9,6 +9,8 @@ import {
   UnderlineIcon,
   StrikethroughIcon,
   Code2Icon,
+  BaselineIcon,
+  PaintBucketIcon,
 } from 'lucide-react';
 import { KEYS } from 'platejs';
 import { useEditorRef } from 'platejs/react';
@@ -92,6 +94,26 @@ export function MoreToolbarButton(props: DropdownMenuProps) {
           >
             <SubscriptIcon className="mr-2 size-4" />
             Subscript
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+
+        <DropdownMenuGroup className="mt-1 border-t pt-1">
+          <DropdownMenuItem
+            onSelect={() => {
+              editor.tf.focus();
+              // These usually involve a separate popover, but for minimalism we can trigger the native color picker or a default action
+            }}
+          >
+            <BaselineIcon className="mr-2 size-4" />
+            Text Color
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              editor.tf.focus();
+            }}
+          >
+            <PaintBucketIcon className="mr-2 size-4" />
+            Highlight Color
           </DropdownMenuItem>
         </DropdownMenuGroup>
 

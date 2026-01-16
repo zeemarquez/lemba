@@ -26,6 +26,7 @@ import {
   SmileIcon,
   TableIcon,
   TableOfContentsIcon,
+  FoldVerticalIcon,
 } from 'lucide-react';
 import { KEYS } from 'platejs';
 import { type PlateEditor, useEditorRef } from 'platejs/react';
@@ -34,6 +35,7 @@ import {
   insertBlock,
   insertInlineElement,
 } from '@/components/plate-editor/transforms';
+import { ELEMENT_PAGE_BREAK } from '@/components/plate-editor/plugins/page-break-plugin';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,6 +101,11 @@ const groups: Group[] = [
         icon: <MinusIcon />,
         label: 'Divider',
         value: KEYS.hr,
+      },
+      {
+        icon: <FoldVerticalIcon />,
+        label: 'Page Break',
+        value: ELEMENT_PAGE_BREAK,
       },
     ].map((item) => ({
       ...item,
