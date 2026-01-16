@@ -1,6 +1,6 @@
 "use client";
 
-import { useStore } from "@/lib/store";
+import { useStore, FileNode } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
     FileText,
@@ -10,66 +10,78 @@ import {
     PanelLeftClose,
     PanelLeftOpen,
     Settings,
-    Moon,
-    Sun,
-    Monitor
+    FolderPlus,
+    RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { FileTree } from "@/components/layout/FileTree";
 
 export function Sidebar() {
     const {
-        files,
+        fileTree,
         activeFileId,
         openFile,
-        addFile,
+        createFile,
+        createFolder,
+        fetchFileTree,
         sidebarView,
         setSidebarView,
         toggleLeftSidebar,
         leftSidebarExpanded,
-        templates,
         activeTemplateId,
-        addTemplate,
-        openTemplate
+        openTemplate,
+        setSettingsOpen,
+        isLoadingFileTree
     } = useStore();
-    const { theme, setTheme } = useTheme();
+
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
         setMounted(true);
-    }, []);
+        fetchFileTree();
+    }, [fetchFileTree]);
 
-    const handleCreateFile = () => {
-        const newId = (Math.random() * 10000).toString();
-        addFile({
-            id: newId,
-            name: `Untitled-${files.length}.md`,
-            content: '',
-            language: 'markdown'
-        });
-        openFile(newId);
+    const handleCreateFile = async () => {
+        const name = window.prompt("Enter file name (e.g., MyNote.md):");
+        if (!name) return;
+        
+        const fileName = name.endsWith('.md') ? name : `${name}.md`;
+        // Determine path based on current view/context?
+        // For now, put in root of "Files"
+        const path = `Files/${fileName}`;
+        await createFile(path);
     };
 
-    const handleCreateTemplate = () => {
-        const newId = (Math.random() * 10000).toString();
-        addTemplate({
-            id: newId,
-            name: `Template-${templates.length}`,
-            css: '',
-            settings: {
-                fontFamily: 'Inter, sans-serif',
-                fontSize: '16px',
-                textColor: '#000000',
-                backgroundColor: '#ffffff',
-                h1: { fontSize: '2.5em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none' },
-                h2: { fontSize: '2em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none' },
-                margins: '20mm'
-            }
-        });
-        openTemplate(newId);
+    const handleCreateFolder = async () => {
+        const name = window.prompt("Enter folder name:");
+        if (!name) return;
+        
+        // Put in root of "Files"
+        const path = `Files/${name}`;
+        await createFolder(path);
     };
+    
+    // Templates creation (basic implementation for now)
+    const handleCreateTemplate = async () => {
+        const name = window.prompt("Enter template name (e.g. MyTemplate.md):");
+        if (!name) return;
+        
+        const fileName = name.endsWith('.md') ? name : `${name}.md`;
+        const path = `Templates/${fileName}`;
+        await createFile(path);
+    };
+
+    const handleCreateTemplateFolder = async () => {
+        const name = window.prompt("Enter folder name:");
+        if (!name) return;
+        const path = `Templates/${name}`;
+        await createFolder(path);
+    }
+
+    const filesRoot = fileTree.find(n => n.name === 'Files');
+    const templatesRoot = fileTree.find(n => n.name === 'Templates');
 
     if (!leftSidebarExpanded) {
         return (
@@ -87,10 +99,9 @@ export function Sidebar() {
                 <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8 text-muted-foreground hover:text-foreground shrink-0", sidebarView === 'settings' && "bg-accent text-accent-foreground")}
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
                     onClick={() => {
-                        toggleLeftSidebar();
-                        setSidebarView('settings');
+                        setSettingsOpen(true);
                     }}
                     title="Settings"
                 >
@@ -139,82 +150,67 @@ export function Sidebar() {
                     <div className="p-3">
                         <div className="flex items-center justify-between mb-2 px-1">
                             <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Files</span>
-                            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleCreateFile}>
-                                <Plus size={12} />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCreateFolder} title="New Folder">
+                                    <FolderPlus size={14} />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCreateFile} title="New File">
+                                    <Plus size={14} />
+                                </Button>
+                            </div>
                         </div>
-                        <div className="space-y-0.5">
-                            {files.map((file) => (
-                                <div
-                                    key={file.id}
-                                    onClick={() => openFile(file.id)}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors group",
-                                        activeFileId === file.id && "bg-accent text-accent-foreground font-medium"
-                                    )}
-                                >
-                                    <FileText size={14} className={cn("opacity-40", activeFileId === file.id && "opacity-100 text-primary")} />
-                                    <span className="truncate">{file.name}</span>
-                                </div>
-                            ))}
-                        </div>
+                        
+                        {isLoadingFileTree ? (
+                             <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
+                                <RefreshCw size={12} className="animate-spin" /> Loading...
+                             </div>
+                        ) : (
+                            <FileTree 
+                                nodes={filesRoot?.children || []} 
+                                activeId={activeFileId} 
+                                onSelect={(node) => openFile(node.id)}
+                            />
+                        )}
+                        
+                        {(!filesRoot || !filesRoot.children?.length) && !isLoadingFileTree && (
+                            <div className="px-2 py-4 text-xs text-muted-foreground text-center">
+                                No files found. Create one to get started.
+                            </div>
+                        )}
                     </div>
                 )}
 
                 {sidebarView === 'templates' && (
                     <div className="p-3">
                         <div className="flex items-center justify-between mb-2 px-1">
-                            <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Export Templates</span>
-                            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleCreateTemplate}>
-                                <Plus size={12} />
-                            </Button>
-                        </div>
-                        <div className="space-y-0.5">
-                            {templates.map((template) => (
-                                <div
-                                    key={template.id}
-                                    onClick={() => openTemplate(template.id)}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors group",
-                                        activeTemplateId === template.id && "bg-accent text-accent-foreground font-medium"
-                                    )}
-                                >
-                                    <LayoutGrid size={14} className={cn("opacity-40", activeTemplateId === template.id && "opacity-100 text-primary")} />
-                                    <span className="truncate">{template.name}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {sidebarView === 'settings' && (
-                    <div className="p-4 space-y-6">
-                        <div>
-                            <h3 className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-4">Appearance</h3>
-                            <div className="grid grid-cols-1 gap-2">
-                                <Button
-                                    variant={mounted && theme === 'light' ? 'secondary' : 'outline'}
-                                    className="justify-start gap-2 h-9 text-xs"
-                                    onClick={() => setTheme('light')}
-                                >
-                                    <Sun size={14} /> Light
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Templates</span>
+                            <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCreateTemplateFolder} title="New Folder">
+                                    <FolderPlus size={14} />
                                 </Button>
-                                <Button
-                                    variant={mounted && theme === 'dark' ? 'secondary' : 'outline'}
-                                    className="justify-start gap-2 h-9 text-xs"
-                                    onClick={() => setTheme('dark')}
-                                >
-                                    <Moon size={14} /> Dark
-                                </Button>
-                                <Button
-                                    variant={mounted && theme === 'system' ? 'secondary' : 'outline'}
-                                    className="justify-start gap-2 h-9 text-xs"
-                                    onClick={() => setTheme('system')}
-                                >
-                                    <Monitor size={14} /> System
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCreateTemplate} title="New Template">
+                                    <Plus size={14} />
                                 </Button>
                             </div>
                         </div>
+                        
+                        {isLoadingFileTree ? (
+                             <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
+                                <RefreshCw size={12} className="animate-spin" /> Loading...
+                             </div>
+                        ) : (
+                            <FileTree 
+                                nodes={templatesRoot?.children || []} 
+                                activeId={activeTemplateId} 
+                                onSelect={(node) => openTemplate(node.id)}
+                            />
+                        )}
+
+                        {(!templatesRoot || !templatesRoot.children?.length) && !isLoadingFileTree && (
+                            <div className="px-2 py-4 text-xs text-muted-foreground text-center">
+                                No templates found.
+                            </div>
+                        )}
                     </div>
                 )}
             </ScrollArea>
@@ -224,8 +220,8 @@ export function Sidebar() {
                 <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8 text-muted-foreground hover:text-foreground", sidebarView === 'settings' && "bg-accent text-accent-foreground")}
-                    onClick={() => setSidebarView('settings')}
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => setSettingsOpen(true)}
                     title="Settings"
                 >
                     <Settings size={18} />

@@ -9,6 +9,7 @@ import { ExitBreakKit } from '@/components/plate-editor/plugins/exit-break-kit';
 import { FontKit } from '@/components/plate-editor/plugins/font-kit';
 import { LinkKit } from '@/components/plate-editor/plugins/link-kit';
 import { MarkdownKit } from '@/components/plate-editor/plugins/markdown-kit';
+import { MathKit } from '@/components/plate-editor/plugins/math-kit';
 import { FloatingToolbarKit } from '@/components/plate-editor/plugins/floating-toolbar-kit';
 import { BlockPlaceholderKit } from '@/components/plate-editor/plugins/block-placeholder-kit';
 import { MediaKit } from '@/components/plate-editor/plugins/media-kit';
@@ -23,6 +24,7 @@ export const HeaderFooterEditorKit = [
   ...LinkKit,
   ...MediaKit,
   ...TableKit,
+  ...MathKit,
   PlaceholderPlugin,
 
   // Marks

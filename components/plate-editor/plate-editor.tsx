@@ -11,6 +11,7 @@ import { Editor, EditorContainer } from '@/components/plate-ui/editor';
 import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
 import { SourceEditor } from '@/components/editor/SourceEditor';
+import { normalizeEquationDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 
 interface PlateEditorProps {
   content: string;
@@ -53,7 +54,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       editor={editor}
       onChange={({ value }) => {
         isUpdatingFromPlate.current = true;
-        const md = editor.api.markdown.serialize({ value });
+        // Serialize and normalize equation delimiters (convert $ to $$)
+        const rawMd = editor.api.markdown.serialize({ value });
+        const md = normalizeEquationDelimiters(rawMd);
         if (md !== content) {
           onChange(md);
         }

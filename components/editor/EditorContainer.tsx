@@ -3,15 +3,33 @@
 import { useStore } from "@/lib/store";
 import { PlateEditor } from "@/components/plate-editor/plate-editor";
 import { FileText } from "lucide-react";
+import { debounce } from "lodash";
+import { useMemo, useEffect } from "react";
 
 export function EditorContainer() {
     const {
         activeFileId,
         files,
-        updateFileContent
+        updateFileContent,
+        saveFile
     } = useStore();
 
     const activeFile = files.find((f) => f.id === activeFileId);
+
+    // Create a debounced save function
+    const debouncedSave = useMemo(
+        () => debounce((id: string, content: string) => {
+            saveFile(id, content);
+        }, 1000),
+        [saveFile]
+    );
+
+    // Cleanup debounce on unmount
+    useEffect(() => {
+        return () => {
+            debouncedSave.cancel();
+        };
+    }, [debouncedSave]);
 
     if (!activeFile) {
         return (
@@ -25,8 +43,12 @@ export function EditorContainer() {
     return (
         <div className="h-full flex flex-col relative w-full bg-background overflow-hidden border-l">
             <PlateEditor
+                key={activeFile.id}
                 content={activeFile.content}
-                onChange={(val: string) => updateFileContent(activeFile.id, val)}
+                onChange={(val: string) => {
+                    updateFileContent(activeFile.id, val);
+                    debouncedSave(activeFile.id, val);
+                }}
             />
         </div>
     );

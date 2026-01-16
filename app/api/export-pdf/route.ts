@@ -1,7 +1,36 @@
 import puppeteer from 'puppeteer';
-import { marked } from 'marked';
+import { Marked } from 'marked';
+import markedKatex from "marked-katex-extension";
+import { markedHighlight } from "marked-highlight";
+import hljs from 'highlight.js';
 import { NextResponse } from 'next/server';
 import { serializeNodesToHtml } from '@/lib/plate/serialize-html';
+
+// Create a configured marked instance for reliable math rendering
+function createMarkedInstance() {
+    const instance = new Marked();
+    
+    // Add KaTeX extension first
+    instance.use(markedKatex({
+        throwOnError: false,
+        output: 'html',
+        nonStandard: true, // Allow single $ for inline math
+    }));
+    
+    // Add highlight extension
+    instance.use(markedHighlight({
+        emptyLangClass: 'hljs',
+        langPrefix: 'hljs language-',
+        highlight(code, lang) {
+            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+            return hljs.highlight(code, { language }).value;
+        }
+    }));
+    
+    return instance;
+}
+
+const markedInstance = createMarkedInstance();
 
 // Convert header/footer content to HTML
 // Supports both JSON (Plate Value) and legacy markdown formats
@@ -19,7 +48,7 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
     }
     
     // Fallback to markdown conversion (legacy format)
-    let html = await marked(content);
+    let html = markedInstance.parse(content) as string;
     
     // Replace title and date in markdown (page is handled by CSS)
     if (context.title) html = html.replace(/{title}/g, context.title);
@@ -215,7 +244,7 @@ export async function POST(req: Request) {
         const { markdown, title, css, settings } = await req.json();
 
         // Convert markdown to HTML using marked
-        const htmlContent = await marked(markdown || '');
+        const htmlContent = markedInstance.parse(markdown || '') as string;
 
         // Convert header/footer content to HTML (supports JSON and markdown)
         const headerContent = settings?.header?.enabled && settings?.header?.content
@@ -260,6 +289,8 @@ export async function POST(req: Request) {
                 <link rel="preconnect" href="https://fonts.googleapis.com">
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
                 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=JetBrains+Mono:wght@400..700&family=Outfit:wght@400..700&family=Times+New+Roman&display=swap" rel="stylesheet">
+                <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" crossorigin="anonymous">
+                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/${settings?.codeBlockTheme || 'github'}.min.css">
                 <style>
                     ${pdfCss}
                 </style>

@@ -36,6 +36,8 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
+          {/* Global KaTeX styles for math rendering in editors */}
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" integrity="sha384-n8MVd4Xs03H9kw0ud964uPAkFE909BaZyTTj1jfieI4749zJonathanSVW1+quiTp" crossOrigin="anonymous" />
         </ThemeProvider>
       </body>
     </html>

@@ -5,25 +5,34 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { ZoomIn, ZoomOut, MoveHorizontal, MoveVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { serializeNodesToHtml } from "@/lib/plate/serialize-html";
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
 import hljs from 'highlight.js';
 
-// Configure marked with katex and highlight
-marked.use(markedKatex({
-  throwOnError: false,
-  output: 'mathml' // Use MathML for better accessibility and no-JS fallback, or 'html' if KaTeX CSS is loaded
-}));
-
-marked.use(markedHighlight({
-    emptyLangClass: 'hljs',
-    langPrefix: 'hljs language-',
-    highlight(code, lang, info) {
-        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-        return hljs.highlight(code, { language }).value;
-    }
-}));
+// Create a configured marked instance for reliable math rendering
+function createMarkedInstance() {
+    const instance = new Marked();
+    
+    // Add KaTeX extension first
+    instance.use(markedKatex({
+        throwOnError: false,
+        output: 'html',
+        nonStandard: true, // Allow single $ for inline math
+    }));
+    
+    // Add highlight extension
+    instance.use(markedHighlight({
+        emptyLangClass: 'hljs',
+        langPrefix: 'hljs language-',
+        highlight(code, lang) {
+            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+            return hljs.highlight(code, { language }).value;
+        }
+    }));
+    
+    return instance;
+}
 
 // A4 dimensions in mm: 210 x 297
 // At 96 DPI, 1mm ≈ 3.78px
@@ -35,9 +44,8 @@ const A4_HEIGHT_PX = 297 * 3.78;
 function markdownToHtml(markdown: string): string {
     if (!markdown) return '';
     try {
-        // marked is synchronous by default unless async extensions are used. 
-        // marked-katex-extension is synchronous.
-        return marked.parse(markdown) as string;
+        const markedInstance = createMarkedInstance();
+        return markedInstance.parse(markdown) as string;
     } catch (e) {
         console.error("Error parsing markdown:", e);
         return markdown;
@@ -79,6 +87,78 @@ function generatePreviewCss(settings: any, previewId: string, pageWidth: number,
     
     // Use scoped selectors to avoid conflicts with page styles
     const scope = `#${previewId}`;
+    
+    const generateHeadingCss = (level: string, style: any) => {
+        if (!style) return '';
+        return `
+        ${scope} .prose ${level} { 
+            font-size: ${style.fontSize} !important; 
+            color: ${style.color} !important; 
+            text-align: ${style.textAlign} !important;
+            border-bottom: ${style.borderBottom ? '1px solid ' + style.color : 'none'} !important;
+            text-transform: ${style.textTransform} !important;
+            font-weight: ${style.fontWeight || '600'} !important;
+            text-decoration: ${style.textDecoration || 'none'} !important;
+            margin-top: 1.5em !important;
+            margin-bottom: 0.5em !important;
+        }
+        `;
+    };
+
+    const numberingCss = (() => {
+        const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+        let css = `#pdf-preview-wrapper { counter-reset: h1-counter; }\n`;
+        
+        // Add resets
+        levels.forEach((level, index) => {
+            if (index < levels.length - 1) {
+                const nextLevel = levels[index + 1];
+                css += `${scope} .prose ${level} { counter-reset: ${nextLevel}-counter; }\n`;
+            }
+        });
+
+        // Add counters
+        levels.forEach((level, index) => {
+            const levelSettings = (settings as any)?.[level]?.numbering;
+            if (!levelSettings?.enabled) return;
+
+            let contentString = `"${levelSettings.prefix}"`;
+            
+            // Build the hierarchy string
+            for (let i = 0; i <= index; i++) {
+                const currentLevel = levels[i];
+                const currentSettings = (settings as any)?.[currentLevel]?.numbering;
+                
+                if (currentSettings?.enabled) {
+                    contentString += ` counter(${currentLevel}-counter, ${currentSettings.style})`;
+                    
+                    // Add separator if it's not the last enabled item
+                    let hasMoreEnabled = false;
+                    for (let j = i + 1; j <= index; j++) {
+                        if ((settings as any)?.[levels[j]]?.numbering?.enabled) {
+                            hasMoreEnabled = true;
+                            break;
+                        }
+                    }
+
+                    if (hasMoreEnabled) {
+                        contentString += ` "${currentSettings.separator}"`;
+                    }
+                }
+            }
+            
+            contentString += ` "${levelSettings.suffix}"`;
+
+            css += `
+            ${scope} .prose ${level}::before { 
+                counter-increment: ${level}-counter !important; 
+                content: ${contentString} !important; 
+                margin-right: 0.5em !important;
+            }\n`;
+        });
+
+        return css;
+    })();
     
     return `
         ${scope} *, ${scope} *::before, ${scope} *::after {
@@ -158,27 +238,13 @@ function generatePreviewCss(settings: any, previewId: string, pageWidth: number,
         ${scope} .page-number-placeholder[data-format="upper-roman"]::after { content: "I"; }
         ${scope} .page-number-placeholder[data-format="lower-alpha"]::after { content: "a"; }
         ${scope} .page-number-placeholder[data-format="upper-alpha"]::after { content: "A"; }
-        ${scope} .prose h1, ${scope} .prose h2, ${scope} .prose h3, 
-        ${scope} .prose h4, ${scope} .prose h5, ${scope} .prose h6 {
-            margin-top: 1.5em;
-            margin-bottom: 0.5em;
-            font-weight: 600;
-        }
-        ${scope} .prose h1 { 
-            font-size: ${settings?.h1?.fontSize || '2.5em'}; 
-            color: ${settings?.h1?.color || 'inherit'}; 
-            text-align: ${settings?.h1?.textAlign || 'left'};
-            border-bottom: ${settings?.h1?.borderBottom ? '1px solid ' + (settings?.h1?.color || '#000') : 'none'};
-            text-transform: ${settings?.h1?.textTransform || 'none'};
-        }
-        ${scope} .prose h2 { 
-            font-size: ${settings?.h2?.fontSize || '2em'}; 
-            color: ${settings?.h2?.color || 'inherit'}; 
-            text-align: ${settings?.h2?.textAlign || 'left'};
-            border-bottom: ${settings?.h2?.borderBottom ? '1px solid ' + (settings?.h2?.color || '#000') : 'none'};
-            text-transform: ${settings?.h2?.textTransform || 'none'};
-        }
-        ${scope} .prose h3 { font-size: 1.5em; }
+        ${generateHeadingCss('h1', settings?.h1)}
+        ${generateHeadingCss('h2', settings?.h2)}
+        ${generateHeadingCss('h3', settings?.h3)}
+        ${generateHeadingCss('h4', settings?.h4)}
+        ${generateHeadingCss('h5', settings?.h5)}
+        ${generateHeadingCss('h6', settings?.h6)}
+        ${numberingCss}
         ${scope} .prose p { margin: 1em 0; }
         ${scope} .prose code {
             background: #f4f4f4;
@@ -324,6 +390,9 @@ export function PdfPreview() {
     // Generate the preview CSS that matches PDF export exactly
     const previewCss = useMemo(() => generatePreviewCss(settings, previewId, currentWidth, currentHeight), [settings, previewId, currentWidth, currentHeight]);
 
+    // Track heading counts for continuous numbering across pages
+    const [pageHeadingCounts, setPageHeadingCounts] = useState<Record<string, number>[]>([]);
+
     // Pagination Effect
     useEffect(() => {
         if (!hiddenContainerRef.current || !htmlContent) return;
@@ -336,7 +405,6 @@ export function PdfPreview() {
             if (!container) return;
 
             // 1. Setup hidden container structure to match real page
-            // We need to render the full structure to get accurate metrics
             const pageContainer = container.querySelector('.page-container') as HTMLElement;
             const headerElement = container.querySelector('.page-header') as HTMLElement;
             const footerElement = container.querySelector('.page-footer') as HTMLElement;
@@ -354,9 +422,8 @@ export function PdfPreview() {
             const paddingBottom = parseFloat(computedStyle.paddingBottom);
             
             const headerHeight = headerElement ? headerElement.offsetHeight : 0;
-            const footerHeight = footerElement ? footerElement.offsetHeight : 0; // Use offsetHeight to include padding/border
+            const footerHeight = footerElement ? footerElement.offsetHeight : 0;
             
-            // Margin bottom of header / margin top of footer are defined in CSS
             const headerStyle = headerElement ? window.getComputedStyle(headerElement) : null;
             const footerStyle = footerElement ? window.getComputedStyle(footerElement) : null;
             
@@ -366,41 +433,74 @@ export function PdfPreview() {
             const contentAvailableHeight = pageHeight - paddingTop - paddingBottom - headerHeight - headerMarginBottom - footerHeight - footerMarginTop;
 
             // 3. Iterate through content and split into pages
-            // We need to inject the HTML into the prose element first to create children
             proseElement.innerHTML = htmlContent;
             
             const childNodes = Array.from(proseElement.children);
             const newPages: string[] = [];
+            const newPageHeadingCounts: Record<string, number>[] = [];
+            
             let currentPageNodes: Element[] = [];
             let accumulatedHeight = 0;
+            
+            const counters = { h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0 };
+            
+            // Capture state for the FIRST page
+            newPageHeadingCounts.push({ ...counters });
 
             childNodes.forEach((node) => {
                 const element = node as HTMLElement;
+                const tagName = element.tagName.toLowerCase();
+                const isHeading = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName);
+                
+                // Calculate height FIRST to decide if it fits
                 const height = element.offsetHeight;
                 const style = window.getComputedStyle(element);
                 const marginTop = parseFloat(style.marginTop);
                 const marginBottom = parseFloat(style.marginBottom);
-                
-                // Effective height of the element including margins
                 const elementTotalHeight = height + marginTop + marginBottom;
 
-                // Check if adding this element would exceed available height
                 if (accumulatedHeight + elementTotalHeight > contentAvailableHeight) {
                     // Page full
                     if (currentPageNodes.length > 0) {
                         newPages.push(currentPageNodes.map(n => n.outerHTML).join(''));
                         currentPageNodes = [];
                         accumulatedHeight = 0;
+                        
+                        // New page starting.
+                        // The current node will be the first on the next page.
+                        // We must snapshot the counters AS THEY ARE NOW (before processing this node)
+                        // This snapshot will be used to initialize the NEW page.
+                        newPageHeadingCounts.push({ ...counters });
+                    }
+                }
+                
+                // Process the node (update counters if it's a heading)
+                // Note: We do this AFTER deciding page break, so if it moves to next page,
+                // the counters for that page are initialized with PRE-node state,
+                // and then the node increments them inside the page (via CSS or subsequent logic).
+                // Wait, if we use CSS counter-reset on page wrapper, it sets the BASE.
+                // If we set base=0. First H1 increments to 1.
+                // If we have H1(1) on Page 1.
+                // Page 2 starts. Base should be 1.
+                // Next H1 increments to 2.
+                // Correct.
+                
+                if (isHeading) {
+                    const level = tagName as keyof typeof counters;
+                    const levelSettings = (settings as any)?.[level]?.numbering;
+                    
+                    if (levelSettings?.enabled) {
+                        counters[level]++;
                     }
                     
-                    // If the element itself is larger than the page, it will just overflow (like in real print)
-                    // or we could split it, but that's hard.
-                    currentPageNodes.push(element);
-                    accumulatedHeight += elementTotalHeight;
-                } else {
-                    currentPageNodes.push(element);
-                    accumulatedHeight += elementTotalHeight;
+                    const levelNum = parseInt(level[1]);
+                    for (let i = levelNum + 1; i <= 6; i++) {
+                        counters[`h${i}` as keyof typeof counters] = 0;
+                    }
                 }
+
+                currentPageNodes.push(element);
+                accumulatedHeight += elementTotalHeight;
             });
 
             // Add last page
@@ -411,9 +511,11 @@ export function PdfPreview() {
             // If empty (no content), show at least one page
             if (newPages.length === 0) {
                 newPages.push('');
+                newPageHeadingCounts.push({ ...counters });
             }
 
             setPages(newPages);
+            setPageHeadingCounts(newPageHeadingCounts);
             setIsPaginating(false);
             
             // Clean up
@@ -505,13 +607,13 @@ export function PdfPreview() {
                         </div>
                     )}
                     
-                    <div className="p-4 flex flex-col items-center min-w-max min-h-full">
+                    <div id="pdf-preview-wrapper" className="p-4 flex flex-col items-center min-w-max min-h-full">
                         {/* Inject the preview CSS */}
                         <style dangerouslySetInnerHTML={{ __html: previewCss }} />
                         {/* Inject KaTeX CSS */}
                         <link 
                             rel="stylesheet" 
-                            href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" 
+                            href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" 
                             integrity="sha384-n8MVd4Xs03H9kw0ud964uPAkFE909BaZyTTj1jfieI4749zJonathanSVW1+quiTp" 
                             crossOrigin="anonymous" 
                         />
@@ -558,7 +660,17 @@ export function PdfPreview() {
                                                 transformOrigin: 'top left',
                                             }}
                                         >
-                                            <div className="page-container">
+                                            <div 
+                                                className="page-container"
+                                                style={{
+                                                    // Apply continuous numbering overrides if available
+                                                    // Note: We use CSS variables or direct counter-reset style
+                                                    // CSS counter-reset syntax: "name value name value..."
+                                                    counterReset: pageHeadingCounts[index] 
+                                                        ? `h1-counter ${pageHeadingCounts[index].h1} h2-counter ${pageHeadingCounts[index].h2} h3-counter ${pageHeadingCounts[index].h3} h4-counter ${pageHeadingCounts[index].h4} h5-counter ${pageHeadingCounts[index].h5} h6-counter ${pageHeadingCounts[index].h6}`
+                                                        : undefined
+                                                }}
+                                            >
                                                 {/* Header */}
                                                 {pageHeaderHtml && (
                                                     <div

@@ -61,7 +61,7 @@ export function HeaderFooterPlateEditor({ content, onChange, placeholder }: Head
 
   if (!mounted) {
     return (
-      <div className="h-full w-full bg-background rounded-xl border border-zinc-100" />
+      <div className="h-full w-full bg-muted/50 rounded-xl border border-border" />
     );
   }
 
@@ -80,8 +80,8 @@ export function HeaderFooterPlateEditor({ content, onChange, placeholder }: Head
         }, 0);
       }}
     >
-      <div className="flex flex-col relative w-full overflow-hidden rounded-xl border border-zinc-200 bg-white">
-        <FixedToolbar className="border-b border-zinc-100 rounded-t-xl">
+      <div className="flex flex-col relative w-full overflow-hidden rounded-xl border border-border bg-background">
+        <FixedToolbar className="border-b border-border rounded-t-xl">
           <HeaderFooterToolbarButtons />
         </FixedToolbar>
 
