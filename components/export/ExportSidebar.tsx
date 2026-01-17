@@ -2,8 +2,14 @@
 
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, ChevronDown } from "lucide-react";
 import { PdfPreview } from "@/components/export/PdfPreview";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/plate-ui/dropdown-menu";
 
 export function ExportSidebar() {
     const { activeFileId, files, toggleRightSidebar, rightSidebarExpanded, activeTemplateId, templates, setActiveTemplate } = useStore();
@@ -86,15 +92,28 @@ export function ExportSidebar() {
                 <div className="flex-1 flex flex-col min-h-0 h-full">
                     <div className="flex items-center justify-between shrink-0 mb-3">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">PDF Preview</h3>
-                        <select
-                            className="text-[10px] bg-muted/50 border border-border rounded px-2 py-1 outline-none font-medium hover:bg-muted transition-colors"
-                            value={activeTemplateId || ''}
-                            onChange={(e) => setActiveTemplate(e.target.value)}
-                        >
-                            {templates.map(t => (
-                                <option key={t.id} value={t.id}>{t.name} Template</option>
-                            ))}
-                        </select>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button 
+                                    variant="outline" 
+                                    className="h-7 text-[10px] px-2 gap-1 font-medium bg-muted/50 border-border hover:bg-muted"
+                                >
+                                    {activeTemplate?.name || 'Select'}
+                                    <ChevronDown size={12} className="opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-[120px]">
+                                {templates.map(t => (
+                                    <DropdownMenuItem 
+                                        key={t.id} 
+                                        onSelect={() => setActiveTemplate(t.id)}
+                                        className="text-xs"
+                                    >
+                                        {t.name}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                     <PdfPreview />
                 </div>
