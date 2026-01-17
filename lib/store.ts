@@ -130,6 +130,7 @@ interface AppState {
     // Opens a file, fetching content if needed
     openFile: (path: string) => Promise<void>;
     saveFile: (path: string, content: string) => Promise<void>;
+    openTemplate: (id: string) => void;
     
     // Legacy/UI Actions
     closeTab: (id: string) => void;

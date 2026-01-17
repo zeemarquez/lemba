@@ -104,12 +104,12 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       // Check for nested list item content
       const licContent = element.children?.find((c: Descendant) => (c as TElement).type === 'lic');
       if (licContent) {
-        const licChildren = ((licContent as TElement).children || []).map(serializeNode).join('');
+        const licChildren = ((licContent as TElement).children || []).map(c => serializeNode(c, context)).join('');
         // Check for nested lists
         const nestedList = element.children?.find((c: Descendant) => 
           (c as TElement).type === 'ul' || (c as TElement).type === 'ol'
         );
-        const nestedHtml = nestedList ? serializeNode(nestedList) : '';
+        const nestedHtml = nestedList ? serializeNode(nestedList, context) : '';
         return `<li${style}>${licChildren}${nestedHtml}</li>`;
       }
       return `<li${style}>${children}</li>`;

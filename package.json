@@ -94,7 +94,7 @@
     "react-lite-youtube-embed": "^3.3.3",
     "react-markdown": "^10.1.0",
     "react-player": "^3.4.0",
-    "react-resizable-panels": "^4.4.1",
+    "react-resizable-panels": "^2.1.9",
     "react-textarea-autosize": "^8.5.9",
     "react-to-print": "^3.2.0",
     "react-tweet": "^3.3.0",
@@ -112,6 +112,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/lodash": "^4.17.23",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

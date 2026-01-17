@@ -83,8 +83,10 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
   const { openFilePicker } = useFilePicker({
     accept: ['image/*'],
     multiple: true,
-    onFilesSelected: ({ plainFiles: updatedFiles }) => {
-      editor.getTransforms(PlaceholderPlugin).insert.media(updatedFiles);
+    onFilesSelected: (data: any) => {
+      if (data.plainFiles) {
+        editor.getTransforms(PlaceholderPlugin).insert.media(data.plainFiles);
+      }
     },
   });
 

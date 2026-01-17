@@ -7,9 +7,11 @@ export const KEY_PLACEHOLDER = 'placeholder';
 
 export const PlaceholderPlugin = createPlatePlugin({
   key: KEY_PLACEHOLDER,
-  isElement: true,
-  isInline: true,
-  isVoid: true,
+  node: {
+    isElement: true,
+    isInline: true,
+    isVoid: true,
+  },
   render: {
     node: PlaceholderElement,
   },

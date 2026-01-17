@@ -26,13 +26,6 @@ import {
 } from './popover';
 import { Button } from './button';
 import { Input } from './input';
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/tabs'; // Wait, I need actual select. Checking components/ui/
 
 export interface TPlaceholderElement extends TElement {
   placeholderType: 'page' | 'date' | 'title';
@@ -101,109 +94,109 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
   return (
     <PlateElement
       {...props}
-      attributes={{
-        ...props.attributes,
-        contentEditable: false,
-      }}
-      className={cn(
-        'inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 align-baseline font-medium text-xs text-zinc-900 border border-zinc-200 shadow-sm transition-all',
-        !readOnly && 'cursor-pointer hover:bg-zinc-200',
-        selected && focused && 'ring-2 ring-zinc-900 ring-offset-1',
-        element.fontFamily && `font-[${element.fontFamily}]`
-      )}
-      onClick={() => !readOnly && setOpen(true)}
     >
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <span className="flex items-center">
-            {getIcon()}
-            {getLabel()}
-            {props.children}
-          </span>
-        </PopoverTrigger>
-        <PopoverContent className="w-64 p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2 pb-2 border-b">
-            <Settings2Icon className="size-4 text-zinc-500" />
-            <h4 className="font-semibold text-sm">{getLabel()} Settings</h4>
-          </div>
-
-          {/* Font Settings */}
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase text-zinc-400">Font Family</label>
-              <select
-                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
-                value={element.fontFamily || ''}
-                onChange={(e) => updateElement({ fontFamily: e.target.value })}
-              >
-                {FONT_FAMILIES.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
+      <span
+        contentEditable={false}
+        className={cn(
+          'inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 align-baseline font-medium text-xs text-zinc-900 border border-zinc-200 shadow-sm transition-all',
+          !readOnly && 'cursor-pointer hover:bg-zinc-200',
+          selected && focused && 'ring-2 ring-zinc-900 ring-offset-1'
+        )}
+        style={element.fontFamily ? { fontFamily: element.fontFamily } : undefined}
+        onClick={() => !readOnly && setOpen(true)}
+      >
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <span className="flex items-center">
+              {getIcon()}
+              {getLabel()}
+            </span>
+          </PopoverTrigger>
+          <PopoverContent className="w-64 p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 pb-2 border-b">
+              <Settings2Icon className="size-4 text-zinc-500" />
+              <h4 className="font-semibold text-sm">{getLabel()} Settings</h4>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase text-zinc-400">Font Size</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="text"
-                  placeholder="e.g. 12px"
-                  className="h-8 text-xs"
-                  value={element.fontSize || ''}
-                  onChange={(e) => updateElement({ fontSize: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
 
-          {/* Type Specific Settings */}
-          {element.placeholderType === 'date' && (
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase text-zinc-400">Date Format</label>
-              <select
-                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
-                value={element.format || 'default'}
-                onChange={(e) => updateElement({ format: e.target.value })}
-              >
-                {DATE_FORMATS.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {element.placeholderType === 'page' && (
+            {/* Font Settings */}
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
+                <label className="text-[10px] font-bold uppercase text-zinc-400">Font Family</label>
                 <select
                   className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
-                  value={element.format || 'decimal'}
-                  onChange={(e) => updateElement({ format: e.target.value })}
+                  value={element.fontFamily || ''}
+                  onChange={(e) => updateElement({ fontFamily: e.target.value })}
                 >
-                  {PAGE_FORMATS.map(f => (
+                  {FONT_FAMILIES.map(f => (
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Offset (Start at)</label>
-                <Input
-                  type="number"
-                  className="h-8 text-xs"
-                  value={element.offset || 0}
-                  onChange={(e) => updateElement({ offset: parseInt(e.target.value) || 0 })}
-                />
+                <label className="text-[10px] font-bold uppercase text-zinc-400">Font Size</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    placeholder="e.g. 12px"
+                    className="h-8 text-xs"
+                    value={element.fontSize || ''}
+                    onChange={(e) => updateElement({ fontSize: e.target.value })}
+                  />
+                </div>
               </div>
             </div>
-          )}
 
-          <div className="pt-2 border-t flex justify-end">
-            <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+            {/* Type Specific Settings */}
+            {element.placeholderType === 'date' && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase text-zinc-400">Date Format</label>
+                <select
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                  value={element.format || 'default'}
+                  onChange={(e) => updateElement({ format: e.target.value })}
+                >
+                  {DATE_FORMATS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {element.placeholderType === 'page' && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
+                  <select
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                    value={element.format || 'decimal'}
+                    onChange={(e) => updateElement({ format: e.target.value })}
+                  >
+                    {PAGE_FORMATS.map(f => (
+                      <option key={f.value} value={f.value}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400">Offset (Start at)</label>
+                  <Input
+                    type="number"
+                    className="h-8 text-xs"
+                    value={element.offset || 0}
+                    onChange={(e) => updateElement({ offset: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 border-t flex justify-end">
+              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+        {props.children}
+      </span>
     </PlateElement>
   );
 }

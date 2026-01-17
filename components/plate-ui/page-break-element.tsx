@@ -15,7 +15,6 @@ export function PageBreakElement({
     <PlateElement
       {...props}
       className={cn(className, 'py-2 my-4 select-none')}
-      contentEditable={false}
     >
       <div
         contentEditable={false}
