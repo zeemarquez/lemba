@@ -80,16 +80,16 @@ export function SettingsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs className="flex flex-1" defaultValue="general">
+        <Tabs className="flex-row gap-0 flex-1" defaultValue="general">
           <TabsList className="flex h-full w-48 flex-col items-stretch justify-start rounded-none border-r bg-muted/20 p-2 gap-1">
             <TabsTrigger
-              className="justify-start px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
               value="general"
             >
               General
             </TabsTrigger>
             <TabsTrigger
-              className="justify-start px-4 py-2 data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
               value="storage"
             >
               Storage

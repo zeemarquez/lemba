@@ -31,7 +31,7 @@ interface HeadingStyle {
     };
 }
 
-interface Template {
+export interface Template {
     id: string;
     name: string;
     css: string;
@@ -104,13 +104,21 @@ interface AppState {
 
     // Actions
     fetchFileTree: () => Promise<void>;
+    fetchTemplates: () => Promise<void>;
     fetchStoragePath: () => Promise<void>;
     updateStoragePath: (path: string) => Promise<void>;
     
     createFile: (path: string, content?: string) => Promise<void>;
     createFolder: (path: string) => Promise<void>;
-    deleteItem: (path: string, type: 'file' | 'folder') => Promise<void>;
     
+    // Template Actions
+    createTemplate: (path: string, template: Template) => Promise<void>;
+    saveTemplate: (path: string, template: Template) => Promise<void>;
+    
+    deleteItem: (path: string, type: 'file' | 'folder') => Promise<void>;
+    renameItem: (oldPath: string, newPath: string) => Promise<void>;
+    moveItem: (sourcePath: string, destinationPath: string) => Promise<void>;
+
     // Opens a file, fetching content if needed
     openFile: (path: string) => Promise<void>;
     saveFile: (path: string, content: string) => Promise<void>;
@@ -234,6 +242,22 @@ export const useStore = create<AppState>((set, get) => ({
         }
     },
 
+    fetchTemplates: async () => {
+        try {
+            const res = await fetch('/api/templates/list');
+            const data = await res.json();
+            if (data.templates) {
+                // Merge default templates with loaded templates
+                // We keep defaults always, and append custom ones
+                // Or maybe custom ones override if IDs clash?
+                // For now just append
+                set({ templates: [...defaultTemplates, ...data.templates] });
+            }
+        } catch (error) {
+            console.error('Failed to fetch templates:', error);
+        }
+    },
+
     fetchStoragePath: async () => {
         try {
             const res = await fetch('/api/settings');
@@ -257,6 +281,7 @@ export const useStore = create<AppState>((set, get) => ({
             if (data.success) {
                 set({ storagePath: path });
                 get().fetchFileTree();
+                get().fetchTemplates();
             }
         } catch (error) {
             console.error('Failed to update storage path:', error);
@@ -294,6 +319,40 @@ export const useStore = create<AppState>((set, get) => ({
         }
     },
 
+    createTemplate: async (path: string, template: Template) => {
+        try {
+            const res = await fetch('/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path, content: template })
+            });
+            if (res.ok) {
+                await get().fetchFileTree();
+                await get().fetchTemplates();
+                // Optionally open it?
+                get().openTemplate(path); // use path as ID
+            }
+        } catch (error) {
+             console.error('Failed to create template:', error);
+        }
+    },
+
+    saveTemplate: async (path: string, template: Template) => {
+        try {
+             await fetch('/api/templates', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path, content: template })
+            });
+            // Update local state
+             set((state) => ({
+                templates: state.templates.map((t) => (t.id === path ? template : t))
+            }));
+        } catch (error) {
+            console.error('Failed to save template:', error);
+        }
+    },
+
     deleteItem: async (path: string, type: 'file' | 'folder') => {
         try {
             const endpoint = type === 'file' ? '/api/fs/file' : '/api/fs/folder';
@@ -307,9 +366,58 @@ export const useStore = create<AppState>((set, get) => ({
                 if (type === 'file' && openTabs.some(t => t.id === path)) {
                     get().closeTab(path);
                 }
+                // Refresh templates if we deleted one
+                if (path.startsWith('Templates/')) {
+                    get().fetchTemplates();
+                }
             }
         } catch (error) {
             console.error('Failed to delete item:', error);
+        }
+    },
+
+    renameItem: async (oldPath: string, newPath: string) => {
+        try {
+            const res = await fetch('/api/fs/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ oldPath, newPath })
+            });
+            if (res.ok) {
+                await get().fetchFileTree();
+                // If it's a file, we might want to update activeFileId if it matches
+                // For simplicity, just close it or let it handle by re-open if user clicks
+                const { activeFileId, openTabs } = get();
+                // If the renamed file was active, maybe we should update activeFileId?
+                // But tab ID is path based. If we rename, tab ID is invalid.
+                // Ideally we should close the old tab and open a new one or update the tab ID.
+                // Let's just refresh tree for now.
+                // If templates, refresh templates
+                if (newPath.startsWith('Templates/') || oldPath.startsWith('Templates/')) {
+                    get().fetchTemplates();
+                }
+            }
+        } catch (error) {
+            console.error('Failed to rename item:', error);
+        }
+    },
+
+    moveItem: async (sourcePath: string, destinationPath: string) => {
+        try {
+            const res = await fetch('/api/fs/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sourcePath, destinationPath })
+            });
+            if (res.ok) {
+                await get().fetchFileTree();
+                // Same tab logic as rename
+                if (destinationPath.startsWith('Templates/') || sourcePath.startsWith('Templates/')) {
+                    get().fetchTemplates();
+                }
+            }
+        } catch (error) {
+            console.error('Failed to move item:', error);
         }
     },
 
