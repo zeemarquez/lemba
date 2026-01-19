@@ -57,11 +57,79 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
     return html;
 }
 
+// Generate CSS for heading numbering using CSS counters
+function generateNumberingCss(settings: any): string {
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    let css = `body { counter-reset: h1-counter h2-counter h3-counter h4-counter h5-counter h6-counter; }\n`;
+    
+    // Add counter resets for child levels
+    levels.forEach((level, index) => {
+        if (index < levels.length - 1) {
+            const resetLevels = levels.slice(index + 1).map(l => `${l}-counter`).join(' ');
+            css += `.prose ${level} { counter-reset: ${resetLevels}; }\n`;
+        }
+    });
+
+    // Add counter increments and content for each level
+    levels.forEach((level, index) => {
+        const levelSettings = settings?.[level]?.numbering;
+        if (!levelSettings?.enabled) return;
+
+        let contentParts: string[] = [];
+        
+        // Add prefix
+        if (levelSettings.prefix) {
+            contentParts.push(`"${levelSettings.prefix}"`);
+        }
+        
+        // Build the hierarchy string with counters
+        for (let i = 0; i <= index; i++) {
+            const currentLevel = levels[i];
+            const currentSettings = settings?.[currentLevel]?.numbering;
+            
+            if (currentSettings?.enabled) {
+                contentParts.push(`counter(${currentLevel}-counter, ${currentSettings.style})`);
+                
+                // Add separator if there are more enabled levels after this one
+                let hasMoreEnabled = false;
+                for (let j = i + 1; j <= index; j++) {
+                    if (settings?.[levels[j]]?.numbering?.enabled) {
+                        hasMoreEnabled = true;
+                        break;
+                    }
+                }
+                
+                if (hasMoreEnabled && currentSettings.separator) {
+                    contentParts.push(`"${currentSettings.separator}"`);
+                }
+            }
+        }
+        
+        // Add suffix
+        if (levelSettings.suffix) {
+            contentParts.push(`"${levelSettings.suffix} "`);
+        } else {
+            contentParts.push(`" "`);
+        }
+
+        css += `
+        .prose ${level} { counter-increment: ${level}-counter; }
+        .prose ${level}::before { 
+            content: ${contentParts.join(' ')}; 
+        }\n`;
+    });
+
+    return css;
+}
+
 // Shared function to generate PDF-specific CSS from settings
 // This is the single source of truth for PDF styling
 export function generatePdfCss(settings: any): string {
     const headerMargins = settings?.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
     const footerMargins = settings?.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
+    
+    // Generate heading numbering CSS
+    const numberingCss = generateNumberingCss(settings);
     
     // Note: Page margins are handled by Puppeteer's margin option, not CSS
     // This ensures consistent margins on ALL pages
@@ -216,6 +284,8 @@ export function generatePdfCss(settings: any): string {
             margin: 0;
             padding: 0;
         }
+        /* Heading numbering */
+        ${numberingCss}
         ${settings?.watermark ? `
         body::before {
             content: '${settings.watermark}';

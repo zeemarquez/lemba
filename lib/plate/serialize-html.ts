@@ -177,9 +177,6 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       return `<a href="${escapeHtml(href)}">${children}</a>`;
     case 'hr':
       return '<hr>';
-    case 'page_break':
-      // Manual page break - use CSS page-break-after for print/PDF
-      return '<div class="manual-page-break" style="page-break-after: always; break-after: page;"></div>';
     case 'placeholder':
       const pType = element.placeholderType as string;
       const pFormat = element.format as string;
@@ -243,6 +240,9 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       
       if (borders) {
         const sides = ['top', 'right', 'bottom', 'left'];
+        // Check if any border side is explicitly set to 0 (indicating "no borders" mode)
+        const hasExplicitNoBorder = sides.some(side => borders[side] && borders[side].size === 0);
+        
         sides.forEach(side => {
           const borderSide = borders[side];
           if (borderSide) {
@@ -251,8 +251,11 @@ function serializeElementNode(element: TElement, children: string, context: Seri
             } else {
               cellStyles.push(`border-${side}: none`);
             }
+          } else if (hasExplicitNoBorder) {
+            // If any side is explicitly set to 0, treat undefined sides as no border too
+            cellStyles.push(`border-${side}: none`);
           } else {
-            // Default border for side if not specified in borders object but borders object exists
+            // Default border for side if not specified and no explicit "no border" is set
             cellStyles.push(`border-${side}: 1px solid #ddd`);
           }
         });

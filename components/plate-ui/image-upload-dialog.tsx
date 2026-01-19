@@ -20,6 +20,7 @@ import {
 } from '@/components/plate-ui/dialog';
 import { Input } from '@/components/plate-ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { browserStorage } from '@/lib/browser-storage';
 
 interface ImageUploadDialogProps {
   open: boolean;
@@ -37,9 +38,40 @@ export function ImageUploadDialog({
   const { openFilePicker } = useFilePicker({
     accept: ['image/*'],
     multiple: true,
-    onFilesSelected: (data: any) => {
+    onFilesSelected: async (data: any) => {
       if (data.plainFiles && data.plainFiles.length > 0) {
-        editor.getTransforms(PlaceholderPlugin).insert.media(data.plainFiles);
+        // Try to use the PlaceholderPlugin's insert.media if available
+        try {
+          const transforms = editor.getTransforms(PlaceholderPlugin);
+          if (transforms?.insert?.media) {
+            transforms.insert.media(data.plainFiles);
+            onOpenChange(false);
+            return;
+          }
+        } catch {
+          // PlaceholderPlugin not available, fall through to manual insertion
+        }
+        
+        // Fallback: manually store images and insert nodes
+        // This is used when PlaceholderPlugin is not configured (e.g., header/footer editor)
+        for (const file of data.plainFiles as File[]) {
+          try {
+            const imageEntry = await browserStorage.storeImage(file);
+            const imageUrl = `indexeddb://images/${imageEntry.id}`;
+            
+            editor.tf.insertNodes({
+              type: KEYS.img,
+              children: [{ text: '' }],
+              id: getNextFigureId(editor),
+              url: imageUrl,
+              width: 400,
+              align: 'center',
+            });
+          } catch (e) {
+            console.error('Failed to store image:', e);
+            toast.error('Failed to upload image');
+          }
+        }
         onOpenChange(false);
       }
     },

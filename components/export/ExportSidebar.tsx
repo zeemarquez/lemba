@@ -27,6 +27,24 @@ export function ExportSidebar() {
             // Convert any IndexedDB image URLs to base64 before sending to server
             const markdownWithBase64Images = await convertIndexedDbImagesToBase64(activeFile.content);
             
+            // Also convert IndexedDB images in header/footer content
+            let settingsWithBase64 = activeTemplate?.settings;
+            if (settingsWithBase64) {
+                settingsWithBase64 = { ...settingsWithBase64 };
+                if (settingsWithBase64.header?.content) {
+                    settingsWithBase64.header = {
+                        ...settingsWithBase64.header,
+                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.header.content),
+                    };
+                }
+                if (settingsWithBase64.footer?.content) {
+                    settingsWithBase64.footer = {
+                        ...settingsWithBase64.footer,
+                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.footer.content),
+                    };
+                }
+            }
+            
             const response = await fetch('/api/export-pdf', {
                 method: 'POST',
                 headers: {
@@ -36,7 +54,7 @@ export function ExportSidebar() {
                     markdown: markdownWithBase64Images,
                     title: activeFile.name.replace(/\.[^/.]+$/, ""),
                     css: activeTemplate?.css || '',
-                    settings: activeTemplate?.settings,
+                    settings: settingsWithBase64,
                 }),
             });
 
