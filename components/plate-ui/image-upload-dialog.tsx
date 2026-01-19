@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { useFilePicker } from 'use-file-picker';
 
 import { Button } from '@/components/plate-ui/button';
+import { getNextFigureId } from '@/components/plate-editor/transforms';
 import {
   Dialog,
   DialogContent,
@@ -49,10 +50,12 @@ export function ImageUploadDialog({
       return toast.error('Invalid URL');
     }
 
+    // Insert image node with auto-assigned fig-X ID
     editor.tf.insertNodes({
       children: [{ text: '' }],
       type: KEYS.img,
       url,
+      id: getNextFigureId(editor),
       width: 400, // Default width to enable HTML serialization
       align: 'center', // Default alignment
     });

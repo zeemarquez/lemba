@@ -1,5 +1,5 @@
 import { MarkdownPlugin, remarkMention } from '@platejs/markdown';
-import { KEYS, getPluginType } from 'platejs';
+import { KEYS, NodeApi, getPluginType } from 'platejs';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
@@ -38,8 +38,8 @@ const mathRules = {
 const imageRules = {
   [KEYS.img]: {
     serialize: (node: any) => {
-      const { url, width, height, alt, align } = node;
-      if (width || height || align) {
+      const { url, width, height, alt, align, caption, id } = node;
+      if (width || height || align || caption || id) {
         // Build style for alignment using margin (more reliable than text-align)
         const styles: string[] = ['display: block'];
         if (width) styles.push(`width: ${width}px`);
@@ -56,9 +56,18 @@ const imageRules = {
         
         let attrs = `src="${url}"`;
         if (alt) attrs += ` alt="${alt}"`;
+        if (id) attrs += ` id="${id}"`;
         attrs += ` style="${styles.join('; ')}"`;
         // Store alignment as data attribute for deserialization
         if (align) attrs += ` data-align="${align}"`;
+        
+        // Handle caption
+        if (caption && Array.isArray(caption) && caption.length > 0) {
+          const captionText = NodeApi.string({ children: caption });
+          if (captionText) {
+            attrs += ` figcaption="${captionText.replace(/"/g, '&quot;')}"`;
+          }
+        }
         
         return {
           type: 'html',
@@ -87,11 +96,13 @@ const imageRules = {
       
       if (imgMatch) {
         const url = imgMatch[1];
-        const widthMatch = value.match(/width:\s*(\d+)px/);
-        const heightMatch = value.match(/height:\s*(\d+)px/);
-        const altMatch = value.match(/alt="([^"]*)"/);
+        const widthMatch = value.match(/width\s*:\s*(\d+)px/);
+        const heightMatch = value.match(/height\s*:\s*(\d+)px/);
+        const altMatch = value.match(/alt\s*=\s*"([^"]*)"/i);
+        const idMatch = value.match(/id\s*=\s*"([^"]*)"/i);
+        const captionMatch = value.match(/figcaption\s*=\s*"([^"]*)"/i);
         // Try data-align first, then fall back to detecting margin pattern
-        const dataAlignMatch = value.match(/data-align="(left|center|right)"/);
+        const dataAlignMatch = value.match(/data-align\s*=\s*"(left|center|right)"/i);
         let align: string | undefined;
         
         if (dataAlignMatch) {
@@ -110,7 +121,9 @@ const imageRules = {
           width: widthMatch ? parseInt(widthMatch[1]) : undefined,
           height: heightMatch ? parseInt(heightMatch[1]) : undefined,
           alt: altMatch ? altMatch[1] : undefined,
+          id: idMatch ? idMatch[1] : undefined,
           align,
+          caption: captionMatch ? [{ text: captionMatch[1] }] : undefined,
           children: [{ text: '' }],
         };
       }
@@ -186,4 +199,3 @@ export function postprocessMathDelimiters(markdown: string): string {
     }
   );
 }
-

@@ -16,7 +16,7 @@ import {
 import { KEYS, PathApi } from 'platejs';
 import { type PlateEditor, useEditorRef } from 'platejs/react';
 import { triggerFloatingLink } from '@platejs/link/react';
-import { insertMedia } from '@platejs/media';
+import { getNextFigureId } from '@/components/plate-editor/transforms';
 import { PlaceholderPlugin } from '@platejs/media/react';
 import { TablePlugin } from '@platejs/table/react';
 import * as React from 'react';
@@ -57,7 +57,15 @@ const insertBlockSimple = (editor: PlateEditor, type: string, data?: any) => {
     if (type === KEYS.table) {
       editor.getTransforms(TablePlugin).insert.table({}, { select: true });
     } else if (type === KEYS.img) {
-      insertMedia(editor, { select: true, type: KEYS.img });
+      // Insert image with auto-assigned fig-X ID
+      editor.tf.insertNodes({
+        type: KEYS.img,
+        children: [{ text: '' }],
+        id: getNextFigureId(editor),
+        width: 400,
+        align: 'center',
+        url: '',
+      }, { select: true });
     } else if (type === KEY_PLACEHOLDER) {
       editor.tf.insertNodes(
         { type: KEY_PLACEHOLDER, children: [{ text: '' }], ...data },

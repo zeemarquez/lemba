@@ -8,6 +8,7 @@ import {
 import { AudioLines, FileUp, Film, ImageIcon, Loader2Icon } from 'lucide-react';
 import type { TPlaceholderElement } from 'platejs';
 import { KEYS } from 'platejs';
+import { getNextFigureId } from '@/components/plate-editor/transforms';
 import type { PlateElementProps } from 'platejs/react';
 import { PlateElement, useEditorPlugin, withHOC } from 'platejs/react';
 import * as React from 'react';
@@ -105,6 +106,7 @@ export const PlaceholderElement = withHOC(
             height: imageRef.current?.height,
             width: imageRef.current?.width || 400,
             align: 'center',
+            id: getNextFigureId(editor), // Auto-assign fig-X ID for images
           }),
           isUpload: true,
           name: element.mediaType === KEYS.file ? uploadedFile.name : '',

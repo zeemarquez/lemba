@@ -4,7 +4,7 @@ import { useStore } from "@/lib/store";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { ZoomIn, ZoomOut, MoveHorizontal, MoveVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { serializeNodesToHtml } from "@/lib/plate/serialize-html";
+import { serializeNodesToHtml, processHtmlImageCaptions } from "@/lib/plate/serialize-html";
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
@@ -45,7 +45,9 @@ function markdownToHtml(markdown: string): string {
     if (!markdown) return '';
     try {
         const markedInstance = createMarkedInstance();
-        return markedInstance.parse(markdown) as string;
+        const html = markedInstance.parse(markdown) as string;
+        // Process image captions that were passed as attributes
+        return processHtmlImageCaptions(html);
     } catch (e) {
         console.error("Error parsing markdown:", e);
         return markdown;
@@ -636,7 +638,7 @@ export function PdfPreview() {
                                 ? headerFooterToHtml(settings.footer.content, {
                                     pageNumber: parseInt(getPreviewPageNumber(index)),
                                     date: new Date().toLocaleDateString(),
-                                    title: activeFile?.name
+                                    title: activeFile?.name 
                                   })
                                 : '';
 

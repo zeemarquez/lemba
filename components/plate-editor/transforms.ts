@@ -22,8 +22,38 @@ import {
   type Path,
   PathApi,
   type TElement,
+  NodeApi,
 } from 'platejs';
 import type { PlateEditor } from 'platejs/react';
+
+export const getNextFigureId = (editor: PlateEditor) => {
+  const images = editor.api.nodes({
+    at: [],
+    match: (n) => n.type === KEYS.img,
+  });
+
+  const ids = new Set(
+    Array.from(images)
+      .map(([node]) => (node as any).id)
+      .filter(Boolean)
+  );
+  
+  let index = 1;
+  while (ids.has(`fig-${index}`)) {
+    index++;
+  }
+  
+  return `fig-${index}`;
+};
+
+export const isFigureIdUnique = (editor: PlateEditor, id: string, excludePath?: Path) => {
+  const images = editor.api.nodes({
+    at: [],
+    match: (n, path) => n.type === KEYS.img && (!excludePath || !PathApi.equals(path, excludePath)),
+  });
+
+  return !Array.from(images).some(([node]) => (node as any).id === id);
+};
 
 const ACTION_THREE_COLUMNS = 'action_three_columns';
 
@@ -52,11 +82,17 @@ const insertBlockMap: Record<
   [KEYS.equation]: (editor) => insertEquation(editor, { select: true }),
   [KEYS.excalidraw]: (editor) => insertExcalidraw(editor, {}, { select: true }),
   [KEYS.file]: (editor) => insertFilePlaceholder(editor, { select: true }),
-  [KEYS.img]: (editor) =>
-    insertMedia(editor, {
-      select: true,
+  [KEYS.img]: (editor) => {
+    // Insert image with auto-assigned fig-X ID
+    editor.tf.insertNodes({
       type: KEYS.img,
-    }),
+      children: [{ text: '' }],
+      id: getNextFigureId(editor),
+      width: 400,
+      align: 'center',
+      url: '',
+    }, { select: true });
+  },
   [KEYS.mediaEmbed]: (editor) =>
     insertMedia(editor, {
       select: true,

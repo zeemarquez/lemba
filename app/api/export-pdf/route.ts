@@ -4,7 +4,7 @@ import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
 import hljs from 'highlight.js';
 import { NextResponse } from 'next/server';
-import { serializeNodesToHtml } from '@/lib/plate/serialize-html';
+import { serializeNodesToHtml, processHtmlImageCaptions } from '@/lib/plate/serialize-html';
 
 // Create a configured marked instance for reliable math rendering
 function createMarkedInstance() {
@@ -244,7 +244,9 @@ export async function POST(req: Request) {
         const { markdown, title, css, settings } = await req.json();
 
         // Convert markdown to HTML using marked
-        const htmlContent = markedInstance.parse(markdown || '') as string;
+        let htmlContent = markedInstance.parse(markdown || '') as string;
+        // Process image captions
+        htmlContent = processHtmlImageCaptions(htmlContent);
 
         // Convert header/footer content to HTML (supports JSON and markdown)
         const headerContent = settings?.header?.enabled && settings?.header?.content

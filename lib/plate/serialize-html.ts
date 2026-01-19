@@ -6,6 +6,61 @@ interface SerializeContext {
   title?: string;
 }
 
+// Helper to post-process HTML string and convert img with figcaption attribute to figure element
+export function processHtmlImageCaptions(html: string): string {
+  // Match img tags that have a figcaption attribute
+  // <img ... figcaption="value" ... >
+  return html.replace(
+    /<img([^>]*?)\s+figcaption="([^"]*)"([^>]*?)>/g,
+    (match, before, caption, after) => {
+      // Extract width if present to constrain the figure
+      const styleMatch = (before + after).match(/style="([^"]*)"/);
+      let width = '';
+      let isCentered = false;
+      
+      if (styleMatch) {
+        const styles = styleMatch[1];
+        const widthMatch = styles.match(/width:\s*(\d+)px/);
+        if (widthMatch) {
+          width = widthMatch[1];
+        }
+        
+        if (styles.includes('margin-left: auto') && styles.includes('margin-right: auto')) {
+          isCentered = true;
+        }
+      }
+      
+      // Also check explicit width attribute
+      if (!width) {
+        const widthAttr = (before + after).match(/width="(\d+)"/);
+        if (widthAttr) {
+          width = widthAttr[1];
+        }
+      }
+      
+      let figureStyle = 'display: block; margin-top: 1em; margin-bottom: 1em;';
+      if (width) {
+        figureStyle += ` width: ${width}px;`;
+      }
+      if (isCentered) {
+        figureStyle += ' margin-left: auto; margin-right: auto;';
+      }
+      
+      // We need to decode the caption if it was HTML attribute encoded
+      const decodedCaption = caption
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+
+      return `<figure style="${figureStyle}">
+        <img${before}${after}>
+        <figcaption style="text-align: center; margin-top: 0.5em; color: #666; font-size: 0.9em; line-height: 1.4;">${decodedCaption}</figcaption>
+      </figure>`;
+    }
+  );
+}
+
 // Serialize Plate nodes to HTML with alignment and formatting preserved
 export function serializeNodesToHtml(nodes: Descendant[], context: SerializeContext = {}): string {
   return nodes.map(node => serializeNode(node, context)).join('');
@@ -212,13 +267,16 @@ function serializeElementNode(element: TElement, children: string, context: Seri
     case 'image':
       const imgUrl = element.url as string || '';
       const imgAlt = element.alt as string || '';
+      const imgId = element.id as string || '';
       const imgWidth = element.width as number | undefined;
       const imgStyles: string[] = ['max-width: 100%', 'height: auto', 'display: block'];
       if (imgWidth) imgStyles.push(`width: ${imgWidth}px`);
       
       // Apply alignment via margin (more reliable for PDF than text-align)
+      let isCentered = false;
       if (align === 'center') {
         imgStyles.push('margin-left: auto', 'margin-right: auto');
+        isCentered = true;
       } else if (align === 'right') {
         imgStyles.push('margin-left: auto', 'margin-right: 0');
       } else {
@@ -226,7 +284,31 @@ function serializeElementNode(element: TElement, children: string, context: Seri
         imgStyles.push('margin-left: 0', 'margin-right: auto');
       }
       
-      return `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(imgAlt)}" style="${imgStyles.join('; ')}" />`;
+      const idAttr = imgId ? ` id="${escapeHtml(imgId)}"` : '';
+      const imgTag = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(imgAlt)}"${idAttr} style="${imgStyles.join('; ')}" />`;
+      
+      // Handle caption if present in node (as children or property)
+      let captionText = '';
+      if (element.caption && Array.isArray(element.caption)) {
+        captionText = element.caption.map(c => c.text || '').join('');
+      }
+      
+      if (captionText) {
+        let figureStyle = 'display: block; margin-top: 1em; margin-bottom: 1em;';
+        if (imgWidth) {
+          figureStyle += ` width: ${imgWidth}px;`;
+        }
+        if (isCentered) {
+          figureStyle += ' margin-left: auto; margin-right: auto;';
+        }
+        
+        return `<figure style="${figureStyle}">
+          ${imgTag}
+          <figcaption style="text-align: center; margin-top: 0.5em; color: #666; font-size: 0.9em; line-height: 1.4;">${escapeHtml(captionText)}</figcaption>
+        </figure>`;
+      }
+      
+      return imgTag;
     case 'media_embed':
       const embedUrl = element.url as string || '';
       const embedHtml = `<iframe src="${escapeHtml(embedUrl)}" style="width: 100%; aspect-ratio: 16/9; border: none;"></iframe>`;
