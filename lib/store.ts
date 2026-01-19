@@ -113,6 +113,7 @@ interface AppState {
     fetchFileTree: () => Promise<void>;
     fetchTemplates: () => Promise<void>;
     fetchFonts: () => Promise<void>;
+    restoreSession: () => Promise<void>;
     
     createFile: (path: string, content?: string) => Promise<void>;
     createFolder: (path: string) => Promise<void>;
@@ -256,6 +257,36 @@ export const useStore = create<AppState>()(
                         set({ customFonts: fonts });
                     } catch (error) {
                         console.error('Failed to fetch fonts:', error);
+                    }
+                },
+
+                restoreSession: async () => {
+                    const { openTabs, files } = get();
+                    const newFiles = [...files];
+                    let hasUpdates = false;
+
+                    for (const tab of openTabs) {
+                        if (tab.type === 'file') {
+                            const isLoaded = newFiles.some(f => f.id === tab.id);
+                            if (!isLoaded) {
+                                try {
+                                    const content = await browserStorage.readFile(tab.id);
+                                    newFiles.push({
+                                        id: tab.id,
+                                        name: tab.id.split('/').pop() || tab.id,
+                                        content,
+                                        language: 'markdown'
+                                    });
+                                    hasUpdates = true;
+                                } catch (error) {
+                                    console.error('Failed to restore file:', tab.id, error);
+                                }
+                            }
+                        }
+                    }
+
+                    if (hasUpdates) {
+                        set({ files: newFiles });
                     }
                 },
 
@@ -493,7 +524,13 @@ export const useStore = create<AppState>()(
                 leftSidebarExpanded: state.leftSidebarExpanded,
                 rightSidebarExpanded: state.rightSidebarExpanded,
                 previewQuality: state.previewQuality,
-                // Do not persist openTabs or files content to avoid issues
+                activeFileId: state.activeFileId,
+                activeTemplateId: state.activeTemplateId,
+                openTabs: state.openTabs,
+                sidebarView: state.sidebarView,
+                currentView: state.currentView,
+                editorViewMode: state.editorViewMode,
+                // Do not persist files content to avoid issues
             })
         }
     )

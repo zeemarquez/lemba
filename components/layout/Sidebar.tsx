@@ -40,7 +40,8 @@ export function Sidebar() {
         moveItem,
         setSettingsOpen,
         isLoadingFileTree,
-        fetchFonts
+        fetchFonts,
+        restoreSession
     } = useStore();
 
     const [mounted, setMounted] = useState(false);
@@ -59,7 +60,8 @@ export function Sidebar() {
         fetchFileTree();
         fetchTemplates();
         fetchFonts();
-    }, [fetchFileTree, fetchTemplates, fetchFonts]);
+        restoreSession();
+    }, [fetchFileTree, fetchTemplates, fetchFonts, restoreSession]);
 
     const handleCreateFile = () => {
         setDialogConfig({
