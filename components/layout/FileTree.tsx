@@ -1,5 +1,5 @@
 import { FileNode } from "@/lib/store";
-import { ChevronRight, FileText, Folder, Trash2, Edit, FileType } from "lucide-react";
+import { ChevronRight, FileText, Folder, Trash2, Edit, LayoutTemplate } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useDrag, useDrop } from "react-dnd";
@@ -114,7 +114,7 @@ const FileTreeItem = ({
                         {node.type === 'folder' ? (
                             <Folder size={14} className="text-blue-400/80 shrink-0" />
                         ) : (node.name.endsWith('.json') || node.name.endsWith('.mdt')) ? (
-                             <FileType size={14} className={cn("text-muted-foreground shrink-0", activeId === node.id && "text-primary")} />
+                             <LayoutTemplate size={14} className={cn("text-muted-foreground shrink-0", activeId === node.id && "text-primary")} />
                         ) : (
                             <FileText size={14} className={cn("text-muted-foreground shrink-0", activeId === node.id && "text-primary")} />
                         )}

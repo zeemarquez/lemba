@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, X, FileType } from "lucide-react";
+import { FileText, X, LayoutTemplate } from "lucide-react";
 import { ExportSidebar } from "@/components/export/ExportSidebar";
 import { PrintStyles } from "@/components/export/PrintStyles";
 import { useRef, useEffect } from "react";
@@ -129,16 +129,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                         )}
 
                                     {isFile ? (
-                                        <FileText size={12} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                        <FileText size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
                                     ) : (
-                                        <FileType size={12} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                        <LayoutTemplate size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
                                     )}
                                         {/* Hide extension in tabs too? User asked for sidebar, but tabs might be nice too. 
                                             User said: "Dont show the extension file of lies or templates"
                                             "file of lies" -> "file list" probably.
                                             Let's apply to tabs too for consistency.
                                         */}
-                                        <span className="truncate flex-1 lowercase font-medium">
+                                        <span className="truncate flex-1 font-medium">
                                             {data.name.replace(/\.(md|json|mdt)$/, '')}
                                         </span>
                                         <button

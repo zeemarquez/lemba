@@ -6,7 +6,7 @@ import {
     FileText,
     Plus,
     FolderSearch,
-    LayoutGrid,
+    LayoutTemplate,
     PanelLeftClose,
     PanelLeftOpen,
     Settings,
@@ -242,7 +242,7 @@ export function Sidebar() {
                         onClick={() => setSidebarView('templates')}
                         title="Templates"
                     >
-                        <LayoutGrid size={18} />
+                        <LayoutTemplate size={18} />
                     </Button>
                     <div className="flex-1" />
                     <Button

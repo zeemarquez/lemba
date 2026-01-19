@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { Layout, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -59,7 +59,7 @@ export function TemplateEditor() {
     if (!template || !settings) {
         return (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 bg-muted/10">
-                <Layout className="h-16 w-16 mb-4 opacity-10" />
+                <LayoutTemplate className="h-16 w-16 mb-4 opacity-10" />
                 <p className="text-sm font-medium opacity-50">Select a template to design</p>
             </div>
         );
@@ -340,7 +340,7 @@ export function TemplateEditor() {
     const sections = [
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
-        { id: 'page-settings', label: 'Page Settings', icon: Layout },
+        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
@@ -698,7 +698,7 @@ export function TemplateEditor() {
                     <section id="section-page-settings" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <Layout size={22} className="text-foreground" />
+                                <LayoutTemplate size={22} className="text-foreground" />
                             </div>
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Page settings</h2>
                         </div>
