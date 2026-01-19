@@ -47,6 +47,23 @@ export function SettingsDialog() {
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      // Auto-assign font name from filename if name is empty or unchanged
+      const nameWithoutExt = file.name.split('.').slice(0, -1).join('.');
+      // Simple heuristic: capitalize first letter, replace hyphens/underscores with spaces
+      const formattedName = nameWithoutExt
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      
+      setFontFamilyName(formattedName);
+    } else {
+      setSelectedFile(null);
+    }
+  };
+
   const handleFontUpload = async () => {
     if (!selectedFile || !fontFamilyName) return;
 
@@ -130,34 +147,25 @@ export function SettingsDialog() {
                 <div className="space-y-4 pt-4 border-t">
                   <h4 className="font-medium text-sm">Custom Fonts</h4>
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                      <div className="space-y-2">
-                        <label className="text-xs text-muted-foreground">Font Family Name</label>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-2">
+                        <label className="text-xs text-muted-foreground">Upload Font (ttf, otf, woff, woff2)</label>
                         <Input 
-                          placeholder="e.g. My Custom Font" 
-                          value={fontFamilyName}
-                          onChange={(e) => setFontFamilyName(e.target.value)}
+                          type="file" 
+                          accept=".ttf,.otf,.woff,.woff2"
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          className="w-full cursor-pointer file:cursor-pointer"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs text-muted-foreground">Font File (ttf, otf, woff, woff2)</label>
-                        <div className="flex gap-2">
-                          <Input 
-                            type="file" 
-                            accept=".ttf,.otf,.woff,.woff2"
-                            ref={fileInputRef}
-                            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                            className="flex-1"
-                          />
-                          <Button 
-                            onClick={handleFontUpload} 
-                            disabled={!selectedFile || !fontFamilyName}
-                            size="icon"
-                          >
-                            <Upload className="size-4" />
-                          </Button>
-                        </div>
-                      </div>
+                      <Button 
+                        onClick={handleFontUpload} 
+                        disabled={!selectedFile || !fontFamilyName}
+                        size="icon"
+                        className="shrink-0"
+                      >
+                        <Upload className="size-4" />
+                      </Button>
                     </div>
 
                     {customFonts.length > 0 && (
