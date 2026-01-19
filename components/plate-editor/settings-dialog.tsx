@@ -1,14 +1,10 @@
 'use client';
 
-/* DEMO ONLY, DO NOT USE IN PRODUCTION */
-
 import {
   Monitor,
   Moon,
   Settings,
   Sun,
-  HardDrive,
-  Globe
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
@@ -28,39 +24,15 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { Input } from '@/components/plate-ui/input';
 import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
   const { 
     isSettingsOpen: open, 
     setSettingsOpen: setOpen,
-    storagePath,
-    fetchStoragePath,
-    updateStoragePath,
-    storageMode,
-    setStorageMode
   } = useStore();
-
-  const [localPath, setLocalPath] = useState('');
-
-  useEffect(() => {
-    if (open && storageMode === 'fs') {
-      fetchStoragePath();
-    }
-  }, [open, fetchStoragePath, storageMode]);
-
-  useEffect(() => {
-    setLocalPath(storagePath);
-  }, [storagePath]);
-
-  const handleSavePath = async () => {
-    await updateStoragePath(localPath);
-    // Optionally show toast or feedback
-  };
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
@@ -91,12 +63,6 @@ export function SettingsDialog() {
               value="general"
             >
               General
-            </TabsTrigger>
-            <TabsTrigger
-              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
-              value="storage"
-            >
-              Storage
             </TabsTrigger>
           </TabsList>
 
@@ -132,57 +98,6 @@ export function SettingsDialog() {
                     </Button>
                   </div>
                 </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent className="mt-0 outline-none" value="storage">
-              <div className="space-y-6">
-                <div className="space-y-4">
-                    <h4 className="font-medium text-sm">Storage Provider</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                        <Button
-                            className="flex flex-col items-center justify-center gap-2 h-24 p-0"
-                            onClick={() => setStorageMode('browser')}
-                            variant={storageMode === 'browser' ? 'secondary' : 'outline'}
-                        >
-                            <Globe className="size-6" />
-                            <span className="text-xs">Browser Storage</span>
-                        </Button>
-                        <Button
-                            className="flex flex-col items-center justify-center gap-2 h-24 p-0"
-                            onClick={() => setStorageMode('fs')}
-                            variant={storageMode === 'fs' ? 'secondary' : 'outline'}
-                        >
-                            <HardDrive className="size-6" />
-                            <span className="text-xs">Local File System</span>
-                        </Button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                        Browser Storage saves files in your browser's local storage (IndexedDB).
-                        Local File System uses the server's file system (requires running locally).
-                    </p>
-                </div>
-
-                {storageMode === 'fs' && (
-                     <div className="space-y-4">
-                        <h4 className="font-medium text-sm">File System Settings</h4>
-                        <div className="space-y-2">
-                            <label className="text-xs text-muted-foreground">Storage Path (absolute path)</label>
-                            <div className="flex gap-2">
-                                <Input 
-                                    value={localPath} 
-                                    onChange={(e) => setLocalPath(e.target.value)} 
-                                    placeholder="/path/to/folder" 
-                                />
-                                <Button onClick={handleSavePath}>Save</Button>
-                            </div>
-                            <p className="text-[10px] text-muted-foreground">
-                                Default: ~/Documents/MarkdownEditor. 
-                                The app will create "Files" and "Templates" folders here.
-                            </p>
-                        </div>
-                     </div>
-                )}
               </div>
             </TabsContent>
           </div>

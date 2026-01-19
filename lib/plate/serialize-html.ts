@@ -213,15 +213,20 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       const imgUrl = element.url as string || '';
       const imgAlt = element.alt as string || '';
       const imgWidth = element.width as number | undefined;
-      const imgStyles: string[] = ['max-width: 100%', 'height: auto'];
+      const imgStyles: string[] = ['max-width: 100%', 'height: auto', 'display: block'];
       if (imgWidth) imgStyles.push(`width: ${imgWidth}px`);
       
-      const imgHtml = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(imgAlt)}" style="${imgStyles.join('; ')}" />`;
-      
-      if (align) {
-        return `<div style="text-align: ${align}">${imgHtml}</div>`;
+      // Apply alignment via margin (more reliable for PDF than text-align)
+      if (align === 'center') {
+        imgStyles.push('margin-left: auto', 'margin-right: auto');
+      } else if (align === 'right') {
+        imgStyles.push('margin-left: auto', 'margin-right: 0');
+      } else {
+        // left or default
+        imgStyles.push('margin-left: 0', 'margin-right: auto');
       }
-      return imgHtml;
+      
+      return `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(imgAlt)}" style="${imgStyles.join('; ')}" />`;
     case 'media_embed':
       const embedUrl = element.url as string || '';
       const embedHtml = `<iframe src="${escapeHtml(embedUrl)}" style="width: 100%; aspect-ratio: 16/9; border: none;"></iframe>`;

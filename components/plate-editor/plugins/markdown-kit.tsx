@@ -35,12 +35,96 @@ const mathRules = {
   },
 };
 
+const imageRules = {
+  [KEYS.img]: {
+    serialize: (node: any) => {
+      const { url, width, height, alt, align } = node;
+      if (width || height || align) {
+        // Build style for alignment using margin (more reliable than text-align)
+        const styles: string[] = ['display: block'];
+        if (width) styles.push(`width: ${width}px`);
+        if (height) styles.push(`height: ${height}px`);
+        
+        // Apply alignment via margin
+        if (align === 'center') {
+          styles.push('margin-left: auto', 'margin-right: auto');
+        } else if (align === 'right') {
+          styles.push('margin-left: auto', 'margin-right: 0');
+        } else {
+          styles.push('margin-left: 0', 'margin-right: auto');
+        }
+        
+        let attrs = `src="${url}"`;
+        if (alt) attrs += ` alt="${alt}"`;
+        attrs += ` style="${styles.join('; ')}"`;
+        // Store alignment as data attribute for deserialization
+        if (align) attrs += ` data-align="${align}"`;
+        
+        return {
+          type: 'html',
+          value: `<img ${attrs} />`,
+        };
+      }
+      return {
+        type: 'image',
+        url,
+        alt,
+      };
+    },
+  },
+  image: {
+    deserialize: (mdastNode: any, _deco: any, options: any) => ({
+      type: getPluginType(options.editor, KEYS.img),
+      url: mdastNode.url,
+      alt: mdastNode.alt,
+      children: [{ text: '' }],
+    }),
+  },
+  html: {
+    deserialize: (mdastNode: any, _deco: any, options: any) => {
+      const value = mdastNode.value;
+      const imgMatch = value.match(/<img[^>]*src="([^"]*)"[^>]*>/);
+      
+      if (imgMatch) {
+        const url = imgMatch[1];
+        const widthMatch = value.match(/width:\s*(\d+)px/);
+        const heightMatch = value.match(/height:\s*(\d+)px/);
+        const altMatch = value.match(/alt="([^"]*)"/);
+        // Try data-align first, then fall back to detecting margin pattern
+        const dataAlignMatch = value.match(/data-align="(left|center|right)"/);
+        let align: string | undefined;
+        
+        if (dataAlignMatch) {
+          align = dataAlignMatch[1];
+        } else if (value.includes('margin-left: auto') && value.includes('margin-right: auto')) {
+          align = 'center';
+        } else if (value.includes('margin-left: auto') && value.includes('margin-right: 0')) {
+          align = 'right';
+        } else if (value.includes('margin-left: 0')) {
+          align = 'left';
+        }
+        
+        return {
+          type: getPluginType(options.editor, KEYS.img),
+          url,
+          width: widthMatch ? parseInt(widthMatch[1]) : undefined,
+          height: heightMatch ? parseInt(heightMatch[1]) : undefined,
+          alt: altMatch ? altMatch[1] : undefined,
+          align,
+          children: [{ text: '' }],
+        };
+      }
+      return { text: mdastNode.value };
+    },
+  },
+};
+
 export const MarkdownKit = [
   MarkdownPlugin.configure({
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention],
-      rules: mathRules,
+      rules: { ...mathRules, ...imageRules },
     },
   }),
 ];

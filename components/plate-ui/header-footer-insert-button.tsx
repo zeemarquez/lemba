@@ -21,6 +21,7 @@ import { PlaceholderPlugin } from '@platejs/media/react';
 import { TablePlugin } from '@platejs/table/react';
 import * as React from 'react';
 import { useFilePicker } from 'use-file-picker';
+import { ImageUploadDialog } from './image-upload-dialog';
 import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
 import {
   DropdownMenu,
@@ -79,16 +80,7 @@ const insertBlockSimple = (editor: PlateEditor, type: string, data?: any) => {
 export function HeaderFooterInsertButton(props: DropdownMenuProps) {
   const editor = useEditorRef();
   const [open, setOpen] = React.useState(false);
-
-  const { openFilePicker } = useFilePicker({
-    accept: ['image/*'],
-    multiple: true,
-    onFilesSelected: (data: any) => {
-      if (data.plainFiles) {
-        editor.getTransforms(PlaceholderPlugin).insert.media(data.plainFiles);
-      }
-    },
-  });
+  const [imageDialogOpen, setImageDialogOpen] = React.useState(false);
 
   const groups: Group[] = [
     {
@@ -106,19 +98,14 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
         },
         {
           icon: <ImageIcon />,
-          label: 'Image via URL',
+          label: 'Image',
           value: KEYS.img,
-        },
-        {
-          icon: <UploadIcon />,
-          label: 'Upload Image',
-          value: 'upload_img',
         },
       ].map((item) => ({
         ...item,
         onSelect: (editor, value) => {
-          if (value === 'upload_img') {
-            openFilePicker();
+          if (value === KEYS.img) {
+            setImageDialogOpen(true);
           } else {
             insertBlockSimple(editor, value);
           }
@@ -182,35 +169,42 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
   ];
 
   return (
-    <DropdownMenu modal={false} onOpenChange={setOpen} open={open} {...props}>
-      <DropdownMenuTrigger asChild>
-        <ToolbarButton isDropdown pressed={open} tooltip="Insert">
-          <PlusIcon />
-        </ToolbarButton>
-      </DropdownMenuTrigger>
+    <>
+      <DropdownMenu modal={false} onOpenChange={setOpen} open={open} {...props}>
+        <DropdownMenuTrigger asChild>
+          <ToolbarButton isDropdown pressed={open} tooltip="Insert">
+            <PlusIcon />
+          </ToolbarButton>
+        </DropdownMenuTrigger>
 
-      <DropdownMenuContent
-        align="start"
-        className="flex max-h-[500px] min-w-0 flex-col overflow-y-auto"
-      >
-        {groups.map(({ group, items: nestedItems }) => (
-          <ToolbarMenuGroup key={group} label={group}>
-            {nestedItems.map(({ icon, label, value, onSelect }) => (
-              <DropdownMenuItem
-                className="min-w-[180px]"
-                key={label} // Use label instead of value since multiple items share value now
-                onSelect={() => {
-                  onSelect(editor, value);
-                  editor.tf.focus();
-                }}
-              >
-                {icon}
-                {label}
-              </DropdownMenuItem>
-            ))}
-          </ToolbarMenuGroup>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <DropdownMenuContent
+          align="start"
+          className="flex max-h-[500px] min-w-0 flex-col overflow-y-auto"
+        >
+          {groups.map(({ group, items: nestedItems }) => (
+            <ToolbarMenuGroup key={group} label={group}>
+              {nestedItems.map(({ icon, label, value, onSelect }) => (
+                <DropdownMenuItem
+                  className="min-w-[180px]"
+                  key={label} // Use label instead of value since multiple items share value now
+                  onSelect={() => {
+                    onSelect(editor, value);
+                    editor.tf.focus();
+                  }}
+                >
+                  {icon}
+                  {label}
+                </DropdownMenuItem>
+              ))}
+            </ToolbarMenuGroup>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ImageUploadDialog
+        open={imageDialogOpen}
+        onOpenChange={setImageDialogOpen}
+      />
+    </>
   );
 }

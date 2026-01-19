@@ -40,6 +40,7 @@ import {
   ToolbarSplitButtonPrimary,
   ToolbarSplitButtonSecondary,
 } from './toolbar';
+import { ImageUploadDialog } from './image-upload-dialog';
 
 const MEDIA_CONFIG: Record<
   string,
@@ -85,6 +86,7 @@ export function MediaToolbarButton({
   const editor = useEditorRef();
   const [open, setOpen] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [imageDialogOpen, setImageDialogOpen] = React.useState(false);
 
   const { openFilePicker } = useFilePicker({
     accept: currentConfig.accept,
@@ -95,6 +97,56 @@ export function MediaToolbarButton({
       }
     },
   });
+
+  if (nodeType === KEYS.img) {
+    return (
+      <>
+        <ToolbarSplitButton
+          onClick={() => setImageDialogOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+            }
+          }}
+          pressed={open}
+        >
+          <ToolbarSplitButtonPrimary>
+            {currentConfig.icon}
+          </ToolbarSplitButtonPrimary>
+
+          <DropdownMenu
+            modal={false}
+            onOpenChange={setOpen}
+            open={open}
+            {...props}
+          >
+            <DropdownMenuTrigger asChild>
+              <ToolbarSplitButtonSecondary />
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent
+              align="start"
+              alignOffset={-32}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={() => setImageDialogOpen(true)}>
+                  {currentConfig.icon}
+                  Insert Image
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </ToolbarSplitButton>
+
+        <ImageUploadDialog
+          open={imageDialogOpen}
+          onOpenChange={setImageDialogOpen}
+        />
+      </>
+    );
+  }
 
   return (
     <>

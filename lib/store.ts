@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
-import { apiStorage } from './api-storage';
-import { StorageProvider } from './storage-provider';
 
 export interface FileNode {
     id: string; // relative path
@@ -82,13 +80,9 @@ export interface Template {
     }
 }
 
-export type StorageMode = 'browser' | 'fs';
-
 interface AppState {
     // File System State
     fileTree: FileNode[];
-    storagePath: string;
-    storageMode: StorageMode;
     isLoadingFileTree: boolean;
     
     // Editor State
@@ -110,11 +104,8 @@ interface AppState {
     activeTemplateCss: string;
 
     // Actions
-    setStorageMode: (mode: StorageMode) => void;
     fetchFileTree: () => Promise<void>;
     fetchTemplates: () => Promise<void>;
-    fetchStoragePath: () => Promise<void>;
-    updateStoragePath: (path: string) => Promise<void>;
     
     createFile: (path: string, content?: string) => Promise<void>;
     createFolder: (path: string) => Promise<void>;
@@ -176,13 +167,9 @@ const DEFAULT_TEMPLATE: Template = {
 export const useStore = create<AppState>()(
     persist(
         (set, get) => {
-            const getStorage = () => get().storageMode === 'browser' ? browserStorage : apiStorage;
-
             return {
                 // Initial State
                 fileTree: [],
-                storagePath: '',
-                storageMode: 'browser',
                 isLoadingFileTree: false,
                 files: [],
                 activeFileId: null,
@@ -198,16 +185,10 @@ export const useStore = create<AppState>()(
                 isSettingsOpen: false,
 
                 // Actions implementation
-                setStorageMode: (mode) => {
-                    set({ storageMode: mode, fileTree: [], files: [], openTabs: [], activeFileId: null, templates: [], activeTemplateId: null });
-                    get().fetchFileTree();
-                    get().fetchTemplates();
-                },
-
                 fetchFileTree: async () => {
                     set({ isLoadingFileTree: true });
                     try {
-                        const { tree } = await getStorage().list();
+                        const { tree } = await browserStorage.list();
                         set({ fileTree: tree });
                     } catch (error) {
                         console.error('Failed to fetch file tree:', error);
@@ -218,8 +199,7 @@ export const useStore = create<AppState>()(
 
                 fetchTemplates: async () => {
                     try {
-                        const storage = getStorage();
-                        let templates = await storage.listTemplates();
+                        let templates = await browserStorage.listTemplates();
                         
                         // Check if Default template exists
                         const defaultExists = templates.some(t => t.name === 'Default');
@@ -228,11 +208,10 @@ export const useStore = create<AppState>()(
                              const path = 'Templates/Default.mdt';
                              try {
                                  // Create the default template file
-                                 // We use the raw storage call to avoid triggering full fetch cycle loop
-                                 await storage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
+                                 await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
                                  
                                  // Re-fetch to get the file with correct metadata
-                                 templates = await storage.listTemplates();
+                                 templates = await browserStorage.listTemplates();
                                  
                                  // Trigger file tree refresh so it shows in sidebar
                                  get().fetchFileTree();
@@ -257,48 +236,9 @@ export const useStore = create<AppState>()(
                     }
                 },
 
-                fetchStoragePath: async () => {
-                    if (get().storageMode === 'fs') {
-                        try {
-                            const res = await fetch('/api/settings');
-                            const data = await res.json();
-                            if (data.storagePath) {
-                                set({ storagePath: data.storagePath });
-                            }
-                        } catch (error) {
-                            console.error('Failed to fetch storage path:', error);
-                        }
-                    }
-                },
-
-                updateStoragePath: async (path: string) => {
-                    // This is only relevant for 'fs' mode currently
-                    if (get().storageMode === 'fs') {
-                         try {
-                            const res = await fetch('/api/settings', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ storagePath: path })
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                                set({ storagePath: path });
-                                get().fetchFileTree();
-                                get().fetchTemplates();
-                            }
-                        } catch (error) {
-                            console.error('Failed to update storage path:', error);
-                        }
-                    } else {
-                        // For browser mode, maybe we don't support custom path? 
-                        // Or maybe we treat it as a "workspace" name?
-                        // For now, ignore.
-                    }
-                },
-
                 createFile: async (path: string, content = '') => {
                     try {
-                        await getStorage().createFile(path, content);
+                        await browserStorage.createFile(path, content);
                         await get().fetchFileTree();
                         await get().openFile(path);
                     } catch (error) {
@@ -308,7 +248,7 @@ export const useStore = create<AppState>()(
 
                 createFolder: async (path: string) => {
                     try {
-                        await getStorage().createFolder(path);
+                        await browserStorage.createFolder(path);
                         await get().fetchFileTree();
                     } catch (error) {
                         console.error('Failed to create folder:', error);
@@ -317,7 +257,7 @@ export const useStore = create<AppState>()(
 
                 createTemplate: async (path: string, template: Template) => {
                     try {
-                        await getStorage().createTemplate(path, template);
+                        await browserStorage.createTemplate(path, template);
                         await get().fetchFileTree();
                         await get().fetchTemplates();
                         get().openTemplate(path);
@@ -328,7 +268,7 @@ export const useStore = create<AppState>()(
 
                 saveTemplate: async (path: string, template: Template) => {
                     try {
-                        await getStorage().saveTemplate(path, template);
+                        await browserStorage.saveTemplate(path, template);
                         set((state) => ({
                             templates: state.templates.map((t) => (t.id === path ? template : t))
                         }));
@@ -339,7 +279,7 @@ export const useStore = create<AppState>()(
 
                 deleteItem: async (path: string, type: 'file' | 'folder') => {
                     try {
-                        await getStorage().delete(path, type);
+                        await browserStorage.delete(path, type);
                         await get().fetchFileTree();
                         
                         const { openTabs } = get();
@@ -356,7 +296,7 @@ export const useStore = create<AppState>()(
 
                 renameItem: async (oldPath: string, newPath: string) => {
                     try {
-                        await getStorage().rename(oldPath, newPath);
+                        await browserStorage.rename(oldPath, newPath);
                         await get().fetchFileTree();
                         if (newPath.startsWith('Templates/') || oldPath.startsWith('Templates/')) {
                             get().fetchTemplates();
@@ -368,7 +308,7 @@ export const useStore = create<AppState>()(
 
                 moveItem: async (sourcePath: string, destinationPath: string) => {
                     try {
-                        await getStorage().move(sourcePath, destinationPath);
+                        await browserStorage.move(sourcePath, destinationPath);
                         await get().fetchFileTree();
                         if (destinationPath.startsWith('Templates/') || sourcePath.startsWith('Templates/')) {
                             get().fetchTemplates();
@@ -384,7 +324,7 @@ export const useStore = create<AppState>()(
 
                     if (!existingFile) {
                         try {
-                            const content = await getStorage().readFile(path);
+                            const content = await browserStorage.readFile(path);
                             const newFile: File = {
                                 id: path,
                                 name: path.split('/').pop() || path,
@@ -411,7 +351,7 @@ export const useStore = create<AppState>()(
 
                 saveFile: async (path: string, content: string) => {
                     try {
-                        await getStorage().writeFile(path, content);
+                        await browserStorage.writeFile(path, content);
                     } catch (error) {
                         console.error('Failed to save file:', error);
                     }
@@ -508,7 +448,6 @@ export const useStore = create<AppState>()(
         {
             name: 'markdown-editor-storage', // key for localStorage
             partialize: (state) => ({
-                storageMode: state.storageMode, // Persist storage mode selection
                 leftSidebarExpanded: state.leftSidebarExpanded,
                 rightSidebarExpanded: state.rightSidebarExpanded,
                 // Do not persist openTabs or files content to avoid issues

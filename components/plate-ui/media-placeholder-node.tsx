@@ -97,10 +97,15 @@ export const PlaceholderElement = withHOC(
       editor.tf.withoutSaving(() => {
         editor.tf.removeNodes({ at: path });
 
+        const isImg = element.mediaType === KEYS.img;
+
         const node = {
           children: [{ text: '' }],
-          initialHeight: imageRef.current?.height,
-          initialWidth: imageRef.current?.width,
+          ...(isImg && {
+            height: imageRef.current?.height,
+            width: imageRef.current?.width || 400,
+            align: 'center',
+          }),
           isUpload: true,
           name: element.mediaType === KEYS.file ? uploadedFile.name : '',
           placeholderId: element.id as string,

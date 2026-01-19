@@ -1,5 +1,4 @@
 import { FileNode, Template } from './store';
-import { StorageProvider } from './storage-provider';
 
 const DB_NAME = 'markdown-editor-db';
 const DB_VERSION = 2;
@@ -13,7 +12,7 @@ interface FileEntry {
     updatedAt: number;
 }
 
-class BrowserStorage implements StorageProvider {
+class BrowserStorage {
     private db: IDBDatabase | null = null;
 
     private async initDB(): Promise<IDBDatabase> {
