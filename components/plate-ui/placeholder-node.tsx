@@ -17,7 +17,8 @@ import {
   useSelected,
   useEditorRef
 } from 'platejs/react';
-import * as React from 'react';
+import { useState, useMemo } from 'react';
+import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import {
   Popover,
@@ -66,8 +67,17 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
   const focused = useFocused();
   const readOnly = useReadOnly();
   const editor = useEditorRef();
+  const customFonts = useStore((state) => state.customFonts);
 
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
+
+  const allFontFamilies = useMemo(() => {
+    const custom = customFonts.map(f => ({
+      label: f.family,
+      value: `'${f.family}'`
+    }));
+    return [...FONT_FAMILIES, ...custom];
+  }, [customFonts]);
 
   const updateElement = (updates: Partial<TPlaceholderElement>) => {
     editor.tf.setNodes(updates, { at: editor.api.findPath(element) });
@@ -127,7 +137,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                   value={element.fontFamily || ''}
                   onChange={(e) => updateElement({ fontFamily: e.target.value })}
                 >
-                  {FONT_FAMILIES.map(f => (
+                  {allFontFamilies.map(f => (
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </select>

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { browserStorage } from './browser-storage';
+import { browserStorage, FontEntry } from './browser-storage';
 
 export interface FileNode {
     id: string; // relative path
@@ -106,9 +106,13 @@ interface AppState {
     activeTemplateId: string | null;
     activeTemplateCss: string;
 
+    // Fonts State
+    customFonts: FontEntry[];
+
     // Actions
     fetchFileTree: () => Promise<void>;
     fetchTemplates: () => Promise<void>;
+    fetchFonts: () => Promise<void>;
     
     createFile: (path: string, content?: string) => Promise<void>;
     createFolder: (path: string) => Promise<void>;
@@ -120,6 +124,10 @@ interface AppState {
     deleteItem: (path: string, type: 'file' | 'folder') => Promise<void>;
     renameItem: (oldPath: string, newPath: string) => Promise<void>;
     moveItem: (sourcePath: string, destinationPath: string) => Promise<void>;
+
+    // Font Actions
+    addFont: (family: string, file: File) => Promise<void>;
+    deleteFont: (id: string) => Promise<void>;
 
     // Opens a file, fetching content if needed
     openFile: (path: string) => Promise<void>;
@@ -184,6 +192,7 @@ export const useStore = create<AppState>()(
                 templates: [],
                 activeTemplateId: null,
                 activeTemplateCss: '',
+                customFonts: [],
                 editorViewMode: 'editing',
                 currentView: 'file',
                 isSettingsOpen: false,
@@ -238,6 +247,15 @@ export const useStore = create<AppState>()(
                         }
                     } catch (error) {
                         console.error('Failed to fetch templates:', error);
+                    }
+                },
+
+                fetchFonts: async () => {
+                    try {
+                        const fonts = await browserStorage.listFonts();
+                        set({ customFonts: fonts });
+                    } catch (error) {
+                        console.error('Failed to fetch fonts:', error);
                     }
                 },
 
@@ -320,6 +338,24 @@ export const useStore = create<AppState>()(
                         }
                     } catch (error) {
                         console.error('Failed to move item:', error);
+                    }
+                },
+
+                addFont: async (family, file) => {
+                    try {
+                        await browserStorage.storeFont(family, file);
+                        await get().fetchFonts();
+                    } catch (error) {
+                        console.error('Failed to add font:', error);
+                    }
+                },
+
+                deleteFont: async (id) => {
+                    try {
+                        await browserStorage.deleteFont(id);
+                        await get().fetchFonts();
+                    } catch (error) {
+                        console.error('Failed to delete font:', error);
                     }
                 },
 

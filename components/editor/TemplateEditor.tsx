@@ -1,14 +1,51 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { Layout, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Layout, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown } from "lucide-react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/plate-ui/dropdown-menu";
+
+const FONT_FAMILIES = [
+    // Sans Serif
+    { label: 'Inter (Modern Sans)', value: 'Inter, sans-serif', category: 'Sans Serif' },
+    { label: 'Roboto (Clean)', value: 'Roboto, sans-serif', category: 'Sans Serif' },
+    { label: 'Open Sans (Neutral)', value: "'Open Sans', sans-serif", category: 'Sans Serif' },
+    { label: 'Montserrat (Modern)', value: 'Montserrat, sans-serif', category: 'Sans Serif' },
+    { label: 'Outfit (Geometric)', value: "'Outfit', sans-serif", category: 'Sans Serif' },
+    { label: 'System Default', value: 'system-ui, sans-serif', category: 'Sans Serif' },
+
+    // Serif
+    { label: 'Times New Roman (Academic)', value: "'Times New Roman', serif", category: 'Serif' },
+    { label: 'Georgia (Classic Serif)', value: "'Georgia', serif", category: 'Serif' },
+    { label: 'Merriweather (Readable)', value: 'Merriweather, serif', category: 'Serif' },
+    { label: 'Playfair Display (Elegant)', value: "'Playfair Display', serif", category: 'Serif' },
+    { label: 'Lora (Contemporary)', value: 'Lora, serif', category: 'Serif' },
+
+    // Mono
+    { label: 'JetBrains Mono (Code)', value: "'JetBrains Mono', monospace", category: 'Monospace' },
+    { label: 'Fira Code (Ligatures)', value: "'Fira Code', monospace", category: 'Monospace' },
+    { label: 'Source Code Pro (Clean Mono)', value: "'Source Code Pro', monospace", category: 'Monospace' },
+];
 
 export function TemplateEditor() {
-    const { activeTemplateId, templates, updateTemplate, setActiveTemplateCss, closeTab } = useStore();
+    const { activeTemplateId, templates, updateTemplate, setActiveTemplateCss, closeTab, customFonts } = useStore();
     const template = templates.find(t => t.id === activeTemplateId);
+
+    const allFontFamilies = useMemo(() => {
+        const custom = customFonts.map(f => ({
+            label: `${f.family} (Custom)`,
+            value: `'${f.family}'`,
+            category: 'Custom'
+        }));
+        return [...FONT_FAMILIES, ...custom];
+    }, [customFonts]);
 
     const [settings, setSettings] = useState(template?.settings);
     const [activeHeadingLevel, setActiveHeadingLevel] = useState<'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>('h1');
@@ -278,9 +315,25 @@ export function TemplateEditor() {
     useEffect(() => {
         if (!settings || !template) return;
         const css = generateCss(settings);
+        
+        // Update local store state
         updateTemplate(template.id, { settings, css });
         setActiveTemplateCss(css);
     }, [settings]);
+
+    // Persist to IndexedDB with debounce
+    useEffect(() => {
+        if (!template) return;
+
+        const timeoutId = setTimeout(() => {
+            // We need to fetch the latest template state from store because 'template' in dependency might be stale 
+            // if we only depended on settings. But 'template' comes from useStore hook which updates.
+            // However, we want to save the *current* state.
+            useStore.getState().saveTemplate(template.id, template);
+        }, 1000);
+
+        return () => clearTimeout(timeoutId);
+    }, [template]);
 
 
     // Section definitions for the index
@@ -343,18 +396,46 @@ export function TemplateEditor() {
                             <div className="grid grid-cols-2 gap-10">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Family</label>
-                                    <select
-                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
-                                        value={settings.fontFamily}
-                                        onChange={(e) => updateSetting('fontFamily', e.target.value)}
-                                    >
-                                        <option value="Inter, sans-serif">Inter (Modern Sans)</option>
-                                        <option value="'Times New Roman', serif">Times New Roman (Academic)</option>
-                                        <option value="'Georgia', serif">Georgia (Classic Serif)</option>
-                                        <option value="'Outfit', sans-serif">Outfit (Geometric)</option>
-                                        <option value="monospace">JetBrains Mono (Code)</option>
-                                        <option value="system-ui, sans-serif">System Default</option>
-                                    </select>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between cursor-pointer">
+                                                <span style={{ fontFamily: settings.fontFamily }}>
+                                                    {allFontFamilies.find(f => f.value === settings.fontFamily)?.label || settings.fontFamily}
+                                                </span>
+                                                <ChevronDown size={16} className="text-muted-foreground" />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto no-scrollbar">
+                                            {['Sans Serif', 'Serif', 'Monospace', 'Custom'].map((category, index) => {
+                                                const categoryFonts = allFontFamilies.filter(f => f.category === category);
+                                                if (categoryFonts.length === 0) return null;
+                                                
+                                                return (
+                                                    <Fragment key={category}>
+                                                        <div className={cn(
+                                                            "px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-70",
+                                                            index > 0 && "mt-2 border-t border-border/50 pt-3"
+                                                        )}>
+                                                            {category}
+                                                        </div>
+                                                        {categoryFonts.map((font) => (
+                                                            <DropdownMenuItem
+                                                                key={font.value}
+                                                                className={cn(
+                                                                    "flex items-center gap-2 px-4 py-2.5 rounded-lg cursor-pointer transition-colors focus:bg-muted focus:text-foreground",
+                                                                    settings.fontFamily === font.value && "bg-muted text-foreground font-bold"
+                                                                )}
+                                                                style={{ fontFamily: font.value }}
+                                                                onSelect={() => updateSetting('fontFamily', font.value)}
+                                                            >
+                                                                {font.label}
+                                                            </DropdownMenuItem>
+                                                        ))}
+                                                    </Fragment>
+                                                );
+                                            })}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 </div>
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Base Font Size</label>

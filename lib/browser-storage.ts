@@ -1,10 +1,11 @@
 import { FileNode, Template } from './store';
 
 const DB_NAME = 'markdown-editor-db';
-const DB_VERSION = 3;
+const DB_VERSION = 10;
 const STORE_FILES = 'files';
 const STORE_TEMPLATES = 'templates';
 const STORE_IMAGES = 'images';
+const STORE_FONTS = 'fonts';
 
 interface FileEntry {
     path: string;
@@ -22,18 +23,44 @@ interface ImageEntry {
     createdAt: number;    // Timestamp when stored
 }
 
+export interface FontEntry {
+    id: string;           // Unique ID (family name usually)
+    family: string;       // Font family name
+    blob: Blob;           // The actual font file data
+    fileName: string;     // Original filename
+    format: string;       // e.g., 'truetype', 'opentype', 'woff', 'woff2'
+    createdAt: number;    // Timestamp when stored
+}
+
 class BrowserStorage {
     private db: IDBDatabase | null = null;
+    private initPromise: Promise<IDBDatabase> | null = null;
 
     private async initDB(): Promise<IDBDatabase> {
         if (this.db) return this.db;
+        if (this.initPromise) return this.initPromise;
 
-        return new Promise((resolve, reject) => {
+        this.initPromise = new Promise((resolve, reject) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-            request.onerror = () => reject(request.error);
+            request.onerror = () => {
+                this.initPromise = null;
+                reject(request.error);
+            };
+
+            request.onblocked = () => {
+                console.warn('Database upgrade blocked. Please close other tabs.');
+            };
+
             request.onsuccess = () => {
                 this.db = request.result;
+                
+                this.db.onversionchange = () => {
+                    this.db?.close();
+                    this.db = null;
+                    this.initPromise = null;
+                };
+
                 resolve(request.result);
             };
 
@@ -51,6 +78,11 @@ class BrowserStorage {
                 // Create images store for persistent image storage
                 if (!db.objectStoreNames.contains(STORE_IMAGES)) {
                     db.createObjectStore(STORE_IMAGES, { keyPath: 'id' });
+                }
+
+                // Create fonts store for persistent font storage
+                if (!db.objectStoreNames.contains(STORE_FONTS)) {
+                    db.createObjectStore(STORE_FONTS, { keyPath: 'id' });
                 }
                 
                 if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
@@ -85,6 +117,8 @@ class BrowserStorage {
                 }
             };
         });
+
+        return this.initPromise;
     }
 
     private async transaction<T>(
@@ -427,6 +461,61 @@ class BrowserStorage {
                 resolve(entries.map(({ blob, ...rest }) => rest));
             };
             request.onerror = () => reject(request.error);
+        });
+    }
+
+    // ==================== Font Storage Methods ====================
+
+    /**
+     * Store a font in IndexedDB
+     */
+    async storeFont(family: string, file: File): Promise<FontEntry> {
+        // Determine format from mime type or extension
+        let format = 'truetype';
+        if (file.name.endsWith('.woff2')) format = 'woff2';
+        else if (file.name.endsWith('.woff')) format = 'woff';
+        else if (file.name.endsWith('.otf')) format = 'opentype';
+
+        const id = family.toLowerCase().replace(/\s+/g, '-');
+        const entry: FontEntry = {
+            id,
+            family,
+            blob: file,
+            fileName: file.name,
+            format,
+            createdAt: Date.now(),
+        };
+
+        await this.transaction(STORE_FONTS, 'readwrite', store => {
+            store.put(entry);
+        });
+
+        return entry;
+    }
+
+    /**
+     * Retrieve all fonts from IndexedDB
+     */
+    async listFonts(): Promise<FontEntry[]> {
+        const db = await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_FONTS, 'readonly');
+            const store = tx.objectStore(STORE_FONTS);
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                resolve(request.result as FontEntry[]);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /**
+     * Delete a font from IndexedDB
+     */
+    async deleteFont(id: string): Promise<void> {
+        await this.transaction(STORE_FONTS, 'readwrite', store => {
+            store.delete(id);
         });
     }
 }
