@@ -6,7 +6,6 @@ import { useStore } from '@/lib/store';
 import { useMounted } from '@/hooks/use-mounted';
 
 import { EditorKit } from '@/components/plate-editor/editor-kit';
-import { SettingsDialog } from '@/components/plate-editor/settings-dialog';
 import { Editor, EditorContainer } from '@/components/plate-ui/editor';
 import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
@@ -95,8 +94,6 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
           )}
         </div>
       </div>
-
-      <SettingsDialog />
     </Plate>
   );
 }

@@ -97,6 +97,9 @@ interface AppState {
     currentView: 'file' | 'template';
     isSettingsOpen: boolean;
     editorViewMode: 'source' | 'editing' | 'viewing' | 'suggestion';
+    
+    // Export Settings
+    previewQuality: 'low' | 'medium' | 'high';
 
     // Templates State
     templates: Template[];
@@ -130,6 +133,7 @@ interface AppState {
     setSidebarView: (view: 'explorer' | 'templates') => void;
     setRightSidebarOpen: (isOpen: boolean) => void;
     setSettingsOpen: (isOpen: boolean) => void;
+    setPreviewQuality: (quality: 'low' | 'medium' | 'high') => void;
     
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -183,6 +187,7 @@ export const useStore = create<AppState>()(
                 editorViewMode: 'editing',
                 currentView: 'file',
                 isSettingsOpen: false,
+                previewQuality: 'medium',
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -410,6 +415,7 @@ export const useStore = create<AppState>()(
                 setSidebarView: (view) => set({ sidebarView: view }),
                 setRightSidebarOpen: (isOpen) => set({ rightSidebarExpanded: isOpen }),
                 setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+                setPreviewQuality: (quality) => set({ previewQuality: quality }),
                 addTemplate: (template) => set((state) => ({ templates: [...state.templates, template] })),
                 updateTemplate: (id, updates) => set((state) => ({
                     templates: state.templates.map((t) => (t.id === id ? { ...t, ...updates } : t))
@@ -450,6 +456,7 @@ export const useStore = create<AppState>()(
             partialize: (state) => ({
                 leftSidebarExpanded: state.leftSidebarExpanded,
                 rightSidebarExpanded: state.rightSidebarExpanded,
+                previewQuality: state.previewQuality,
                 // Do not persist openTabs or files content to avoid issues
             })
         }

@@ -15,7 +15,7 @@ const A4_HEIGHT_PX = 842; // 297mm at 72 DPI
 const DEBOUNCE_DELAY = 2000;
 
 export function PdfPreview() {
-    const { activeFileId, files, activeTemplateId, templates } = useStore();
+    const { activeFileId, files, activeTemplateId, templates, previewQuality } = useStore();
     const [mounted, setMounted] = useState(false);
     const [scale, setScale] = useState(0.35);
     const [pageImages, setPageImages] = useState<string[]>([]);
@@ -63,8 +63,8 @@ export function PdfPreview() {
     const currentHeight = isHorizontal ? A4_WIDTH_PX : A4_HEIGHT_PX;
 
     // Simple hash function for change detection
-    const getContentHash = useCallback((content: string, settings: any) => {
-        const str = content + JSON.stringify(settings || {});
+    const getContentHash = useCallback((content: string, settings: any, quality: string) => {
+        const str = content + JSON.stringify(settings || {}) + quality;
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
             const char = str.charCodeAt(i);
@@ -78,7 +78,7 @@ export function PdfPreview() {
     const fetchPreview = useCallback(async () => {
         if (!activeFile) return;
 
-        const currentHash = getContentHash(content, settings);
+        const currentHash = getContentHash(content, settings, previewQuality);
         
         // Skip if content hasn't changed
         if (currentHash === lastContentHashRef.current && pageImages.length > 0) {
@@ -119,6 +119,7 @@ export function PdfPreview() {
                     markdown: markdownWithBase64Images,
                     title: activeFile.name.replace(/\.[^/.]+$/, ""),
                     settings: settingsWithBase64,
+                    quality: previewQuality,
                 }),
             });
 
@@ -136,7 +137,7 @@ export function PdfPreview() {
         } finally {
             setIsLoading(false);
         }
-    }, [activeFile, content, settings, getContentHash, pageImages.length]);
+    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length]);
 
     // Debounced preview generation
     useEffect(() => {

@@ -79,9 +79,17 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
     return html;
 }
 
+// Quality settings for preview rendering
+const QUALITY_SETTINGS = {
+    low: { scale: 0.75, jpegQuality: 0.4 },
+    medium: { scale: 1.0, jpegQuality: 0.6 },
+    high: { scale: 1.5, jpegQuality: 0.85 },
+};
+
 export async function POST(req: Request) {
     try {
-        const { markdown, title, settings } = await req.json();
+        const { markdown, title, settings, quality = 'medium' } = await req.json();
+        const qualityConfig = QUALITY_SETTINGS[quality as keyof typeof QUALITY_SETTINGS] || QUALITY_SETTINGS.medium;
 
         // Convert markdown to HTML using marked
         let htmlContent = markedInstance.parse(markdown || '') as string;
@@ -165,7 +173,7 @@ export async function POST(req: Request) {
             try {
                 const pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
                 
-                // Use pdf.js with LOWER resolution and JPEG for speed
+                // Use pdf.js with configurable resolution based on quality setting
                 await pdfPage.setContent(`
                     <!DOCTYPE html>
                     <html>
@@ -176,14 +184,13 @@ export async function POST(req: Request) {
                     <body>
                         <canvas id="canvas"></canvas>
                         <script>
-                            window.renderPdfPages = async function(pdfData) {
+                            window.renderPdfPages = async function(pdfData, renderScale, jpegQuality) {
                                 const pdf = await pdfjsLib.getDocument({ data: atob(pdfData) }).promise;
                                 const images = [];
-                                const scale = 1.0; // Lower resolution for speed (was 2.0)
                                 
                                 for (let i = 1; i <= pdf.numPages; i++) {
                                     const page = await pdf.getPage(i);
-                                    const viewport = page.getViewport({ scale });
+                                    const viewport = page.getViewport({ scale: renderScale });
                                     
                                     const canvas = document.getElementById('canvas');
                                     canvas.width = viewport.width;
@@ -194,8 +201,7 @@ export async function POST(req: Request) {
                                     context.fillRect(0, 0, canvas.width, canvas.height);
                                     
                                     await page.render({ canvasContext: context, viewport }).promise;
-                                    // Use JPEG at 60% quality for smaller size and faster transfer
-                                    images.push(canvas.toDataURL('image/jpeg', 0.6));
+                                    images.push(canvas.toDataURL('image/jpeg', jpegQuality));
                                 }
                                 
                                 return images;
@@ -205,10 +211,10 @@ export async function POST(req: Request) {
                     </html>
                 `, { waitUntil: 'domcontentloaded' });
 
-                // Render PDF pages to images
-                const images = await pdfPage.evaluate(async (pdfBase64: string) => {
-                    return await (window as any).renderPdfPages(pdfBase64);
-                }, pdfBase64);
+                // Render PDF pages to images with quality settings
+                const images = await pdfPage.evaluate(async (pdfBase64: string, scale: number, jpegQuality: number) => {
+                    return await (window as any).renderPdfPages(pdfBase64, scale, jpegQuality);
+                }, pdfBase64, qualityConfig.scale, qualityConfig.jpegQuality);
 
                 return NextResponse.json({ 
                     pages: images,

@@ -32,6 +32,8 @@ export function SettingsDialog() {
   const { 
     isSettingsOpen: open, 
     setSettingsOpen: setOpen,
+    previewQuality,
+    setPreviewQuality,
   } = useStore();
 
   return (
@@ -63,6 +65,12 @@ export function SettingsDialog() {
               value="general"
             >
               General
+            </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="export"
+            >
+              Export
             </TabsTrigger>
           </TabsList>
 
@@ -96,6 +104,46 @@ export function SettingsDialog() {
                       <Monitor className="size-6" />
                       <span className="text-xs">System</span>
                     </Button>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent className="mt-0 outline-none" value="export">
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm">Preview</h4>
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">Preview quality</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={previewQuality === 'low' ? 'secondary' : 'outline'}
+                        onClick={() => setPreviewQuality('low')}
+                        className="flex-1"
+                      >
+                        Low
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={previewQuality === 'medium' ? 'secondary' : 'outline'}
+                        onClick={() => setPreviewQuality('medium')}
+                        className="flex-1"
+                      >
+                        Medium
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={previewQuality === 'high' ? 'secondary' : 'outline'}
+                        onClick={() => setPreviewQuality('high')}
+                        className="flex-1"
+                      >
+                        High
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Lower quality renders faster. Final export always uses full quality.
+                    </p>
                   </div>
                 </div>
               </div>
