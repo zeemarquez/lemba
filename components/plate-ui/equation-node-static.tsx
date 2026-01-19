@@ -58,7 +58,7 @@ export function InlineEquationElementStatic(
   const html = getEquationHtml({
     element: props.element,
     options: {
-      displayMode: true,
+      displayMode: false,
       errorColor: '#cc0000',
       fleqn: false,
       leqno: false,

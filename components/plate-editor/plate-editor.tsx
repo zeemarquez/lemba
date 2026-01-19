@@ -11,7 +11,7 @@ import { Editor, EditorContainer } from '@/components/plate-ui/editor';
 import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
 import { SourceEditor } from '@/components/editor/SourceEditor';
-import { normalizeEquationDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
+import { preprocessMathDelimiters, postprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 
 interface PlateEditorProps {
   content: string;
@@ -27,7 +27,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   const initialValue = useMemo(() => {
     const tempEditor = createPlateEditor({ plugins: EditorKit });
-    return tempEditor.api.markdown.deserialize(content);
+    // Preprocess to convert single-line $$..$$ to multi-line for correct parsing
+    const preprocessed = preprocessMathDelimiters(content);
+    return tempEditor.api.markdown.deserialize(preprocessed);
   }, []); // Only once
 
   const editor = usePlateEditor({
@@ -37,11 +39,16 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   // Sync content from Source view back to Plate if content changed externally or in source mode
   useEffect(() => {
+    // Optimization: Skip deserialization when in source mode to prevent lag.
+    if (editorViewMode === 'source') return;
+
     if (!isUpdatingFromPlate.current) {
-      const newValue = editor.api.markdown.deserialize(content);
+      // Preprocess to convert single-line $$..$$ to multi-line for correct parsing
+      const preprocessed = preprocessMathDelimiters(content);
+      const newValue = editor.api.markdown.deserialize(preprocessed);
       editor.tf.setValue(newValue);
     }
-  }, [content, editor]);
+  }, [content, editor, editorViewMode]);
 
   if (!mounted) {
     return (
@@ -54,9 +61,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       editor={editor}
       onChange={({ value }) => {
         isUpdatingFromPlate.current = true;
-        // Serialize and normalize equation delimiters (convert $ to $$)
+        // Serialize and postprocess to normalize block equation format
         const rawMd = editor.api.markdown.serialize({ value });
-        const md = normalizeEquationDelimiters(rawMd);
+        const md = postprocessMathDelimiters(rawMd);
         if (md !== content) {
           onChange(md);
         }

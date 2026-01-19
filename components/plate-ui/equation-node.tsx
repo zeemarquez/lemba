@@ -111,7 +111,7 @@ export function InlineEquationElement(
     element,
     katexRef,
     options: {
-      displayMode: true,
+      displayMode: false,
       errorColor: '#cc0000',
       fleqn: false,
       leqno: false,
