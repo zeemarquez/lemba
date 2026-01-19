@@ -177,6 +177,9 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       return `<a href="${escapeHtml(href)}">${children}</a>`;
     case 'hr':
       return '<hr>';
+    case 'page_break':
+      // Manual page break - use CSS page-break-after for print/PDF
+      return '<div class="manual-page-break" style="page-break-after: always; break-after: page;"></div>';
     case 'placeholder':
       const pType = element.placeholderType as string;
       const pFormat = element.format as string;

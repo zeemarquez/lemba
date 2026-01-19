@@ -2,6 +2,7 @@ import { MarkdownPlugin, remarkMention } from '@platejs/markdown';
 import { KEYS, NodeApi, getPluginType } from 'platejs';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { ELEMENT_PAGE_BREAK } from './page-break-plugin';
 
 /**
  * Custom math rules to ensure:
@@ -32,6 +33,72 @@ const mathRules = {
       type: 'inlineMath',
       value: node.texExpression || '',
     }),
+  },
+};
+
+/**
+ * Page break rules for markdown serialization/deserialization
+ * Uses HTML comment format: <!-- pagebreak -->
+ */
+const pageBreakRules = {
+  [ELEMENT_PAGE_BREAK]: {
+    serialize: () => ({
+      type: 'html',
+      value: '<!-- pagebreak -->',
+    }),
+  },
+  html: {
+    deserialize: (mdastNode: any, _deco: any, options: any) => {
+      const value = mdastNode.value?.trim();
+      
+      // Check for page break comment
+      if (value === '<!-- pagebreak -->') {
+        return {
+          type: getPluginType(options.editor, ELEMENT_PAGE_BREAK),
+          children: [{ text: '' }],
+        };
+      }
+      
+      // Handle image HTML (original html deserialize logic will be merged)
+      const imgMatch = value?.match(/<img[^>]*src="([^"]*)"[^>]*>/);
+      
+      if (imgMatch) {
+        const url = imgMatch[1];
+        const widthMatch = value.match(/width\s*:\s*(\d+)px/);
+        const heightMatch = value.match(/height\s*:\s*(\d+)px/);
+        const altMatch = value.match(/alt\s*=\s*"([^"]*)"/i);
+        const idMatch = value.match(/id\s*=\s*"([^"]*)"/i);
+        const captionMatch = value.match(/figcaption\s*=\s*"([^"]*)"/i);
+        // Try data-align first, then fall back to detecting margin pattern
+        const dataAlignMatch = value.match(/data-align\s*=\s*"(left|center|right)"/i);
+        let align: string | undefined;
+        
+        if (dataAlignMatch) {
+          align = dataAlignMatch[1];
+        } else if (value.includes('margin-left: auto') && value.includes('margin-right: auto')) {
+          align = 'center';
+        } else if (value.includes('margin-left: auto') && value.includes('margin-right: 0')) {
+          align = 'right';
+        } else if (value.includes('margin-left: 0')) {
+          align = 'left';
+        }
+        
+        return {
+          type: getPluginType(options.editor, KEYS.img),
+          url,
+          width: widthMatch ? parseInt(widthMatch[1]) : undefined,
+          height: heightMatch ? parseInt(heightMatch[1]) : undefined,
+          alt: altMatch ? altMatch[1] : undefined,
+          id: idMatch ? idMatch[1] : undefined,
+          align,
+          caption: captionMatch ? [{ text: captionMatch[1] }] : undefined,
+          children: [{ text: '' }],
+        };
+      }
+      
+      // Return as text for other HTML
+      return { text: mdastNode.value };
+    },
   },
 };
 
@@ -89,47 +156,7 @@ const imageRules = {
       children: [{ text: '' }],
     }),
   },
-  html: {
-    deserialize: (mdastNode: any, _deco: any, options: any) => {
-      const value = mdastNode.value;
-      const imgMatch = value.match(/<img[^>]*src="([^"]*)"[^>]*>/);
-      
-      if (imgMatch) {
-        const url = imgMatch[1];
-        const widthMatch = value.match(/width\s*:\s*(\d+)px/);
-        const heightMatch = value.match(/height\s*:\s*(\d+)px/);
-        const altMatch = value.match(/alt\s*=\s*"([^"]*)"/i);
-        const idMatch = value.match(/id\s*=\s*"([^"]*)"/i);
-        const captionMatch = value.match(/figcaption\s*=\s*"([^"]*)"/i);
-        // Try data-align first, then fall back to detecting margin pattern
-        const dataAlignMatch = value.match(/data-align\s*=\s*"(left|center|right)"/i);
-        let align: string | undefined;
-        
-        if (dataAlignMatch) {
-          align = dataAlignMatch[1];
-        } else if (value.includes('margin-left: auto') && value.includes('margin-right: auto')) {
-          align = 'center';
-        } else if (value.includes('margin-left: auto') && value.includes('margin-right: 0')) {
-          align = 'right';
-        } else if (value.includes('margin-left: 0')) {
-          align = 'left';
-        }
-        
-        return {
-          type: getPluginType(options.editor, KEYS.img),
-          url,
-          width: widthMatch ? parseInt(widthMatch[1]) : undefined,
-          height: heightMatch ? parseInt(heightMatch[1]) : undefined,
-          alt: altMatch ? altMatch[1] : undefined,
-          id: idMatch ? idMatch[1] : undefined,
-          align,
-          caption: captionMatch ? [{ text: captionMatch[1] }] : undefined,
-          children: [{ text: '' }],
-        };
-      }
-      return { text: mdastNode.value };
-    },
-  },
+  // html deserialize is handled in pageBreakRules to handle both page breaks and images
 };
 
 export const MarkdownKit = [
@@ -137,7 +164,7 @@ export const MarkdownKit = [
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention],
-      rules: { ...mathRules, ...imageRules },
+      rules: { ...mathRules, ...imageRules, ...pageBreakRules },
     },
   }),
 ];

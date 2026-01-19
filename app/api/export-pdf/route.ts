@@ -60,9 +60,11 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
 // Shared function to generate PDF-specific CSS from settings
 // This is the single source of truth for PDF styling
 export function generatePdfCss(settings: any): string {
-    const margins = settings?.margins || { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' };
     const headerMargins = settings?.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
     const footerMargins = settings?.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
+    
+    // Note: Page margins are handled by Puppeteer's margin option, not CSS
+    // This ensures consistent margins on ALL pages
     
     return `
         *, *::before, *::after {
@@ -72,7 +74,6 @@ export function generatePdfCss(settings: any): string {
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
         }
         body {
             font-family: ${settings?.fontFamily || "'Inter', sans-serif"};
@@ -82,27 +83,14 @@ export function generatePdfCss(settings: any): string {
             max-width: 100%;
             background-color: ${settings?.backgroundColor || '#ffffff'};
         }
-        .page-container {
-            width: 100%;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding-top: ${margins.top};
-            padding-right: ${margins.right};
-            padding-bottom: ${margins.bottom};
-            padding-left: ${margins.left};
-            box-sizing: border-box;
-        }
         .prose {
             font-family: ${settings?.fontFamily || "'Inter', sans-serif"};
             font-size: ${settings?.fontSize || '16px'};
             color: ${settings?.textColor || '#333'};
             max-width: 100%;
-            flex: 1;
             line-height: 1.6;
         }
         .page-header, .page-footer {
-            flex-shrink: 0;
             width: 100%;
         }
         .page-header {
@@ -220,6 +208,14 @@ export function generatePdfCss(settings: any): string {
             border-top: 1px solid #ddd;
             margin: 2em 0;
         }
+        /* Manual page break styling */
+        .manual-page-break {
+            page-break-after: always;
+            break-after: page;
+            height: 0;
+            margin: 0;
+            padding: 0;
+        }
         ${settings?.watermark ? `
         body::before {
             content: '${settings.watermark}';
@@ -247,6 +243,11 @@ export async function POST(req: Request) {
         let htmlContent = markedInstance.parse(markdown || '') as string;
         // Process image captions
         htmlContent = processHtmlImageCaptions(htmlContent);
+        // Process page break comments - convert <!-- pagebreak --> to proper page break div
+        htmlContent = htmlContent.replace(
+            /<!--\s*pagebreak\s*-->/gi,
+            '<div class="manual-page-break"></div>'
+        );
 
         // Convert header/footer content to HTML (supports JSON and markdown)
         const headerContent = settings?.header?.enabled && settings?.header?.content
@@ -279,10 +280,13 @@ export async function POST(req: Request) {
         const offset = headerMatch ? parseInt(headerMatch[1]) : (footerMatch ? parseInt(footerMatch[1]) : 0);
         
         if (offset > 0) {
-            pdfCss += `\n.page-container { counter-reset: page ${offset}; }`;
+            pdfCss += `\nbody { counter-reset: page ${offset}; }`;
         }
 
-        // Build the full HTML document
+        // Get margins from settings
+        const margins = settings?.margins || { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' };
+
+        // Build the full HTML document - simpler structure since margins are handled by Puppeteer
         const fullHtml = `
             <!DOCTYPE html>
             <html>
@@ -298,13 +302,11 @@ export async function POST(req: Request) {
                 </style>
             </head>
             <body>
-                <div class="page-container">
-                    ${headerHtml}
-                    <div class="prose">
-                        ${htmlContent}
-                    </div>
-                    ${footerHtml}
+                ${headerHtml}
+                <div class="prose">
+                    ${htmlContent}
                 </div>
+                ${footerHtml}
             </body>
             </html>
         `;
@@ -320,15 +322,15 @@ export async function POST(req: Request) {
         // Set the HTML content
         await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
 
-        // Generate PDF with zero margins (margins are handled via CSS padding)
+        // Generate PDF with margins from settings - this ensures consistent margins on ALL pages
         const pdfBuffer = await page.pdf({
             format: 'A4',
             landscape: settings?.pageLayout === 'horizontal',
             margin: {
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0,
+                top: margins.top,
+                right: margins.right,
+                bottom: margins.bottom,
+                left: margins.left,
             },
             printBackground: true,
         });
