@@ -76,7 +76,7 @@ export function SettingsDialog() {
           <Settings className="size-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden gap-0 flex flex-col min-h-[400px]">
+      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden gap-0 flex flex-col min-h-[600px]">
         <DialogHeader className="p-6 pb-2 border-b">
           <DialogTitle className="text-xl">Settings</DialogTitle>
           <DialogDescription>
@@ -84,8 +84,8 @@ export function SettingsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs className="flex-row gap-0 flex-1" defaultValue="general">
-          <TabsList className="flex h-full w-48 flex-col items-stretch justify-start rounded-none border-r bg-muted/20 p-2 gap-1">
+        <Tabs className="flex-row gap-0 flex-1 items-stretch" defaultValue="general">
+          <TabsList className="flex h-auto w-48 flex-col items-stretch justify-start rounded-none border-r bg-muted/20 p-2 gap-1">
             <TabsTrigger
               className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
               value="general"
@@ -187,12 +187,6 @@ export function SettingsDialog() {
             </TabsContent>
           </div>
         </Tabs>
-
-        <div className="p-4 border-t bg-muted/5">
-          <p className="text-muted-foreground text-[10px] text-center uppercase tracking-wider font-medium">
-            Settings are saved for the current session
-          </p>
-        </div>
       </DialogContent>
     </Dialog>
   );
