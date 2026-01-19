@@ -38,6 +38,10 @@ export function SettingsDialog() {
     setSettingsOpen: setOpen,
     previewQuality,
     setPreviewQuality,
+    uiIconSize,
+    setUiIconSize,
+    uiFontSize,
+    setUiFontSize,
     customFonts,
     addFont,
     deleteFont,
@@ -141,6 +145,66 @@ export function SettingsDialog() {
                       <Monitor className="size-6" />
                       <span className="text-xs">System</span>
                     </Button>
+                  </div>
+
+                  <div className="space-y-3 pt-4">
+                    <p className="text-sm text-muted-foreground">Icon Size</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={uiIconSize === 'small' ? 'secondary' : 'outline'}
+                        onClick={() => setUiIconSize('small')}
+                        className="flex-1"
+                      >
+                        Small
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={uiIconSize === 'normal' ? 'secondary' : 'outline'}
+                        onClick={() => setUiIconSize('normal')}
+                        className="flex-1"
+                      >
+                        Normal
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={uiIconSize === 'big' ? 'secondary' : 'outline'}
+                        onClick={() => setUiIconSize('big')}
+                        className="flex-1"
+                      >
+                        Big
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-4">
+                    <p className="text-sm text-muted-foreground">Font Size</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={uiFontSize === 'small' ? 'secondary' : 'outline'}
+                        onClick={() => setUiFontSize('small')}
+                        className="flex-1"
+                      >
+                        Small
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={uiFontSize === 'normal' ? 'secondary' : 'outline'}
+                        onClick={() => setUiFontSize('normal')}
+                        className="flex-1"
+                      >
+                        Normal
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={uiFontSize === 'big' ? 'secondary' : 'outline'}
+                        onClick={() => setUiFontSize('big')}
+                        className="flex-1"
+                      >
+                        Big
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

@@ -82,7 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     {/* Main Content */}
                     <ResizablePanel id="editor-panel" defaultSize={50} className="flex flex-col h-full bg-background min-w-0 min-h-0">
                         {/* Tab Bar Container */}
-                        <div className="flex items-end bg-muted/20 h-11 overflow-x-auto overflow-y-hidden no-scrollbar scroll-smooth shrink-0 relative">
+                        <div className="flex items-end bg-muted/20 h-11 overflow-x-auto overflow-y-hidden no-scrollbar scroll-smooth shrink-0 relative app-chrome">
                             {/* Prefix line (before first tab) */}
                             <div className="w-2 h-full border-b border-border shrink-0" />
                             {openTabs.map(tab => {

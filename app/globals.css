@@ -49,6 +49,8 @@
 
 :root {
   --radius: 0.625rem;
+  --ui-icon-size: 1rem;
+  --ui-font-size: 0.875rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -132,4 +134,22 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+/* UI Size Classes - applied to body, affects .app-chrome elements */
+.ui-icon-small { --ui-icon-scale: 0.85; }
+.ui-icon-normal { --ui-icon-scale: 1; }
+.ui-icon-big { --ui-icon-scale: 1.2; }
+
+.ui-font-small { --ui-font-scale: 0.9; }
+.ui-font-normal { --ui-font-scale: 1; }
+.ui-font-big { --ui-font-scale: 1.15; }
+
+/* App chrome: sidebars, tabs, template editor panels - NOT the document editor */
+.app-chrome {
+  font-size: calc(1rem * var(--ui-font-scale, 1));
+}
+
+.app-chrome svg {
+  transform: scale(var(--ui-icon-scale, 1));
 }

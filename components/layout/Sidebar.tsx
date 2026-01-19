@@ -195,7 +195,7 @@ export function Sidebar() {
 
     if (!leftSidebarExpanded) {
         return (
-            <div className="h-full flex flex-col items-center py-2 bg-muted/30 border-r box-border overflow-hidden">
+            <div className="h-full flex flex-col items-center py-2 bg-muted/30 border-r box-border overflow-hidden app-chrome">
                 <Button
                     variant="ghost"
                     size="icon"
@@ -223,7 +223,7 @@ export function Sidebar() {
 
     return (
         <>
-            <div className="h-full flex flex-col bg-muted/30 border-r w-full overflow-hidden">
+            <div className="h-full flex flex-col bg-muted/30 border-r w-full overflow-hidden app-chrome">
                 {/* Sidebar Header */}
                 <div className="p-2 flex items-center justify-between shrink-0">
                     <Button

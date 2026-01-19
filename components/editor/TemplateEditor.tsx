@@ -378,7 +378,7 @@ export function TemplateEditor() {
     }, []);
 
     return (
-        <div className="flex-1 flex bg-background min-h-0">
+        <div className="flex-1 flex bg-background min-h-0 app-chrome">
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-16 w-full space-y-16 pb-24">
