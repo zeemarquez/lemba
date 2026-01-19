@@ -1,10 +1,11 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { ZoomIn, ZoomOut, MoveHorizontal, MoveVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { serializeNodesToHtml, processHtmlImageCaptions } from "@/lib/plate/serialize-html";
+import { resolveIndexedDbImagesInHtml } from "@/hooks/use-indexed-db-image";
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
@@ -368,8 +369,18 @@ export function PdfPreview() {
     const content = activeFile?.content || '';
     const settings = activeTemplate?.settings;
 
-    // Convert markdown to HTML
-    const htmlContent = useMemo(() => markdownToHtml(content), [content]);
+    // Convert markdown to HTML and resolve IndexedDB image URLs
+    const [htmlContent, setHtmlContent] = useState('');
+    
+    useEffect(() => {
+        const convertMarkdown = async () => {
+            const rawHtml = markdownToHtml(content);
+            // Resolve any IndexedDB image URLs to blob URLs for display
+            const resolvedHtml = await resolveIndexedDbImagesInHtml(rawHtml);
+            setHtmlContent(resolvedHtml);
+        };
+        convertMarkdown();
+    }, [content]);
 
     const isHorizontal = settings?.pageLayout === 'horizontal';
     const currentWidth = isHorizontal ? A4_HEIGHT_PX : A4_WIDTH_PX;

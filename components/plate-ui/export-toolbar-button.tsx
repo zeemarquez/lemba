@@ -9,6 +9,7 @@ import { useEditorRef } from 'platejs/react';
 import { serializeHtml } from 'platejs/static';
 import * as React from 'react';
 import { BaseEditorKit } from '@/components/plate-editor/editor-base-kit';
+import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,11 +74,14 @@ export function ExportToolbarButton(props: DropdownMenuProps) {
   const exportToPdf = async () => {
     const md = editor.getApi(MarkdownPlugin).markdown.serialize();
     try {
+      // Convert any IndexedDB image URLs to base64 before sending to server
+      const mdWithBase64Images = await convertIndexedDbImagesToBase64(md);
+      
       const response = await fetch('/api/export-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          markdown: md,
+          markdown: mdWithBase64Images,
         }),
       });
 

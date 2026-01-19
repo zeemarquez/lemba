@@ -1,15 +1,25 @@
 import { FileNode, Template } from './store';
 
 const DB_NAME = 'markdown-editor-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_FILES = 'files';
 const STORE_TEMPLATES = 'templates';
+const STORE_IMAGES = 'images';
 
 interface FileEntry {
     path: string;
     content: string;
     type: 'file' | 'folder';
     updatedAt: number;
+}
+
+interface ImageEntry {
+    id: string;           // Unique ID for the image
+    blob: Blob;           // The actual image data
+    name: string;         // Original filename
+    type: string;         // MIME type (e.g., 'image/png')
+    size: number;         // File size in bytes
+    createdAt: number;    // Timestamp when stored
 }
 
 class BrowserStorage {
@@ -36,6 +46,11 @@ class BrowserStorage {
                     filesStore = db.createObjectStore(STORE_FILES, { keyPath: 'path' });
                 } else {
                     filesStore = tx!.objectStore(STORE_FILES);
+                }
+                
+                // Create images store for persistent image storage
+                if (!db.objectStoreNames.contains(STORE_IMAGES)) {
+                    db.createObjectStore(STORE_IMAGES, { keyPath: 'id' });
                 }
                 
                 if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
@@ -325,6 +340,94 @@ class BrowserStorage {
 
     async deleteTemplate(path: string): Promise<void> {
         await this.delete(path, 'file');
+    }
+
+    // ==================== Image Storage Methods ====================
+
+    /**
+     * Generate a unique ID for an image
+     */
+    generateImageId(): string {
+        return `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+
+    /**
+     * Store an image in IndexedDB
+     * @param file The image file to store
+     * @returns The stored image entry with its ID
+     */
+    async storeImage(file: File): Promise<ImageEntry> {
+        const id = this.generateImageId();
+        const entry: ImageEntry = {
+            id,
+            blob: file,
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            createdAt: Date.now(),
+        };
+
+        await this.transaction(STORE_IMAGES, 'readwrite', store => {
+            store.put(entry);
+        });
+
+        return entry;
+    }
+
+    /**
+     * Retrieve an image from IndexedDB by ID
+     * @param id The image ID
+     * @returns The image entry or null if not found
+     */
+    async getImage(id: string): Promise<ImageEntry | null> {
+        try {
+            const entry = await this.transaction<ImageEntry>(STORE_IMAGES, 'readonly', store => store.get(id));
+            return entry || null;
+        } catch (e) {
+            console.error('Error retrieving image:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Get a blob URL for an image stored in IndexedDB
+     * @param id The image ID
+     * @returns A blob URL that can be used in img src, or null if not found
+     */
+    async getImageUrl(id: string): Promise<string | null> {
+        const entry = await this.getImage(id);
+        if (!entry) return null;
+        return URL.createObjectURL(entry.blob);
+    }
+
+    /**
+     * Delete an image from IndexedDB
+     * @param id The image ID
+     */
+    async deleteImage(id: string): Promise<void> {
+        await this.transaction(STORE_IMAGES, 'readwrite', store => {
+            store.delete(id);
+        });
+    }
+
+    /**
+     * List all stored images
+     * @returns Array of image entries (without blob data for efficiency)
+     */
+    async listImages(): Promise<Omit<ImageEntry, 'blob'>[]> {
+        const db = await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_IMAGES, 'readonly');
+            const store = tx.objectStore(STORE_IMAGES);
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                const entries = request.result as ImageEntry[];
+                // Return entries without blob for efficiency when just listing
+                resolve(entries.map(({ blob, ...rest }) => rest));
+            };
+            request.onerror = () => reject(request.error);
+        });
     }
 }
 

@@ -7,6 +7,7 @@ import type {
 } from 'uploadthing/types';
 import { z } from 'zod';
 import type { OurFileRouter } from '@/lib/plate/uploadthing';
+import { browserStorage } from '@/lib/browser-storage';
 
 export type UploadedFile<T = unknown> = ClientUploadedFileData<T>;
 
@@ -59,33 +60,43 @@ export function useUploadFile({
 
       onUploadError?.(error);
 
-      // Mock upload for unauthenticated users
-      // toast.info('User not logged in. Mocking upload process.');
-      const mockUploadedFile = {
-        key: 'mock-key-0',
-        appUrl: `https://mock-app-url.com/${file.name}`,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: URL.createObjectURL(file),
-      } as UploadedFile;
-
-      // Simulate upload progress
+      // Store image locally in IndexedDB for persistence
+      // This ensures images survive page refreshes and browser restarts
       let progress = 0;
 
       const simulateProgress = async () => {
         while (progress < 100) {
           await new Promise((resolve) => setTimeout(resolve, 50));
-          progress += 2;
+          progress += 4; // Faster progress since local storage is quick
           setProgress(Math.min(progress, 100));
         }
       };
 
-      await simulateProgress();
+      // Start progress simulation
+      const progressPromise = simulateProgress();
 
-      setUploadedFile(mockUploadedFile);
+      // Store image in IndexedDB
+      const imageEntry = await browserStorage.storeImage(file);
+      
+      // Wait for progress to complete for smooth UX
+      await progressPromise;
 
-      return mockUploadedFile;
+      // Create URL using our custom protocol that will be resolved later
+      // Format: indexeddb://images/{id}
+      const persistentUrl = `indexeddb://images/${imageEntry.id}`;
+
+      const localUploadedFile = {
+        key: imageEntry.id,
+        appUrl: persistentUrl,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        url: persistentUrl,
+      } as UploadedFile;
+
+      setUploadedFile(localUploadedFile);
+
+      return localUploadedFile;
     } finally {
       setProgress(0);
       setIsUploading(false);

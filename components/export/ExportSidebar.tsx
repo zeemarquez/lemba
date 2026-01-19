@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, ChevronDown } from "lucide-react";
 import { PdfPreview } from "@/components/export/PdfPreview";
+import { convertIndexedDbImagesToBase64 } from "@/hooks/use-indexed-db-image";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,13 +24,16 @@ export function ExportSidebar() {
         if (!activeFile) return;
 
         try {
+            // Convert any IndexedDB image URLs to base64 before sending to server
+            const markdownWithBase64Images = await convertIndexedDbImagesToBase64(activeFile.content);
+            
             const response = await fetch('/api/export-pdf', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    markdown: activeFile.content,
+                    markdown: markdownWithBase64Images,
                     title: activeFile.name.replace(/\.[^/.]+$/, ""),
                     css: activeTemplate?.css || '',
                     settings: activeTemplate?.settings,
