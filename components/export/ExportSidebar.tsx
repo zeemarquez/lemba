@@ -186,7 +186,7 @@ export function ExportSidebar() {
 
     if (!rightSidebarExpanded) {
         return (
-            <div className="h-full flex flex-col items-center py-2 bg-muted/30 border-l box-border overflow-hidden app-chrome">
+            <div className="h-full flex flex-col items-center py-2 bg-muted/30 box-border overflow-hidden app-chrome">
                 <Button
                     variant="ghost"
                     size="icon"
@@ -201,7 +201,7 @@ export function ExportSidebar() {
     }
 
     return (
-        <div className="h-full flex flex-col bg-muted/30 border-l w-full overflow-hidden app-chrome">
+        <div className="h-full flex flex-col bg-muted/30 w-full overflow-hidden app-chrome">
             {/* Export Header */}
             <div className="p-2 flex items-center justify-between shrink-0">
                 <span className="font-semibold text-sm px-2">Export</span>

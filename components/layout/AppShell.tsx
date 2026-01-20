@@ -110,18 +110,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                         {/* Inverted Radius Shoulders (Seamless Junction) */}
                                         {isActive && (
                                             <>
-                                                {/* Left side scoop SVG */}
-                                                <div className="absolute -left-[10px] bottom-0 w-[10px] h-[10px] pointer-events-none z-20">
-                                                    <svg className="w-full h-full text-background fill-current overflow-visible" viewBox="0 0 10 10">
-                                                        <path d="M 0 10 L 10 10 L 10 0 Q 10 10 0 10 Z" />
-                                                        <path d="M 0 10 Q 10 10 10 0" fill="none" stroke="currentColor" strokeWidth="1" className="text-border" />
+                                                {/* Left scoop */}
+                                                <div className="absolute -left-[10px] bottom-[-0.5px] w-[10px] h-[11px] pointer-events-none z-20">
+                                                    <svg className="w-full h-full" viewBox="0 0 10 11" preserveAspectRatio="none">
+                                                        <path d="M 0 11 L 10 11 L 10 0 Q 10 10 0 10 L 0 11" className="fill-background" />
+                                                        <path d="M 10 0 Q 10 10 0 10" fill="none" stroke="currentColor" strokeWidth="1" className="text-border" />
                                                     </svg>
                                                 </div>
 
-                                                {/* Right side scoop SVG */}
-                                                <div className="absolute -right-[10px] bottom-0 w-[10px] h-[10px] pointer-events-none z-20">
-                                                    <svg className="w-full h-full text-background fill-current overflow-visible" viewBox="0 0 10 10">
-                                                        <path d="M 0 0 Q 0 10 10 10 L 0 10 Z" />
+                                                {/* Right scoop */}
+                                                <div className="absolute -right-[10px] bottom-[-0.5px] w-[10px] h-[11px] pointer-events-none z-20">
+                                                    <svg className="w-full h-full" viewBox="0 0 10 11" preserveAspectRatio="none">
+                                                        <path d="M 10 11 L 0 11 L 0 0 Q 0 10 10 10 L 10 11" className="fill-background" />
                                                         <path d="M 0 0 Q 0 10 10 10" fill="none" stroke="currentColor" strokeWidth="1" className="text-border" />
                                                     </svg>
                                                 </div>

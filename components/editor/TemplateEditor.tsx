@@ -381,7 +381,7 @@ export function TemplateEditor() {
         <div className="flex-1 flex bg-background min-h-0 app-chrome">
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto no-scrollbar">
-                <div className="p-16 w-full space-y-16 pb-24">
+                <div className="p-8 w-full space-y-12 pb-24">
 
                     {/* Typography Section */}
                     <section id="section-typography" className="space-y-8 scroll-mt-16">
@@ -392,8 +392,8 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Typography</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
-                            <div className="grid grid-cols-2 gap-10">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Family</label>
                                     <DropdownMenu>
@@ -483,7 +483,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Headings</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-10 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
                             {/* Heading Level Selector */}
                             <div className="flex items-center gap-4 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
                                 {(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const).map((level) => (
@@ -502,7 +502,7 @@ export function TemplateEditor() {
                                 ))}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-10">
+                            <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Size</label>
                                     <input
@@ -536,7 +536,7 @@ export function TemplateEditor() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-10">
+                            <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Alignment</label>
                                     <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
@@ -647,7 +647,7 @@ export function TemplateEditor() {
                                 </div>
 
                                 {(settings as any)[activeHeadingLevel].numbering?.enabled && (
-                                    <div className="grid grid-cols-2 gap-10 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <div className="grid grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
                                         <div className="space-y-3">
                                             <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
                                             <select
@@ -706,7 +706,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Page settings</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-12 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
                             {/* Layout Selection */}
                             <div className="space-y-5">
                                 <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Orientation</label>
@@ -765,7 +765,7 @@ export function TemplateEditor() {
                             </div>
 
                             {/* Background & Watermark */}
-                            <div className="grid grid-cols-2 gap-10 pt-4 border-t border-border">
+                            <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
                                     <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
@@ -822,7 +822,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Code Blocks</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             <div className="space-y-3">
                                 <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
                                 <select
@@ -853,7 +853,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Tables</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             {/* Prevent Page Break Toggle */}
                             <div className="flex items-center justify-between">
                                 <div className="space-y-1">
@@ -887,7 +887,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Index</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             {/* Enable Toggle */}
                             <div className="flex items-center justify-between">
                                 <div className="space-y-1">
@@ -1029,7 +1029,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Front Page</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             {/* Enable Toggle */}
                             <div className="flex items-center gap-6">
                                 <label className="text-base font-semibold text-foreground">Enable front page</label>
@@ -1086,7 +1086,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Header</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             {/* Enable Toggle */}
                             <div className="flex items-center gap-6">
                                 <label className="text-base font-semibold text-foreground">Enable header</label>
@@ -1166,7 +1166,7 @@ export function TemplateEditor() {
                             <h2 className="text-xl font-bold text-foreground tracking-tight">Footer</h2>
                         </div>
 
-                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
                             {/* Enable Toggle */}
                             <div className="flex items-center gap-6">
                                 <label className="text-base font-semibold text-foreground">Enable footer</label>
