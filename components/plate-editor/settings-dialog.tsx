@@ -3,10 +3,10 @@
 import {
   Monitor,
   Moon,
-  Settings,
   Sun,
   Upload,
   Trash2,
+  ChevronDown,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
@@ -16,10 +16,8 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/plate-ui/dialog';
 import {
   Tabs,
@@ -28,8 +26,13 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { Input } from '@/components/plate-ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/plate-ui/dropdown-menu';
 import { useStore } from '@/lib/store';
-import { cn } from '@/lib/utils';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
@@ -42,9 +45,15 @@ export function SettingsDialog() {
     setUiIconSize,
     uiFontSize,
     setUiFontSize,
+    showOutline,
+    setShowOutline,
     customFonts,
     addFont,
     deleteFont,
+    sourceEditorFontFamily,
+    sourceEditorFontSize,
+    setSourceEditorFontFamily,
+    setSourceEditorFontSize,
   } = useStore();
 
   const [fontFamilyName, setFontFamilyName] = React.useState('');
@@ -79,18 +88,6 @@ export function SettingsDialog() {
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger asChild>
-        <Button
-          className={cn(
-            'group fixed right-4 bottom-4 z-50 size-10 overflow-hidden',
-            'rounded-full shadow-md hover:shadow-lg'
-          )}
-          size="icon"
-          variant="default"
-        >
-          <Settings className="size-4" />
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-5xl p-0 overflow-hidden gap-0 flex flex-col min-h-[600px]">
         <DialogHeader className="p-6 pb-2 border-b">
           <DialogTitle className="text-xl">Settings</DialogTitle>
@@ -106,6 +103,12 @@ export function SettingsDialog() {
               value="general"
             >
               General
+            </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="editor"
+            >
+              Editor
             </TabsTrigger>
             <TabsTrigger
               className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
@@ -209,6 +212,30 @@ export function SettingsDialog() {
                 </div>
 
                 <div className="space-y-4 pt-4 border-t">
+                  <h4 className="font-medium text-sm">Layout</h4>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="text-sm">Show Outline</p>
+                      <p className="text-xs text-muted-foreground">
+                        Display document outline in the explorer sidebar
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowOutline(!showOutline)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        showOutline ? 'bg-primary' : 'bg-muted-foreground/30'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          showOutline ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t">
                   <h4 className="font-medium text-sm">Custom Fonts</h4>
                   <div className="space-y-4">
                     <div className="flex items-end gap-2">
@@ -256,6 +283,83 @@ export function SettingsDialog() {
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent className="mt-0 outline-none" value="editor">
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm">Source</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Customize the appearance of the markdown source editor.
+                  </p>
+                  
+                  <div className="flex items-center gap-3 pt-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-64 justify-between"
+                          style={{ fontFamily: sourceEditorFontFamily }}
+                        >
+                          <span className="truncate">{sourceEditorFontFamily}</span>
+                          <ChevronDown className="size-4 shrink-0 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64">
+                        {[
+                          { label: 'Monospace (System)', value: 'monospace' },
+                          { label: 'JetBrains Mono', value: '"JetBrains Mono", monospace' },
+                          { label: 'Fira Code', value: '"Fira Code", monospace' },
+                          { label: 'Source Code Pro', value: '"Source Code Pro", monospace' },
+                          { label: 'Consolas', value: 'Consolas, monospace' },
+                          { label: 'Monaco', value: 'Monaco, monospace' },
+                          { label: 'Menlo', value: 'Menlo, monospace' },
+                          { label: 'Courier New', value: '"Courier New", monospace' },
+                        ].map((font) => (
+                          <DropdownMenuItem
+                            key={font.value}
+                            onClick={() => setSourceEditorFontFamily(font.value)}
+                            style={{ fontFamily: font.value }}
+                          >
+                            {font.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <Input
+                      type="number"
+                      min={10}
+                      max={32}
+                      value={sourceEditorFontSize}
+                      onChange={(e) => setSourceEditorFontSize(Number(e.target.value))}
+                      className="w-20"
+                    />
+                    <span className="text-sm text-muted-foreground">px</span>
+                  </div>
+
+                  <div 
+                    className="mt-4 p-4 rounded-md border bg-muted/30"
+                    style={{ 
+                      fontFamily: sourceEditorFontFamily, 
+                      fontSize: `${sourceEditorFontSize}px`,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <pre className="whitespace-pre-wrap text-foreground">
+{`# Sample Markdown
+
+The quick brown fox jumps over the lazy dog.
+
+\`\`\`javascript
+function hello() {
+  console.log("Hello, World!");
+}
+\`\`\``}
+                    </pre>
                   </div>
                 </div>
               </div>

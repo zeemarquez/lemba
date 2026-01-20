@@ -4,7 +4,6 @@ import { useStore, FileNode } from "@/lib/store";
 import { browserStorage } from "@/lib/browser-storage";
 import { cn } from "@/lib/utils";
 import {
-    FileText,
     Plus,
     FolderSearch,
     LayoutTemplate,
@@ -12,13 +11,21 @@ import {
     PanelLeftOpen,
     Settings,
     FolderPlus,
-    RefreshCw
+    RefreshCw,
+    ChevronRight,
+    ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useEffect, useState } from "react";
 import { FileTree } from "@/components/layout/FileTree";
 import { InputDialog } from "@/components/layout/InputDialog";
+import { DocumentOutline } from "@/components/layout/DocumentOutline";
+import {
+    ResizablePanelGroup,
+    ResizablePanel,
+    ResizableHandle,
+} from "@/components/ui/resizable";
 
 export function Sidebar() {
     const {
@@ -43,11 +50,15 @@ export function Sidebar() {
         isLoadingFileTree,
         fetchFonts,
         restoreSession,
-        templates
+        templates,
+        showOutline,
+        currentView
     } = useStore();
 
     const [mounted, setMounted] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [isOutlineCollapsed, setIsOutlineCollapsed] = useState(false);
+    const [isFilesCollapsed, setIsFilesCollapsed] = useState(false);
     const [dialogConfig, setDialogConfig] = useState<{
         title: string;
         description: string;
@@ -331,8 +342,94 @@ export function Sidebar() {
                     </Button>
                 </div>
 
-                <ScrollArea className="flex-1">
-                    {sidebarView === 'explorer' && (
+                {sidebarView === 'explorer' && showOutline && currentView === 'file' && activeFileId && (
+                    <ResizablePanelGroup direction="vertical" className="flex-1 min-h-0">
+                        {/* Files Panel */}
+                        <ResizablePanel 
+                            defaultSize={60} 
+                            minSize={20}
+                            collapsible={true}
+                            collapsedSize={8}
+                            onCollapse={() => setIsFilesCollapsed(true)}
+                            onExpand={() => setIsFilesCollapsed(false)}
+                        >
+                            <div className="h-full flex flex-col">
+                                <div 
+                                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-accent/30 shrink-0"
+                                    onClick={() => setIsFilesCollapsed(!isFilesCollapsed)}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        {isFilesCollapsed ? (
+                                            <ChevronRight size={14} className="text-muted-foreground" />
+                                        ) : (
+                                            <ChevronDown size={14} className="text-muted-foreground" />
+                                        )}
+                                        <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Files</span>
+                                    </div>
+                                    {!isFilesCollapsed && (
+                                        <div className="flex items-center gap-1">
+                                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); handleCreateFolder(); }} title="New Folder">
+                                                <FolderPlus size={14} />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); handleCreateFile(); }} title="New File">
+                                                <Plus size={14} />
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {!isFilesCollapsed && (
+                                    <ScrollArea className="flex-1">
+                                        <div className="px-3 pb-2">
+                                            {isLoadingFileTree ? (
+                                                <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
+                                                    <RefreshCw size={12} className="animate-spin" /> Loading...
+                                                </div>
+                                            ) : (
+                                                <FileTree 
+                                                    nodes={filesRoot?.children || []} 
+                                                    activeId={activeFileId} 
+                                                    onSelect={(node) => openFile(node.id)}
+                                                    onRename={handleRename}
+                                                    onDelete={handleDelete}
+                                                    onMove={handleMove}
+                                                    onExport={handleExportFile}
+                                                />
+                                            )}
+                                            
+                                            {(!filesRoot || !filesRoot.children?.length) && !isLoadingFileTree && (
+                                                <div className="px-2 py-4 text-xs text-muted-foreground text-center">
+                                                    No files found. Create one to get started.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </ScrollArea>
+                                )}
+                            </div>
+                        </ResizablePanel>
+                        
+                        <ResizableHandle />
+                        
+                        {/* Outline Panel */}
+                        <ResizablePanel 
+                            defaultSize={40} 
+                            minSize={15}
+                            collapsible={true}
+                            collapsedSize={8}
+                            onCollapse={() => setIsOutlineCollapsed(true)}
+                            onExpand={() => setIsOutlineCollapsed(false)}
+                        >
+                            <DocumentOutline 
+                                className="h-full"
+                                isCollapsed={isOutlineCollapsed}
+                                onToggleCollapse={() => setIsOutlineCollapsed(!isOutlineCollapsed)}
+                            />
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
+                )}
+
+                {sidebarView === 'explorer' && (!showOutline || currentView !== 'file' || !activeFileId) && (
+                    <ScrollArea className="flex-1">
                         <div className="p-3">
                             <div className="flex items-center justify-between mb-2 px-1">
                                 <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Files</span>
@@ -347,9 +444,9 @@ export function Sidebar() {
                             </div>
                             
                             {isLoadingFileTree ? (
-                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
+                                <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
                                     <RefreshCw size={12} className="animate-spin" /> Loading...
-                                 </div>
+                                </div>
                             ) : (
                                 <FileTree 
                                     nodes={filesRoot?.children || []} 
@@ -368,9 +465,11 @@ export function Sidebar() {
                                 </div>
                             )}
                         </div>
-                    )}
+                    </ScrollArea>
+                )}
 
-                    {sidebarView === 'templates' && (
+                {sidebarView === 'templates' && (
+                    <ScrollArea className="flex-1">
                         <div className="p-3">
                             <div className="flex items-center justify-between mb-2 px-1">
                                 <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Templates</span>
@@ -406,8 +505,8 @@ export function Sidebar() {
                                 </div>
                             )}
                         </div>
-                    )}
-                </ScrollArea>
+                    </ScrollArea>
+                )}
 
                 {/* Sidebar Footer - Settings */}
                 <div className="p-2 shrink-0">

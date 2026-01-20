@@ -123,9 +123,14 @@ interface AppState {
     editorViewMode: 'source' | 'editing' | 'viewing' | 'suggestion';
     uiIconSize: 'small' | 'normal' | 'big';
     uiFontSize: 'small' | 'normal' | 'big';
+    showOutline: boolean;
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
+
+    // Source Editor Settings
+    sourceEditorFontFamily: string;
+    sourceEditorFontSize: number;
 
     // Templates State
     templates: Template[];
@@ -171,6 +176,9 @@ interface AppState {
     setPreviewQuality: (quality: 'low' | 'medium' | 'high') => void;
     setUiIconSize: (size: 'small' | 'normal' | 'big') => void;
     setUiFontSize: (size: 'small' | 'normal' | 'big') => void;
+    setShowOutline: (show: boolean) => void;
+    setSourceEditorFontFamily: (fontFamily: string) => void;
+    setSourceEditorFontSize: (fontSize: number) => void;
 
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -244,6 +252,9 @@ export const useStore = create<AppState>()(
                 previewQuality: 'medium',
                 uiIconSize: 'normal',
                 uiFontSize: 'normal',
+                showOutline: true,
+                sourceEditorFontFamily: 'monospace',
+                sourceEditorFontSize: 14,
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -572,6 +583,9 @@ export const useStore = create<AppState>()(
                 setPreviewQuality: (quality) => set({ previewQuality: quality }),
                 setUiIconSize: (size) => set({ uiIconSize: size }),
                 setUiFontSize: (size) => set({ uiFontSize: size }),
+                setShowOutline: (show) => set({ showOutline: show }),
+                setSourceEditorFontFamily: (fontFamily) => set({ sourceEditorFontFamily: fontFamily }),
+                setSourceEditorFontSize: (fontSize) => set({ sourceEditorFontSize: fontSize }),
                 addTemplate: (template) => set((state) => ({ templates: [...state.templates, template] })),
                 updateTemplate: (id, updates) => set((state) => ({
                     templates: state.templates.map((t) => (t.id === id ? { ...t, ...updates } : t))
@@ -615,6 +629,9 @@ export const useStore = create<AppState>()(
                 previewQuality: state.previewQuality,
                 uiIconSize: state.uiIconSize,
                 uiFontSize: state.uiFontSize,
+                showOutline: state.showOutline,
+                sourceEditorFontFamily: state.sourceEditorFontFamily,
+                sourceEditorFontSize: state.sourceEditorFontSize,
                 activeFileId: state.activeFileId,
                 activeTemplateId: state.activeTemplateId,
                 openTabs: state.openTabs,
