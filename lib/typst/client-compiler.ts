@@ -6,6 +6,22 @@ export interface FontData {
     internalName?: string; // Actual font family name from file metadata
 }
 
+interface HeadingNumbering {
+    enabled?: boolean;
+    style?: 'decimal' | 'decimal-leading-zero' | 'lower-roman' | 'upper-roman' | 'lower-alpha' | 'upper-alpha';
+    separator?: string;
+    prefix?: string;
+    suffix?: string;
+}
+
+interface HeadingOptions {
+    fontSize?: string;
+    color?: string;
+    textAlign?: string;
+    borderBottom?: boolean;
+    numbering?: HeadingNumbering;
+}
+
 export interface TypstOptions {
     margins?: { top: string; bottom: string; left: string; right: string };
     fontFamily?: string;
@@ -20,12 +36,12 @@ export interface TypstOptions {
     pageLayout?: 'portrait' | 'horizontal' | 'vertical';
     backgroundColor?: string;
     textColor?: string;
-    h1?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean; numbering?: { enabled?: boolean } };
-    h2?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h3?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h4?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h5?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h6?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
+    h1?: HeadingOptions;
+    h2?: HeadingOptions;
+    h3?: HeadingOptions;
+    h4?: HeadingOptions;
+    h5?: HeadingOptions;
+    h6?: HeadingOptions;
 }
 
 // Track loaded custom fonts to avoid re-adding them
@@ -181,6 +197,129 @@ export function fixTypstUnit(value: string | number | undefined): string {
         return `1${s.toLowerCase()}`;
     }
     return '0pt';
+}
+
+/**
+ * Generate Typst heading numbering configuration
+ * Supports per-level numbering control where the first enabled level becomes the "root"
+ * Uses custom counters to properly handle cases where parent levels are disabled
+ */
+function generateHeadingNumbering(settings: any): string {
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
+    
+    // Check which levels have numbering enabled
+    const levelConfigs = levels.map((tag, i) => ({
+        level: i + 1,
+        tag,
+        enabled: settings[tag]?.numbering?.enabled || false,
+        style: settings[tag]?.numbering?.style || 'decimal',
+        separator: settings[tag]?.numbering?.separator || '.',
+        prefix: settings[tag]?.numbering?.prefix || '',
+        suffix: settings[tag]?.numbering?.suffix || '.'
+    }));
+    
+    // Find enabled levels
+    const enabledLevels = levelConfigs.filter(l => l.enabled);
+    if (enabledLevels.length === 0) {
+        return '#set heading(numbering: none)';
+    }
+    
+    // Map CSS numbering style to Typst format
+    const styleToTypst = (style: string): string => {
+        switch (style) {
+            case 'decimal': return '"1"';
+            case 'decimal-leading-zero': return '"01"';
+            case 'lower-roman': return '"i"';
+            case 'upper-roman': return '"I"';
+            case 'lower-alpha': return '"a"';
+            case 'upper-alpha': return '"A"';
+            default: return '"1"';
+        }
+    };
+    
+    // Strategy: Use custom counters (h1c, h2c, etc.) that we manage ourselves
+    // This allows us to only count and display enabled levels
+    let result = '// Disable default heading numbering - we use custom counters\n';
+    result += '#set heading(numbering: none)\n\n';
+    
+    // Create custom counters for each enabled level
+    enabledLevels.forEach(config => {
+        result += `#let h${config.level}c = counter("h${config.level}-counter")\n`;
+    });
+    result += '\n';
+    
+    // For each heading level, create show rules
+    levelConfigs.forEach((levelConfig) => {
+        if (!levelConfig.enabled) {
+            // Disabled level: just show the heading body, but reset child counters
+            const childCountersToReset = enabledLevels
+                .filter(l => l.level > levelConfig.level)
+                .map(l => `h${l.level}c.update(0)`);
+            
+            if (childCountersToReset.length > 0) {
+                result += `#show heading.where(level: ${levelConfig.level}): it => {\n`;
+                result += `  ${childCountersToReset.join('\n  ')}\n`;
+                result += `  block(above: 1.4em, below: 0.5em, it.body)\n`;
+                result += `}\n`;
+            }
+            // If no children to reset, no need for a show rule - default display is fine
+        } else {
+            // Enabled level: increment counter, reset child counters, display numbering
+            const { prefix, suffix } = levelConfig;
+            
+            // Find child enabled levels to reset
+            const childCountersToReset = enabledLevels
+                .filter(l => l.level > levelConfig.level)
+                .map(l => `h${l.level}c.update(0)`);
+            
+            // Find all enabled ancestor levels (including self) for building the number
+            const ancestorLevels = enabledLevels
+                .filter(l => l.level <= levelConfig.level);
+            
+            result += `#show heading.where(level: ${levelConfig.level}): it => {\n`;
+            result += `  h${levelConfig.level}c.step()\n`;
+            if (childCountersToReset.length > 0) {
+                result += `  ${childCountersToReset.join('\n  ')}\n`;
+            }
+            
+            // Build the numbering display parts
+            let numberingParts: string[] = [];
+            ancestorLevels.forEach((ancestor, idx) => {
+                numberingParts.push(`h${ancestor.level}c.display(${styleToTypst(ancestor.style)})`);
+                if (idx < ancestorLevels.length - 1) {
+                    numberingParts.push(`[${ancestor.separator}]`);
+                }
+            });
+            
+            result += `  context block(above: 1.4em, below: 0.5em)[\n`;
+            result += `    #text(weight: "bold")[`;
+            
+            // Add prefix if present
+            if (prefix) {
+                result += `${prefix}`;
+            }
+            
+            // Add counter displays
+            numberingParts.forEach(part => {
+                if (part.startsWith('[')) {
+                    // It's a separator literal
+                    result += `#${part}`;
+                } else {
+                    // It's a counter display
+                    result += `#${part}`;
+                }
+            });
+            
+            // Add suffix
+            result += `${suffix} `;
+            result += `]\n`;
+            result += `    #it.body\n`;
+            result += `  ]\n`;
+            result += `}\n`;
+        }
+    });
+    
+    return result;
 }
 
 export function generatePreamble(options: TypstOptions): string {
@@ -373,8 +512,8 @@ export function generatePreamble(options: TypstOptions): string {
   lang: "en"
 )
 
-#set heading(numbering: "1.1") 
-${settings.h1?.numbering?.enabled ? '' : '#set heading(numbering: none)'}
+// Heading numbering configuration
+${generateHeadingNumbering(settings)}
 
 ${headingStyles}
 

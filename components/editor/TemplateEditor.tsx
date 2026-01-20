@@ -170,26 +170,33 @@ export function TemplateEditor() {
 
         const generateNumberingCss = () => {
             const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
-            let css = '.prose { counter-reset: h1-counter; }\n';
+            
+            // Find the first enabled level - this becomes the "root" for numbering
+            const firstEnabledIndex = levels.findIndex(level => (s as any)[level]?.numbering?.enabled);
+            if (firstEnabledIndex === -1) return ''; // No numbering enabled
+            
+            // Reset all counters at the root, starting from the first enabled level
+            const countersToReset = levels.slice(firstEnabledIndex).map(l => `${l}-counter`).join(' ');
+            let css = `.prose { counter-reset: ${countersToReset}; }\n`;
 
-            // Add resets
+            // Add resets: each heading resets all lower-level counters
             levels.forEach((level, index) => {
                 if (index < levels.length - 1) {
-                    const nextLevel = levels[index + 1];
-                    // IMPORTANT: Reset the next level counter when the current level is encountered
-                    css += `.prose ${level} { counter-reset: ${nextLevel}-counter; }\n`;
+                    // Reset all counters below this level
+                    const lowerCounters = levels.slice(index + 1).map(l => `${l}-counter`).join(' ');
+                    css += `.prose ${level} { counter-reset: ${lowerCounters}; }\n`;
                 }
             });
 
-            // Add counters
+            // Add counters - only for enabled levels
             levels.forEach((level, index) => {
                 const settings = (s as any)[level]?.numbering;
                 if (!settings?.enabled) return;
 
                 let contentString = `"${settings.prefix}"`;
 
-                // Build the hierarchy string
-                for (let i = 0; i <= index; i++) {
+                // Build the hierarchy string - only include enabled levels from firstEnabledIndex to current
+                for (let i = firstEnabledIndex; i <= index; i++) {
                     const currentLevel = levels[i];
                     const currentSettings = (s as any)[currentLevel]?.numbering;
 
@@ -430,13 +437,15 @@ export function TemplateEditor() {
                                     </DropdownMenu>
                                 </div>
                                 <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Base Font Size</label>
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Size</label>
                                     <input
-                                        type="text"
+                                        type="number"
+                                        min="8"
+                                        max="72"
                                         className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
-                                        value={settings.fontSize}
-                                        onChange={(e) => updateSetting('fontSize', e.target.value)}
-                                        placeholder="e.g. 16px"
+                                        value={parseInt(settings.fontSize) || 16}
+                                        onChange={(e) => updateSetting('fontSize', `${e.target.value}px`)}
+                                        placeholder="e.g. 16"
                                     />
                                 </div>
                             </div>
@@ -496,11 +505,13 @@ export function TemplateEditor() {
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Size</label>
                                     <input
-                                        type="text"
+                                        type="number"
+                                        min="8"
+                                        max="200"
                                         className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
-                                        value={(settings as any)[activeHeadingLevel].fontSize}
-                                        onChange={(e) => updateSetting(`${activeHeadingLevel}.fontSize`, e.target.value)}
-                                        placeholder="e.g. 2.5em"
+                                        value={parseInt((settings as any)[activeHeadingLevel].fontSize) || 16}
+                                        onChange={(e) => updateSetting(`${activeHeadingLevel}.fontSize`, `${e.target.value}px`)}
+                                        placeholder="e.g. 32"
                                     />
                                 </div>
                                 <div className="space-y-3">

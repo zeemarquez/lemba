@@ -16,6 +16,24 @@ import { processTypstImages } from '@/lib/typst/client-image-manager';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import { useStore } from '@/lib/store';
 
+// Heading numbering settings
+interface HeadingNumbering {
+    enabled?: boolean;
+    style?: 'decimal' | 'decimal-leading-zero' | 'lower-roman' | 'upper-roman' | 'lower-alpha' | 'upper-alpha';
+    separator?: string;
+    prefix?: string;
+    suffix?: string;
+}
+
+// Heading style settings
+interface HeadingSettings {
+    fontSize?: string;
+    color?: string;
+    textAlign?: string;
+    borderBottom?: boolean;
+    numbering?: HeadingNumbering;
+}
+
 // Settings type that matches the template settings from the store
 export interface TemplateSettings {
     fontFamily?: string;
@@ -24,12 +42,12 @@ export interface TemplateSettings {
     backgroundColor?: string;
     pageLayout?: 'vertical' | 'horizontal';
     margins?: { top: string; bottom: string; left: string; right: string };
-    h1?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean; numbering?: { enabled?: boolean } };
-    h2?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h3?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h4?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h5?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    h6?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
+    h1?: HeadingSettings;
+    h2?: HeadingSettings;
+    h3?: HeadingSettings;
+    h4?: HeadingSettings;
+    h5?: HeadingSettings;
+    h6?: HeadingSettings;
     header?: { enabled?: boolean; content?: string; startPage?: number; margins?: { bottom: string; left: string; right: string } };
     footer?: { enabled?: boolean; content?: string; startPage?: number; margins?: { top: string; left: string; right: string } };
     frontPage?: { enabled?: boolean; content?: string };
