@@ -19,6 +19,9 @@ import type * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { PopoverAnchor } from '@radix-ui/react-popover';
 import { cva } from 'class-variance-authority';
 import {
+  AlignVerticalDistributeCenterIcon,
+  AlignVerticalJustifyEndIcon,
+  AlignVerticalJustifyStartIcon,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -212,6 +215,10 @@ function TableFloatingToolbar({
                 <TableBordersDropdownMenuContent />
               </DropdownMenuPortal>
             </DropdownMenu>
+
+            <VerticalAlignDropdownMenu tooltip="Vertical align">
+              <AlignVerticalDistributeCenterIcon />
+            </VerticalAlignDropdownMenu>
 
             {collapsedInside && (
               <ToolbarGroup>
@@ -421,6 +428,68 @@ function ColorDropdownMenu({
   );
 }
 
+type VerticalAlign = 'top' | 'middle' | 'bottom';
+
+function VerticalAlignDropdownMenu({
+  children,
+  tooltip,
+}: {
+  children: React.ReactNode;
+  tooltip: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const editor = useEditorRef();
+  const selectedCells = usePluginOption(TablePlugin, 'selectedCells');
+
+  const setVerticalAlign = React.useCallback(
+    (align: VerticalAlign) => {
+      setOpen(false);
+      
+      // If cells are selected via table selection, use those
+      if (selectedCells && selectedCells.length > 0) {
+        for (const [, path] of selectedCells) {
+          editor.tf.setNodes({ verticalAlign: align }, { at: path });
+        }
+      } else if (editor.selection) {
+        // Otherwise, find the cell at the current selection
+        const cellEntry = editor.api.node({
+          match: { type: ['td', 'th'] },
+          at: editor.selection,
+        });
+        if (cellEntry) {
+          editor.tf.setNodes({ verticalAlign: align }, { at: cellEntry[1] });
+        }
+      }
+    },
+    [selectedCells, editor]
+  );
+
+  return (
+    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <ToolbarButton tooltip={tooltip}>{children}</ToolbarButton>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="start">
+        <DropdownMenuGroup>
+          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('top')}>
+            <AlignVerticalJustifyStartIcon />
+            <span>Align Top</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('middle')}>
+            <AlignVerticalDistributeCenterIcon />
+            <span>Align Middle</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('bottom')}>
+            <AlignVerticalJustifyEndIcon />
+            <span>Align Bottom</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function TableRowElement({
   children,
   ...props
@@ -575,7 +644,12 @@ export function TableCellElement({
       }
     >
       <div
-        className="relative z-20 box-border h-full px-3 py-2"
+        className={cn(
+          "relative z-20 box-border h-full px-3 py-2 flex flex-col",
+          (element as any).verticalAlign === 'middle' && 'justify-center',
+          (element as any).verticalAlign === 'bottom' && 'justify-end',
+          (!(element as any).verticalAlign || (element as any).verticalAlign === 'top') && 'justify-start'
+        )}
         style={{ minHeight }}
       >
         {props.children}

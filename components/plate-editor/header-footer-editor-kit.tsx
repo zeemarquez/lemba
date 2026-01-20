@@ -15,6 +15,8 @@ import { BlockPlaceholderKit } from '@/components/plate-editor/plugins/block-pla
 import { MediaKit } from '@/components/plate-editor/plugins/media-kit';
 import { TableKit } from '@/components/plate-editor/plugins/table-kit';
 import { PlaceholderPlugin } from '@/components/plate-editor/plugins/placeholder-kit';
+import { BaseVerticalSpacerPlugin } from '@/components/plate-editor/plugins/vertical-spacer-kit';
+import { VerticalSpacerElement } from '@/components/plate-ui/vertical-spacer-element';
 
 // Simplified kit for header/footer editors
 // Only includes: table, divider, image, link, emoji + font controls
@@ -26,6 +28,7 @@ export const HeaderFooterEditorKit = [
   ...TableKit,
   ...MathKit,
   PlaceholderPlugin,
+  BaseVerticalSpacerPlugin.withComponent(VerticalSpacerElement),
 
   // Marks
   ...BasicMarksKit,

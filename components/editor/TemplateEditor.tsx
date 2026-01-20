@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown, FileText, TableIcon } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -12,26 +12,17 @@ import {
     DropdownMenuTrigger,
 } from "@/components/plate-ui/dropdown-menu";
 
+// Available fonts in Typst WASM compiler (from typst.ts text assets)
+// These are the only built-in fonts that work for PDF export
 const FONT_FAMILIES = [
-    // Sans Serif
-    { label: 'Inter (Modern Sans)', value: 'Inter, sans-serif', category: 'Sans Serif' },
-    { label: 'Roboto (Clean)', value: 'Roboto, sans-serif', category: 'Sans Serif' },
-    { label: 'Open Sans (Neutral)', value: "'Open Sans', sans-serif", category: 'Sans Serif' },
-    { label: 'Montserrat (Modern)', value: 'Montserrat, sans-serif', category: 'Sans Serif' },
-    { label: 'Outfit (Geometric)', value: "'Outfit', sans-serif", category: 'Sans Serif' },
-    { label: 'System Default', value: 'system-ui, sans-serif', category: 'Sans Serif' },
-
-    // Serif
-    { label: 'Times New Roman (Academic)', value: "'Times New Roman', serif", category: 'Serif' },
-    { label: 'Georgia (Classic Serif)', value: "'Georgia', serif", category: 'Serif' },
-    { label: 'Merriweather (Readable)', value: 'Merriweather, serif', category: 'Serif' },
-    { label: 'Playfair Display (Elegant)', value: "'Playfair Display', serif", category: 'Serif' },
-    { label: 'Lora (Contemporary)', value: 'Lora, serif', category: 'Serif' },
-
-    // Mono
-    { label: 'JetBrains Mono (Code)', value: "'JetBrains Mono', monospace", category: 'Monospace' },
-    { label: 'Fira Code (Ligatures)', value: "'Fira Code', monospace", category: 'Monospace' },
-    { label: 'Source Code Pro (Clean Mono)', value: "'Source Code Pro', monospace", category: 'Monospace' },
+    // Serif - Libertinus Serif (the main text font)
+    { label: 'Libertinus Serif (Classic)', value: "'Libertinus Serif', serif", category: 'Serif' },
+    
+    // Monospace - DejaVu Sans Mono
+    { label: 'DejaVu Sans Mono (Code)', value: "'DejaVu Sans Mono', monospace", category: 'Monospace' },
+    
+    // Math/Academic - New Computer Modern
+    { label: 'New Computer Modern (Academic)', value: "'New Computer Modern', serif", category: 'Serif' },
 ];
 
 export function TemplateEditor() {
@@ -50,11 +41,93 @@ export function TemplateEditor() {
     const [settings, setSettings] = useState(template?.settings);
     const [activeHeadingLevel, setActiveHeadingLevel] = useState<'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>('h1');
 
+    // Only update local settings when we switch templates
     useEffect(() => {
         if (template?.settings) {
             setSettings(template.settings);
         }
-    }, [activeTemplateId, template]);
+    }, [activeTemplateId]);
+
+    const updateSetting = (path: string, value: any) => {
+        setSettings(prev => {
+            if (!prev) return prev;
+            const newSettings = { ...prev };
+            const keys = path.split('.');
+            let current: any = newSettings;
+            for (let i = 0; i < keys.length - 1; i++) {
+                current[keys[i]] = { ...current[keys[i]] };
+                current = current[keys[i]];
+            }
+            current[keys[keys.length - 1]] = value;
+            return newSettings;
+        });
+    };
+
+    // Autosave local settings to store with debounce
+    useEffect(() => {
+        if (!settings || !template) return;
+
+        const timeoutId = setTimeout(() => {
+            const css = generateCss(settings);
+
+            // Check if settings actually changed to avoid unnecessary store updates
+            const currentStoreTemplate = useStore.getState().templates.find(t => t.id === template.id);
+            if (JSON.stringify(currentStoreTemplate?.settings) === JSON.stringify(settings)) {
+                return;
+            }
+
+            updateTemplate(template.id, { settings, css });
+            setActiveTemplateCss(css);
+
+            // Also persist to IndexedDB
+            useStore.getState().saveTemplate(template.id, { ...template, settings, css });
+        }, 500); // 500ms debounce
+
+        return () => clearTimeout(timeoutId);
+    }, [settings, template?.id, updateTemplate, setActiveTemplateCss]);
+
+    // Section definitions for the index
+    const sections = useMemo(() => [
+        { id: 'typography', label: 'Typography', icon: TypeIcon },
+        { id: 'headings', label: 'Headings', icon: HeadingIcon },
+        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
+        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
+        { id: 'tables', label: 'Tables', icon: TableIcon },
+        { id: 'front-page', label: 'Front Page', icon: FileText },
+        { id: 'header', label: 'Header', icon: ArrowUpFromLine },
+        { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
+    ], []);
+
+    const [activeSection, setActiveSection] = useState('typography');
+
+    const scrollToSection = (sectionId: string) => {
+        const element = document.getElementById(`section-${sectionId}`);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
+
+    // Intersection observer to track active section
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        const id = entry.target.id.replace('section-', '');
+                        setActiveSection(id);
+                    }
+                });
+            },
+            { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
+        );
+
+        sections.forEach((section) => {
+            const element = document.getElementById(`section-${section.id}`);
+            if (element) observer.observe(element);
+        });
+
+        return () => observer.disconnect();
+    }, [sections]);
 
     if (!template || !settings) {
         return (
@@ -70,9 +143,9 @@ export function TemplateEditor() {
     // This CSS is only used for browser print (Ctrl+P)
     const generateCss = (s: typeof settings) => {
         const margins = s.margins || { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' };
-        const headerMargins = s.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
-        const footerMargins = s.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
-        
+        const headerMargins = s.header?.margins || { bottom: '0mm', left: '0mm', right: '0mm' };
+        const footerMargins = s.footer?.margins || { top: '0mm', left: '0mm', right: '0mm' };
+
         // Check for page number offset
         const headerMatch = s.header?.content?.match(/"offset":\s*(\d+)/);
         const footerMatch = s.footer?.content?.match(/"offset":\s*(\d+)/);
@@ -98,7 +171,7 @@ export function TemplateEditor() {
         const generateNumberingCss = () => {
             const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
             let css = '.prose { counter-reset: h1-counter; }\n';
-            
+
             // Add resets
             levels.forEach((level, index) => {
                 if (index < levels.length - 1) {
@@ -114,15 +187,15 @@ export function TemplateEditor() {
                 if (!settings?.enabled) return;
 
                 let contentString = `"${settings.prefix}"`;
-                
+
                 // Build the hierarchy string
                 for (let i = 0; i <= index; i++) {
                     const currentLevel = levels[i];
                     const currentSettings = (s as any)[currentLevel]?.numbering;
-                    
+
                     if (currentSettings?.enabled) {
                         contentString += ` counter(${currentLevel}-counter, ${currentSettings.style})`;
-                        
+
                         // Add separator if it's not the last enabled item
                         // Check if there are any subsequent enabled levels up to 'index'
                         let hasMoreEnabled = false;
@@ -138,7 +211,7 @@ export function TemplateEditor() {
                         }
                     }
                 }
-                
+
                 contentString += ` "${settings.suffix}"`;
 
                 css += `
@@ -202,18 +275,14 @@ export function TemplateEditor() {
                 width: 100%;
             }
             .page-header {
-                padding-top: ${headerMargins.top};
                 padding-right: ${headerMargins.right};
                 padding-bottom: ${headerMargins.bottom};
                 padding-left: ${headerMargins.left};
-                margin-bottom: 10px;
             }
             .page-footer {
                 padding-top: ${footerMargins.top};
                 padding-right: ${footerMargins.right};
-                padding-bottom: ${footerMargins.bottom};
                 padding-left: ${footerMargins.left};
-                margin-top: 10px;
             }
             .page-header p, .page-footer p {
                 margin: 0;
@@ -296,86 +365,9 @@ export function TemplateEditor() {
         `;
     };
 
-    const updateSetting = (path: string, value: any) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            const newSettings = { ...prev };
-            const keys = path.split('.');
-            let current: any = newSettings;
-            for (let i = 0; i < keys.length - 1; i++) {
-                current[keys[i]] = { ...current[keys[i]] };
-                current = current[keys[i]];
-            }
-            current[keys[keys.length - 1]] = value;
-            return newSettings;
-        });
-    };
-
-    // Autosave: sync settings to store when they change
-    useEffect(() => {
-        if (!settings || !template) return;
-        const css = generateCss(settings);
-        
-        // Update local store state
-        updateTemplate(template.id, { settings, css });
-        setActiveTemplateCss(css);
-    }, [settings]);
-
-    // Persist to IndexedDB with debounce
-    useEffect(() => {
-        if (!template) return;
-
-        const timeoutId = setTimeout(() => {
-            // We need to fetch the latest template state from store because 'template' in dependency might be stale 
-            // if we only depended on settings. But 'template' comes from useStore hook which updates.
-            // However, we want to save the *current* state.
-            useStore.getState().saveTemplate(template.id, template);
-        }, 1000);
-
-        return () => clearTimeout(timeoutId);
-    }, [template]);
 
 
-    // Section definitions for the index
-    const sections = [
-        { id: 'typography', label: 'Typography', icon: TypeIcon },
-        { id: 'headings', label: 'Headings', icon: HeadingIcon },
-        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
-        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
-        { id: 'header', label: 'Header', icon: ArrowUpFromLine },
-        { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
-    ];
 
-    const [activeSection, setActiveSection] = useState('typography');
-
-    const scrollToSection = (sectionId: string) => {
-        const element = document.getElementById(`section-${sectionId}`);
-        if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    };
-
-    // Intersection observer to track active section
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            (entries) => {
-                entries.forEach((entry) => {
-                    if (entry.isIntersecting) {
-                        const id = entry.target.id.replace('section-', '');
-                        setActiveSection(id);
-                    }
-                });
-            },
-            { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
-        );
-
-        sections.forEach((section) => {
-            const element = document.getElementById(`section-${section.id}`);
-            if (element) observer.observe(element);
-        });
-
-        return () => observer.disconnect();
-    }, []);
 
     return (
         <div className="flex-1 flex bg-background min-h-0 app-chrome">
@@ -409,7 +401,7 @@ export function TemplateEditor() {
                                             {['Sans Serif', 'Serif', 'Monospace', 'Custom'].map((category, index) => {
                                                 const categoryFonts = allFontFamilies.filter(f => f.category === category);
                                                 if (categoryFonts.length === 0) return null;
-                                                
+
                                                 return (
                                                     <Fragment key={category}>
                                                         <div className={cn(
@@ -827,6 +819,85 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Tables Section */}
+                    <section id="section-tables" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <TableIcon size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Tables</h2>
+                        </div>
+
+                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Prevent Page Break Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Prevent page breaks</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, tables will try to stay on a single page instead of being split across pages.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('tables.preventPageBreak', !settings.tables?.preventPageBreak)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.tables?.preventPageBreak ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.tables?.preventPageBreak ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Front Page Section */}
+                    <section id="section-front-page" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <FileText size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Front Page</h2>
+                        </div>
+
+                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Enable Toggle */}
+                            <div className="flex items-center gap-6">
+                                <label className="text-base font-semibold text-foreground">Enable front page</label>
+                                <button
+                                    onClick={() => updateSetting('frontPage.enabled', !settings.frontPage?.enabled)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative",
+                                        settings.frontPage?.enabled ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.frontPage?.enabled ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {settings.frontPage?.enabled && (
+                                <>
+                                    <p className="text-sm text-muted-foreground">
+                                        The front page will be inserted as the first page of your document, before the main content.
+                                    </p>
+
+                                    {/* Plate Editor for Front Page Content */}
+                                    <HeaderFooterPlateEditor
+                                        content={settings.frontPage?.content || ''}
+                                        onChange={(value) => updateSetting('frontPage.content', value)}
+                                        placeholder="Design your front page..."
+                                        variant="large"
+                                    />
+                                </>
+                            )}
+                        </div>
+                    </section>
+
                     {/* Header Section */}
                     <section id="section-header" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -863,12 +934,26 @@ export function TemplateEditor() {
                                         placeholder="Type something..."
                                     />
 
+                                    {/* Start Page */}
+                                    <div className="flex items-center gap-4">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Start from page</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                            value={settings.header?.startPage || 1}
+                                            onChange={(e) => {
+                                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                                updateSetting('header.startPage', val);
+                                            }}
+                                        />
+                                    </div>
+
                                     {/* Margins */}
                                     <div className="space-y-5">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
-                                        <div className="grid grid-cols-4 gap-6">
+                                        <div className="grid grid-cols-3 gap-6">
                                             {[
-                                                { label: 'Top', path: 'header.margins.top' },
                                                 { label: 'Bottom', path: 'header.margins.bottom' },
                                                 { label: 'Left', path: 'header.margins.left' },
                                                 { label: 'Right', path: 'header.margins.right' }
@@ -929,13 +1014,27 @@ export function TemplateEditor() {
                                         placeholder="Type something..."
                                     />
 
+                                    {/* Start Page */}
+                                    <div className="flex items-center gap-4">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Start from page</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                            value={settings.footer?.startPage || 1}
+                                            onChange={(e) => {
+                                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                                updateSetting('footer.startPage', val);
+                                            }}
+                                        />
+                                    </div>
+
                                     {/* Margins */}
                                     <div className="space-y-5">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
-                                        <div className="grid grid-cols-4 gap-6">
+                                        <div className="grid grid-cols-3 gap-6">
                                             {[
                                                 { label: 'Top', path: 'footer.margins.top' },
-                                                { label: 'Bottom', path: 'footer.margins.bottom' },
                                                 { label: 'Left', path: 'footer.margins.left' },
                                                 { label: 'Right', path: 'footer.margins.right' }
                                             ].map((m) => (
