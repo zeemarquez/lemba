@@ -23,6 +23,7 @@ interface HeadingStyle {
     borderBottom: boolean;
     textTransform: 'none' | 'uppercase' | 'capitalize';
     fontWeight: string;
+    fontStyle: string;
     textDecoration: string;
     numbering: {
         enabled: boolean;
@@ -49,6 +50,7 @@ export interface Template {
             left: string;
             right: string;
         };
+        startPageNumber?: number;
         watermark?: string;
         h1: HeadingStyle;
         h2: HeadingStyle;
@@ -79,10 +81,25 @@ export interface Template {
         frontPage?: {
             enabled: boolean;
             content: string;
+            emptyPagesAfter?: number;
         };
         codeBlockTheme?: string;
         tables?: {
             preventPageBreak: boolean;
+        };
+        outline?: {
+            enabled: boolean;
+            title?: {
+                content: string;
+            };
+            entries?: {
+                fontSize: string;
+                bold: boolean;
+                italic: boolean;
+                underline: boolean;
+                filler: 'dotted' | 'line' | 'empty';
+            };
+            emptyPagesAfter?: number;
         };
     }
 }
@@ -177,16 +194,30 @@ const DEFAULT_TEMPLATE: Template = {
         backgroundColor: '#ffffff',
         pageLayout: 'vertical',
         margins: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' },
-        h1: { fontSize: '40px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '700', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        h2: { fontSize: '32px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        h3: { fontSize: '24px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        h4: { fontSize: '20px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        h5: { fontSize: '18px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        h6: { fontSize: '16px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        startPageNumber: 1,
+        h1: { fontSize: '40px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '700', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        h2: { fontSize: '32px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        h3: { fontSize: '24px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        h4: { fontSize: '20px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        h5: { fontSize: '18px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
+        h6: { fontSize: '16px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
         header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
         tables: { preventPageBreak: false },
+        outline: { 
+            enabled: false,
+            title: {
+                content: '',
+            },
+            entries: {
+                fontSize: '12px',
+                bold: false,
+                italic: false,
+                underline: false,
+                filler: 'dotted',
+            },
+        },
     }
 };
 

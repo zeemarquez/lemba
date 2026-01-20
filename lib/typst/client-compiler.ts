@@ -201,8 +201,10 @@ export function fixTypstUnit(value: string | number | undefined): string {
 
 /**
  * Generate Typst heading numbering configuration
- * Supports per-level numbering control where the first enabled level becomes the "root"
- * Uses custom counters to properly handle cases where parent levels are disabled
+ * Uses custom counters to properly handle cases where some heading levels have numbering disabled.
+ * For example: H1 disabled, H2 enabled -> H2 shows as "1.", "2." (not "1.1", "1.2")
+ * 
+ * Also exports the enabled levels configuration for use in outline generation.
  */
 function generateHeadingNumbering(settings: any): string {
     const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
@@ -320,6 +322,18 @@ function generateHeadingNumbering(settings: any): string {
     });
     
     return result;
+}
+
+/**
+ * Get which heading levels have numbering enabled
+ * Used by outline generation to know which counters to query
+ */
+export function getEnabledHeadingLevels(settings: any): number[] {
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
+    return levels
+        .map((tag, i) => ({ level: i + 1, enabled: settings[tag]?.numbering?.enabled || false }))
+        .filter(l => l.enabled)
+        .map(l => l.level);
 }
 
 export function generatePreamble(options: TypstOptions): string {

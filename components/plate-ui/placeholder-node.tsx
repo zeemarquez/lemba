@@ -39,7 +39,6 @@ import { Input } from './input';
 export interface TPlaceholderElement extends TElement {
   placeholderType: 'page' | 'date' | 'title' | 'totalPages';
   format?: string;
-  offset?: number;
   fontFamily?: string;
   fontSize?: string;
   bold?: boolean;
@@ -260,28 +259,17 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
             )}
 
             {element.placeholderType === 'page' && (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
-                  <select
-                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
-                    value={element.format || 'decimal'}
-                    onChange={(e) => updateElement({ format: e.target.value })}
-                  >
-                    {PAGE_FORMATS.map(f => (
-                      <option key={f.value} value={f.value}>{f.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase text-zinc-400">Offset (Start at)</label>
-                  <Input
-                    type="number"
-                    className="h-8 text-xs"
-                    value={element.offset || 0}
-                    onChange={(e) => updateElement({ offset: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
+                <select
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                  value={element.format || 'decimal'}
+                  onChange={(e) => updateElement({ format: e.target.value })}
+                >
+                  {PAGE_FORMATS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
               </div>
             )}
 

@@ -4,6 +4,7 @@ interface SerializeContext {
   pageNumber?: string | number;
   date?: string;
   title?: string;
+  pageNumberOffset?: number;
 }
 
 // Helper to post-process HTML string and convert img with figcaption attribute to figure element
@@ -180,7 +181,8 @@ function serializeElementNode(element: TElement, children: string, context: Seri
     case 'placeholder':
       const pType = element.placeholderType as string;
       const pFormat = element.format as string;
-      const pOffset = (element.offset as number) || 0;
+      // Use global page number offset from context
+      const pOffset = context.pageNumberOffset || 0;
       const pFontFamily = element.fontFamily as string;
       const pFontSize = element.fontSize as string;
       

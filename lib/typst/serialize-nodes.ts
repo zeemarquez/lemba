@@ -10,6 +10,8 @@ interface SerializeContext {
     tables?: {
         preventPageBreak?: boolean;
     };
+    /** Global page number offset from template settings */
+    pageNumberOffset?: number;
 }
 
 export function serializeNodesToTypst(nodes: Descendant[], context: SerializeContext = {}): string {
@@ -201,7 +203,8 @@ function formatToTypstNumbering(format: string | undefined): string {
 function serializePlaceholder(element: TElement, context: SerializeContext): string {
     const placeholderType = (element as any).placeholderType;
     const format = (element as any).format;
-    const offset = (element as any).offset || 0;
+    // Use global page number offset from context (template settings)
+    const offset = context.pageNumberOffset || 0;
     const fontFamily = (element as any).fontFamily;
     const fontSize = (element as any).fontSize;
     const bold = (element as any).bold;
@@ -213,10 +216,8 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
     if (placeholderType === 'page') {
         const numbering = formatToTypstNumbering(format);
         if (offset !== 0) {
-            // Use counter.step with offset, then display
-            content = `#{ counter(page).update(n => n + ${offset}); counter(page).display(${numbering}); counter(page).update(n => n - ${offset}) }`;
-            // Simpler approach: just add offset to displayed value
-            content = `#numbering(${numbering}, counter(page).get().first() + ${offset})`;
+            // Add offset to displayed value, but only show if result is >= 1
+            content = `#{ let p = counter(page).get().first() + ${offset}; if p >= 1 { numbering(${numbering}, p) } }`;
         } else {
             content = `#counter(page).display(${numbering})`;
         }

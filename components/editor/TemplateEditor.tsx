@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown, FileText, TableIcon } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -93,6 +93,7 @@ export function TemplateEditor() {
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'tables', label: 'Tables', icon: TableIcon },
+        { id: 'outline', label: 'Index', icon: List },
         { id: 'front-page', label: 'Front Page', icon: FileText },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
@@ -146,10 +147,10 @@ export function TemplateEditor() {
         const headerMargins = s.header?.margins || { bottom: '0mm', left: '0mm', right: '0mm' };
         const footerMargins = s.footer?.margins || { top: '0mm', left: '0mm', right: '0mm' };
 
-        // Check for page number offset
-        const headerMatch = s.header?.content?.match(/"offset":\s*(\d+)/);
-        const footerMatch = s.footer?.content?.match(/"offset":\s*(\d+)/);
-        const offset = headerMatch ? parseInt(headerMatch[1]) : (footerMatch ? parseInt(footerMatch[1]) : 0);
+        // Calculate page number offset from startPageNumber setting
+        // If startPageNumber is 2, page 2 should display as 1, so offset = 1 - 2 = -1
+        const startPageNumber = s.startPageNumber || 1;
+        const offset = 1 - startPageNumber;
 
         const generateHeadingCss = (level: string, style: any) => {
             if (!style) return '';
@@ -560,7 +561,7 @@ export function TemplateEditor() {
                                     </div>
                                 </div>
                                 <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Formatting</label>
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
                                     <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
                                         <button
                                             onClick={() => updateSetting(`${activeHeadingLevel}.fontWeight`, (settings as any)[activeHeadingLevel].fontWeight === '700' ? '400' : '700')}
@@ -574,6 +575,17 @@ export function TemplateEditor() {
                                             <Bold size={16} />
                                         </button>
                                         <button
+                                            onClick={() => updateSetting(`${activeHeadingLevel}.fontStyle`, (settings as any)[activeHeadingLevel].fontStyle === 'italic' ? 'normal' : 'italic')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings as any)[activeHeadingLevel].fontStyle === 'italic'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Italic size={16} />
+                                        </button>
+                                        <button
                                             onClick={() => updateSetting(`${activeHeadingLevel}.textDecoration`, (settings as any)[activeHeadingLevel].textDecoration === 'underline' ? 'none' : 'underline')}
                                             className={cn(
                                                 "p-2.5 rounded-xl transition-all",
@@ -583,18 +595,6 @@ export function TemplateEditor() {
                                             )}
                                         >
                                             <Underline size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => updateSetting(`${activeHeadingLevel}.borderBottom`, !(settings as any)[activeHeadingLevel].borderBottom)}
-                                            className={cn(
-                                                "p-2.5 rounded-xl transition-all",
-                                                (settings as any)[activeHeadingLevel].borderBottom
-                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                            title="Border Bottom"
-                                        >
-                                            <Baseline size={16} />
                                         </button>
                                     </div>
                                 </div>
@@ -796,6 +796,20 @@ export function TemplateEditor() {
                                     />
                                 </div>
                             </div>
+
+                            {/* Start Page Number */}
+                            <div className="pt-4 border-t border-border">
+                                <div className="space-y-3 max-w-xs">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Start Page Number</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-4 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                        value={settings.startPageNumber || 1}
+                                        onChange={(e) => updateSetting('startPageNumber', Math.max(1, parseInt(e.target.value) || 1))}
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </section>
 
@@ -864,6 +878,148 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Index/Outline Section */}
+                    <section id="section-outline" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <List size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Index</h2>
+                        </div>
+
+                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Enable Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Enable index</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, a table of contents will be automatically generated based on your document headings.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('outline.enabled', !settings.outline?.enabled)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.outline?.enabled ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.outline?.enabled ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {settings.outline?.enabled && (
+                                <>
+                                    {/* Title Settings */}
+                                    <div className="pt-8 border-t border-border space-y-8">
+                                        <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Title</h3>
+                                        
+                                        <HeaderFooterPlateEditor
+                                            content={settings.outline?.title?.content || ''}
+                                            onChange={(value) => updateSetting('outline.title.content', value)}
+                                            placeholder="Table of Contents"
+                                        />
+                                    </div>
+
+                                    {/* Entries Settings */}
+                                    <div className="pt-8 border-t border-border space-y-8">
+                                        <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Entries Settings</h3>
+
+                                        <div className="grid grid-cols-3 gap-6">
+                                            <div className="flex flex-col gap-3">
+                                                <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Size</label>
+                                                <input
+                                                    type="number"
+                                                    min="8"
+                                                    max="36"
+                                                    className="block w-20 bg-muted/50 border border-border rounded-2xl p-1 h-[42px] text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border text-center"
+                                                    value={parseInt(settings.outline?.entries?.fontSize || '12')}
+                                                    onChange={(e) => updateSetting('outline.entries.fontSize', `${e.target.value}px`)}
+                                                    placeholder="12"
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-3">
+                                                <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
+                                                <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                                    <button
+                                                        onClick={() => updateSetting('outline.entries.bold', !settings.outline?.entries?.bold)}
+                                                        className={cn(
+                                                            "p-2.5 rounded-xl transition-all",
+                                                            settings.outline?.entries?.bold
+                                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                                : "text-muted-foreground hover:text-foreground"
+                                                        )}
+                                                    >
+                                                        <Bold size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => updateSetting('outline.entries.italic', !settings.outline?.entries?.italic)}
+                                                        className={cn(
+                                                            "p-2.5 rounded-xl transition-all",
+                                                            settings.outline?.entries?.italic
+                                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                                : "text-muted-foreground hover:text-foreground"
+                                                        )}
+                                                    >
+                                                        <Italic size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => updateSetting('outline.entries.underline', !settings.outline?.entries?.underline)}
+                                                        className={cn(
+                                                            "p-2.5 rounded-xl transition-all",
+                                                            settings.outline?.entries?.underline
+                                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                                : "text-muted-foreground hover:text-foreground"
+                                                        )}
+                                                    >
+                                                        <Underline size={16} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col gap-3">
+                                                <label className="block text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Filler</label>
+                                                <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                                    {[
+                                                        { id: 'dotted', label: 'Dotted' },
+                                                        { id: 'line', label: 'Line' },
+                                                        { id: 'empty', label: 'Empty' }
+                                                    ].map((filler) => (
+                                                        <button
+                                                            key={filler.id}
+                                                            onClick={() => updateSetting('outline.entries.filler', filler.id)}
+                                                            className={cn(
+                                                                "px-3 p-2.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all",
+                                                                settings.outline?.entries?.filler === filler.id
+                                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                                    : "text-muted-foreground hover:text-foreground"
+                                                            )}
+                                                        >
+                                                            {filler.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Empty Pages After */}
+                                    <div className="flex items-center gap-4 pt-8 border-t border-border">
+                                        <label className="text-sm font-medium text-foreground">Empty pages after</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={settings.outline?.emptyPagesAfter || 0}
+                                            onChange={(e) => updateSetting('outline.emptyPagesAfter', Math.max(0, parseInt(e.target.value) || 0))}
+                                            className="w-20 px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </section>
+
                     {/* Front Page Section */}
                     <section id="section-front-page" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -904,6 +1060,18 @@ export function TemplateEditor() {
                                         placeholder="Design your front page..."
                                         variant="large"
                                     />
+
+                                    {/* Empty Pages After */}
+                                    <div className="flex items-center gap-4 pt-4 border-t border-border">
+                                        <label className="text-sm font-medium text-foreground">Empty pages after</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={settings.frontPage?.emptyPagesAfter || 0}
+                                            onChange={(e) => updateSetting('frontPage.emptyPagesAfter', Math.max(0, parseInt(e.target.value) || 0))}
+                                            className="w-20 px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                                        />
+                                    </div>
                                 </>
                             )}
                         </div>

@@ -140,7 +140,7 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
           icon: <HashIcon />,
           label: 'Page Number',
           value: KEY_PLACEHOLDER,
-          data: { placeholderType: 'page', format: 'decimal', offset: 0 }
+          data: { placeholderType: 'page', format: 'decimal' }
         },
         {
           icon: <LayersIcon />,
