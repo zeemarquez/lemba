@@ -11,7 +11,9 @@ export interface TypstOptions {
     fontFamily?: string;
     fontSize?: string;
     header?: string;
+    headerMargins?: { bottom: string; left: string; right: string };
     footer?: string;
+    footerMargins?: { top: string; left: string; right: string };
     pageLayout?: 'portrait' | 'horizontal' | 'vertical';
     backgroundColor?: string;
     textColor?: string;
@@ -184,7 +186,9 @@ export function generatePreamble(options: TypstOptions): string {
         fontFamily = 'sans-serif', // Use generic font that Typst has
         fontSize = '12pt',
         header = '',
+        headerMargins,
         footer = '',
+        footerMargins,
         pageLayout = 'portrait'
     } = options;
 
@@ -281,6 +285,37 @@ export function generatePreamble(options: TypstOptions): string {
         console.log(`[Typst] Mapped font "${fontFamily}" -> "${cleanedFont}"`);
     }
 
+    // Header/footer margins (simplified):
+    // - Header: bottom margin (gap to content), left/right (horizontal inset)
+    // - Footer: top margin (gap from content), left/right (horizontal inset)
+    const typstHeaderMargins = {
+        bottom: fixTypstUnit(headerMargins?.bottom || '5mm'),
+        left: fixTypstUnit(headerMargins?.left || '0mm'),
+        right: fixTypstUnit(headerMargins?.right || '0mm'),
+    };
+    
+    const typstFooterMargins = {
+        top: fixTypstUnit(footerMargins?.top || '5mm'),
+        left: fixTypstUnit(footerMargins?.left || '0mm'),
+        right: fixTypstUnit(footerMargins?.right || '0mm'),
+    };
+
+    // Build header content with left/right padding for horizontal inset
+    const headerContent = header.trim() 
+        ? `#pad(left: ${typstHeaderMargins.left}, right: ${typstHeaderMargins.right})[${header}]`
+        : '';
+    
+    // Build footer content with left/right padding for horizontal inset
+    const footerContent = footer.trim()
+        ? `#pad(left: ${typstFooterMargins.left}, right: ${typstFooterMargins.right})[${footer}]`
+        : '';
+
+    // header-ascent: gap between header and main content (header's bottom margin)
+    // footer-descent: gap between main content and footer (footer's top margin)
+    // When no header/footer, use 0pt so margins are exact
+    const headerAscent = header.trim() ? typstHeaderMargins.bottom : '0pt';
+    const footerDescent = footer.trim() ? typstFooterMargins.top : '0pt';
+
     return `
 #set page(
   paper: "a4",
@@ -293,11 +328,13 @@ export function generatePreamble(options: TypstOptions): string {
   ),
   fill: rgb("${bgColor}"),
   header: [
-    ${header}
+    ${headerContent}
   ],
+  header-ascent: ${headerAscent},
   footer: [
-    ${footer}
-  ]
+    ${footerContent}
+  ],
+  footer-descent: ${footerDescent}
 )
 
 #set text(

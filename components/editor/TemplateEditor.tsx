@@ -141,8 +141,8 @@ export function TemplateEditor() {
     // This CSS is only used for browser print (Ctrl+P)
     const generateCss = (s: typeof settings) => {
         const margins = s.margins || { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' };
-        const headerMargins = s.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
-        const footerMargins = s.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
+        const headerMargins = s.header?.margins || { bottom: '0mm', left: '0mm', right: '0mm' };
+        const footerMargins = s.footer?.margins || { top: '0mm', left: '0mm', right: '0mm' };
 
         // Check for page number offset
         const headerMatch = s.header?.content?.match(/"offset":\s*(\d+)/);
@@ -273,18 +273,14 @@ export function TemplateEditor() {
                 width: 100%;
             }
             .page-header {
-                padding-top: ${headerMargins.top};
                 padding-right: ${headerMargins.right};
                 padding-bottom: ${headerMargins.bottom};
                 padding-left: ${headerMargins.left};
-                margin-bottom: 10px;
             }
             .page-footer {
                 padding-top: ${footerMargins.top};
                 padding-right: ${footerMargins.right};
-                padding-bottom: ${footerMargins.bottom};
                 padding-left: ${footerMargins.left};
-                margin-top: 10px;
             }
             .page-header p, .page-footer p {
                 margin: 0;
@@ -860,9 +856,8 @@ export function TemplateEditor() {
                                     {/* Margins */}
                                     <div className="space-y-5">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
-                                        <div className="grid grid-cols-4 gap-6">
+                                        <div className="grid grid-cols-3 gap-6">
                                             {[
-                                                { label: 'Top', path: 'header.margins.top' },
                                                 { label: 'Bottom', path: 'header.margins.bottom' },
                                                 { label: 'Left', path: 'header.margins.left' },
                                                 { label: 'Right', path: 'header.margins.right' }
@@ -926,10 +921,9 @@ export function TemplateEditor() {
                                     {/* Margins */}
                                     <div className="space-y-5">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
-                                        <div className="grid grid-cols-4 gap-6">
+                                        <div className="grid grid-cols-3 gap-6">
                                             {[
                                                 { label: 'Top', path: 'footer.margins.top' },
-                                                { label: 'Bottom', path: 'footer.margins.bottom' },
                                                 { label: 'Left', path: 'footer.margins.left' },
                                                 { label: 'Right', path: 'footer.margins.right' }
                                             ].map((m) => (

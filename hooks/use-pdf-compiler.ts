@@ -30,8 +30,8 @@ export interface TemplateSettings {
     h4?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h5?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h6?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    header?: { enabled?: boolean; content?: string; margins?: { top: string; bottom: string; left: string; right: string } };
-    footer?: { enabled?: boolean; content?: string; margins?: { top: string; bottom: string; left: string; right: string } };
+    header?: { enabled?: boolean; content?: string; margins?: { bottom: string; left: string; right: string } };
+    footer?: { enabled?: boolean; content?: string; margins?: { top: string; left: string; right: string } };
     [key: string]: unknown;
 }
 
@@ -163,7 +163,9 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             const typstOptions: TypstOptions = {
                 ...settings,
                 header: headerContent,
+                headerMargins: settings?.header?.margins,
                 footer: footerContent,
+                footerMargins: settings?.footer?.margins,
                 fontFamily: settings?.fontFamily || 'Inter',
             };
 
