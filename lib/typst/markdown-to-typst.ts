@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
+import { texToTypst } from 'tex-to-typst';
 
 export interface MarkdownToTypstOptions {
     tables?: {
@@ -175,37 +176,24 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
 
             return `#image("${escapeTypstString(href)}"${extraArgs})\n\n`;
         case 'katex':
-            return `$ ${fixMathForTypst(token.text)} $\n\n`;
+        case 'blockKatex':
+            // Block/display math: use spaces around content for Typst display mode
+            return `$ ${convertLatexToTypst(token.text)} $\n\n`;
         default:
             return '';
     }
 }
 
-function fixMathForTypst(math: string): string {
-    if (!math) return '';
-    const commandMap: Record<string, string> = {
-        '\\sum': ' sum ', '\\prod': ' prod ', '\\int': ' integral ',
-        '\\alpha': ' alpha ', '\\beta': ' beta ', '\\gamma': ' gamma ',
-        '\\sigma': ' sigma ', '\\pi': ' pi ', '\\infty': ' oo ',
-        '\\partial': ' pd ', '\\nabla': ' nabla ', '\\text': ' text ',
-        '\\sqrt': ' sqrt ', '\\sin': ' sin ', '\\cos': ' cos ',
-        '\\tan': ' tan ', '\\log': ' log ', '\\ln': ' ln ',
-        '\\lim': ' lim ', '\\to': ' -> ', '\\rightarrow': ' -> ',
-        '\\approx': ' approx ', '\\le': ' <= ', '\\ge': ' >= ',
-        '\\neq': ' != ', '\\pm': ' plus.minus ', '\\times': ' * ',
-        '\\div': ' / ', '\\cdot': ' dot '
-    };
-    let processed = math;
-    for (const [lat, typ] of Object.entries(commandMap)) {
-        processed = processed.split(lat).join(typ);
+function convertLatexToTypst(latex: string): string {
+    if (!latex) return '';
+    try {
+        const result = texToTypst(latex);
+        return result.value || latex;
+    } catch (error) {
+        console.error('[Typst] Failed to convert LaTeX to Typst:', error);
+        // Return the original if conversion fails
+        return latex;
     }
-    processed = processed.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, ' frac($1, $2) ');
-    processed = processed.replace(/\\([a-zA-Z]+)/g, ' $1 ');
-    return processed.replace(/[a-zA-Z]{2,}/g, (match) => {
-        const typstKeywords = new Set(['sum', 'prod', 'integral', 'frac', 'sqrt', 'sin', 'cos', 'tan', 'log', 'ln', 'lim', 'alpha', 'beta', 'gamma', 'oo']);
-        if (typstKeywords.has(match.toLowerCase())) return match;
-        return match.split('').join(' ');
-    });
 }
 
 function parseInline(tokens: any[]): string {
@@ -242,7 +230,14 @@ function parseInline(tokens: any[]): string {
                 output += `#image("${escapeTypstString(href)}"${w ? `, width: ${w}` : ''})`;
                 break;
             case 'inlineKatex':
-                output += `$${fixMathForTypst(token.text)}$`;
+                // Check displayMode: true means block/display math ($$...$$), false means inline ($...$)
+                if (token.displayMode) {
+                    // Display mode math: use spaces for Typst block display
+                    output += `$ ${convertLatexToTypst(token.text)} $`;
+                } else {
+                    // Inline math: no spaces for Typst inline mode
+                    output += `$${convertLatexToTypst(token.text)}$`;
+                }
                 break;
             case 'escape':
                 output += escapeTypst(token.text);
