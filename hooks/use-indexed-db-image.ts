@@ -24,6 +24,7 @@ export function getImageIdFromUrl(url: string): string | null {
 /**
  * Resolve an IndexedDB URL to a blob URL
  * Returns the original URL if it's not an IndexedDB URL
+ * Returns undefined if the IndexedDB image cannot be found
  */
 export async function resolveImageUrl(url: string | undefined): Promise<string | undefined> {
   if (!url) return url;
@@ -39,7 +40,7 @@ export async function resolveImageUrl(url: string | undefined): Promise<string |
   }
   
   const imageId = getImageIdFromUrl(url);
-  if (!imageId) return url;
+  if (!imageId) return undefined;
   
   try {
     const blobUrl = await browserStorage.getImageUrl(imageId);
@@ -51,7 +52,8 @@ export async function resolveImageUrl(url: string | undefined): Promise<string |
     console.error('Failed to resolve IndexedDB image URL:', e);
   }
   
-  return url;
+  // Return undefined if we couldn't resolve the IndexedDB URL
+  return undefined;
 }
 
 /**

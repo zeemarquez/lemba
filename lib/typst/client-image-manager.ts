@@ -1,5 +1,7 @@
 'use client';
 
+import { browserStorage } from '@/lib/browser-storage';
+
 /**
  * Fetch an image from URL and return as base64 data URL
  */
@@ -48,9 +50,56 @@ async function blobUrlToDataUrl(blobUrl: string): Promise<string | null> {
     }
 }
 
+/**
+ * Convert an IndexedDB image URL to a base64 data URL
+ */
+async function indexedDbUrlToDataUrl(indexedDbUrl: string): Promise<string | null> {
+    try {
+        // Extract image ID from indexeddb://images/{id}
+        const match = indexedDbUrl.match(/^indexeddb:\/\/images\/(.+)$/);
+        if (!match) {
+            console.error(`[Typst] [ImageManager] Invalid IndexedDB URL format: ${indexedDbUrl}`);
+            return null;
+        }
+        
+        const imageId = match[1];
+        
+        // Get the blob URL from browser storage
+        const blobUrl = await browserStorage.getImageUrl(imageId);
+        if (!blobUrl) {
+            console.error(`[Typst] [ImageManager] Image not found in IndexedDB: ${imageId}`);
+            return null;
+        }
+        
+        // Convert blob URL to data URL
+        return await blobUrlToDataUrl(blobUrl);
+    } catch (e) {
+        console.error(`[Typst] [ImageManager] Failed to convert IndexedDB URL:`, e);
+        return null;
+    }
+}
+
 export interface ProcessTypstImagesResult {
     source: string;
     images: never[]; // We no longer use separate image array, all embedded as data URLs
+}
+
+/**
+ * Generate a placeholder image data URL for missing images
+ * Creates a simple gray rectangle with "Image not found" text
+ */
+function generatePlaceholderImageDataUrl(): string {
+    // Create a simple SVG placeholder
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120">
+        <rect width="200" height="120" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/>
+        <path d="M60 50 L80 70 L95 55 L120 85 L80 85 L60 60 Z" fill="#ccc"/>
+        <circle cx="130" cy="45" r="12" fill="#ccc"/>
+        <text x="100" y="105" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#888">Could not find image</text>
+    </svg>`;
+    
+    // Convert to base64 data URL
+    const base64 = btoa(svg);
+    return `data:image/svg+xml;base64,${base64}`;
 }
 
 /**
@@ -98,18 +147,28 @@ export async function processTypstImages(typstSource: string): Promise<ProcessTy
             } else if (url.startsWith('blob:')) {
                 console.log('[Typst] [ImageManager] Converting blob URL to data URL');
                 dataUrl = await blobUrlToDataUrl(url);
+            } else if (url.startsWith('indexeddb://')) {
+                console.log(`[Typst] [ImageManager] Converting IndexedDB URL to data URL: ${url}`);
+                dataUrl = await indexedDbUrlToDataUrl(url);
             } else {
                 // Local/relative paths - these won't work in browser context
                 console.warn(`[Typst] [ImageManager] Cannot handle local path in browser: ${url}`);
-                continue;
+                // Use placeholder for unhandled paths
+                dataUrl = generatePlaceholderImageDataUrl();
             }
 
-            if (dataUrl) {
-                urlToDataUrl.set(rawUrl, dataUrl);
-                console.log(`[Typst] [ImageManager] SUCCESS: Converted ${url.substring(0, 50)}... to data URL`);
+            // If we couldn't get the image, use a placeholder
+            if (!dataUrl) {
+                console.warn(`[Typst] [ImageManager] Using placeholder for missing image: ${url.substring(0, 50)}...`);
+                dataUrl = generatePlaceholderImageDataUrl();
             }
+
+            urlToDataUrl.set(rawUrl, dataUrl);
+            console.log(`[Typst] [ImageManager] SUCCESS: Converted ${url.substring(0, 50)}... to data URL`);
         } catch (e) {
             console.error(`[Typst] [ImageManager] ERROR processing ${rawUrl}:`, e);
+            // Use placeholder on error as well
+            urlToDataUrl.set(rawUrl, generatePlaceholderImageDataUrl());
         }
     }
 
