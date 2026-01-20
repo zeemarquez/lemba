@@ -59,6 +59,7 @@ export interface Template {
         header?: {
             enabled: boolean;
             content: string;
+            startPage: number;
             margins: {
                 bottom: string;
                 left: string;
@@ -68,11 +69,16 @@ export interface Template {
         footer?: {
             enabled: boolean;
             content: string;
+            startPage: number;
             margins: {
                 top: string;
                 left: string;
                 right: string;
             };
+        };
+        frontPage?: {
+            enabled: boolean;
+            content: string;
         };
         codeBlockTheme?: string;
     }
@@ -174,8 +180,9 @@ const DEFAULT_TEMPLATE: Template = {
         h4: { fontSize: '1.25em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
         h5: { fontSize: '1.1em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
         h6: { fontSize: '1em', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
-        header: { enabled: false, content: '', margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
-        footer: { enabled: false, content: '', margins: { top: '5mm', left: '0mm', right: '0mm' } },
+        header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
+        footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
+        frontPage: { enabled: false, content: '' },
     }
 };
 

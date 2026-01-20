@@ -12,8 +12,11 @@ export interface TypstOptions {
     fontSize?: string;
     header?: string;
     headerMargins?: { bottom: string; left: string; right: string };
+    headerStartPage?: number;
     footer?: string;
     footerMargins?: { top: string; left: string; right: string };
+    footerStartPage?: number;
+    frontPage?: string;
     pageLayout?: 'portrait' | 'horizontal' | 'vertical';
     backgroundColor?: string;
     textColor?: string;
@@ -187,8 +190,11 @@ export function generatePreamble(options: TypstOptions): string {
         fontSize = '12pt',
         header = '',
         headerMargins,
+        headerStartPage = 1,
         footer = '',
         footerMargins,
+        footerStartPage = 1,
+        frontPage = '',
         pageLayout = 'portrait'
     } = options;
 
@@ -301,12 +307,13 @@ export function generatePreamble(options: TypstOptions): string {
     };
 
     // Build header content with left/right padding for horizontal inset
-    const headerContent = header.trim() 
+    // Use context to conditionally show header based on page number
+    const paddedHeaderContent = header.trim() 
         ? `#pad(left: ${typstHeaderMargins.left}, right: ${typstHeaderMargins.right})[${header}]`
         : '';
     
     // Build footer content with left/right padding for horizontal inset
-    const footerContent = footer.trim()
+    const paddedFooterContent = footer.trim()
         ? `#pad(left: ${typstFooterMargins.left}, right: ${typstFooterMargins.right})[${footer}]`
         : '';
 
@@ -315,6 +322,32 @@ export function generatePreamble(options: TypstOptions): string {
     // When no header/footer, use 0pt so margins are exact
     const headerAscent = header.trim() ? typstHeaderMargins.bottom : '0pt';
     const footerDescent = footer.trim() ? typstFooterMargins.top : '0pt';
+
+    // When front page is enabled, header/footer should start from page 2 at minimum
+    // (page 1 is the front page which shouldn't have header/footer)
+    const hasFrontPage = frontPage.trim().length > 0;
+    const effectiveHeaderStartPage = hasFrontPage ? Math.max(headerStartPage, 2) : headerStartPage;
+    const effectiveFooterStartPage = hasFrontPage ? Math.max(footerStartPage, 2) : footerStartPage;
+
+    // Build header value - always use context since placeholders like page numbers require it
+    let headerValue: string;
+    if (!header.trim()) {
+        headerValue = '[]';
+    } else if (effectiveHeaderStartPage > 1) {
+        headerValue = `context { if counter(page).get().first() >= ${effectiveHeaderStartPage} [${paddedHeaderContent}] }`;
+    } else {
+        headerValue = `context [${paddedHeaderContent}]`;
+    }
+
+    // Build footer value - always use context since placeholders like page numbers require it
+    let footerValue: string;
+    if (!footer.trim()) {
+        footerValue = '[]';
+    } else if (effectiveFooterStartPage > 1) {
+        footerValue = `context { if counter(page).get().first() >= ${effectiveFooterStartPage} [${paddedFooterContent}] }`;
+    } else {
+        footerValue = `context [${paddedFooterContent}]`;
+    }
 
     return `
 #set page(
@@ -327,13 +360,9 @@ export function generatePreamble(options: TypstOptions): string {
     right: ${typstMargins.right}
   ),
   fill: rgb("${bgColor}"),
-  header: [
-    ${headerContent}
-  ],
+  header: ${headerValue},
   header-ascent: ${headerAscent},
-  footer: [
-    ${footerContent}
-  ],
+  footer: ${footerValue},
   footer-descent: ${footerDescent}
 )
 

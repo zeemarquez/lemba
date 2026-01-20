@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown, FileText } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -92,6 +92,7 @@ export function TemplateEditor() {
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
+        { id: 'front-page', label: 'Front Page', icon: FileText },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
     ], []);
@@ -817,6 +818,51 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Front Page Section */}
+                    <section id="section-front-page" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <FileText size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Front Page</h2>
+                        </div>
+
+                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Enable Toggle */}
+                            <div className="flex items-center gap-6">
+                                <label className="text-base font-semibold text-foreground">Enable front page</label>
+                                <button
+                                    onClick={() => updateSetting('frontPage.enabled', !settings.frontPage?.enabled)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative",
+                                        settings.frontPage?.enabled ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.frontPage?.enabled ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {settings.frontPage?.enabled && (
+                                <>
+                                    <p className="text-sm text-muted-foreground">
+                                        The front page will be inserted as the first page of your document, before the main content.
+                                    </p>
+
+                                    {/* Plate Editor for Front Page Content */}
+                                    <HeaderFooterPlateEditor
+                                        content={settings.frontPage?.content || ''}
+                                        onChange={(value) => updateSetting('frontPage.content', value)}
+                                        placeholder="Design your front page..."
+                                        variant="large"
+                                    />
+                                </>
+                            )}
+                        </div>
+                    </section>
+
                     {/* Header Section */}
                     <section id="section-header" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -852,6 +898,21 @@ export function TemplateEditor() {
                                         onChange={(value) => updateSetting('header.content', value)}
                                         placeholder="Type something..."
                                     />
+
+                                    {/* Start Page */}
+                                    <div className="flex items-center gap-4">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Start from page</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                            value={settings.header?.startPage || 1}
+                                            onChange={(e) => {
+                                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                                updateSetting('header.startPage', val);
+                                            }}
+                                        />
+                                    </div>
 
                                     {/* Margins */}
                                     <div className="space-y-5">
@@ -917,6 +978,21 @@ export function TemplateEditor() {
                                         onChange={(value) => updateSetting('footer.content', value)}
                                         placeholder="Type something..."
                                     />
+
+                                    {/* Start Page */}
+                                    <div className="flex items-center gap-4">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Start from page</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                            value={settings.footer?.startPage || 1}
+                                            onChange={(e) => {
+                                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                                updateSetting('footer.startPage', val);
+                                            }}
+                                        />
+                                    </div>
 
                                     {/* Margins */}
                                     <div className="space-y-5">

@@ -14,6 +14,7 @@ interface HeaderFooterPlateEditorProps {
   content: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  variant?: 'default' | 'large';
 }
 
 // Try to parse content as JSON (Plate Value), fallback to markdown deserialization
@@ -36,7 +37,7 @@ function parseContent(content: string, tempEditor: ReturnType<typeof createPlate
   return tempEditor.api.markdown.deserialize(content);
 }
 
-export function HeaderFooterPlateEditor({ content, onChange, placeholder }: HeaderFooterPlateEditorProps) {
+export function HeaderFooterPlateEditor({ content, onChange, placeholder, variant = 'default' }: HeaderFooterPlateEditorProps) {
   const mounted = useMounted();
   const isUpdatingFromPlate = useRef(false);
 
@@ -85,10 +86,10 @@ export function HeaderFooterPlateEditor({ content, onChange, placeholder }: Head
           <HeaderFooterToolbarButtons />
         </FixedToolbar>
 
-        <EditorContainer className="min-h-[160px] max-h-[280px]">
+        <EditorContainer className={variant === 'large' ? "min-h-[600px] max-h-[800px]" : "min-h-[160px] max-h-[280px]"}>
           <Editor 
             variant="none" 
-            className="px-4 py-3 text-sm min-h-[160px]"
+            className={variant === 'large' ? "px-4 py-3 text-sm min-h-[600px]" : "px-4 py-3 text-sm min-h-[160px]"}
             placeholder={placeholder || "Type something..."}
           />
         </EditorContainer>

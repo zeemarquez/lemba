@@ -30,8 +30,9 @@ export interface TemplateSettings {
     h4?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h5?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h6?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
-    header?: { enabled?: boolean; content?: string; margins?: { bottom: string; left: string; right: string } };
-    footer?: { enabled?: boolean; content?: string; margins?: { top: string; left: string; right: string } };
+    header?: { enabled?: boolean; content?: string; startPage?: number; margins?: { bottom: string; left: string; right: string } };
+    footer?: { enabled?: boolean; content?: string; startPage?: number; margins?: { top: string; left: string; right: string } };
+    frontPage?: { enabled?: boolean; content?: string };
     [key: string]: unknown;
 }
 
@@ -50,22 +51,28 @@ export interface UsePdfCompilerReturn {
 }
 
 /**
- * Convert header/footer content to Typst
+ * Convert Plate/markdown content to Typst
+ * @param scaleImages - If true, applies scaling to images (used for header/footer)
+ * @param insideContext - If true, content will be rendered inside a context expression (header/footer)
  */
-async function headerFooterToTypst(content: string, context: { title?: string }): Promise<string> {
+async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean }): Promise<string> {
     if (!content) return '';
 
     try {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed) && parsed.length > 0) {
             // It's Plate content (JSON)
-            return serializeNodesToTypst(parsed, { title: context.title });
+            return serializeNodesToTypst(parsed, { 
+                title: context.title, 
+                scaleImages: context.scaleImages,
+                insideContext: context.insideContext 
+            });
         }
     } catch {
         // Not JSON, assume markdown string
     }
 
-    // For markdown headers, we use our converter
+    // For markdown content, we use our converter
     return markdownToTypst(content).trim();
 }
 
@@ -145,18 +152,27 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             // 2. Convert Markdown to Typst
             const typstBody = markdownToTypst(markdownWithImages);
 
-            // 3. Prepare Header/Footer
+            // 3. Prepare Header/Footer/Front Page
             let headerContent = '';
             let footerContent = '';
+            let frontPageContent = '';
             
             if (settings?.header?.enabled && settings?.header?.content) {
                 const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);
-                headerContent = await headerFooterToTypst(headerWithImages, { title });
+                // Header is inside context expression, so insideContext=true
+                headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true });
             }
             
             if (settings?.footer?.enabled && settings?.footer?.content) {
                 const footerWithImages = await convertIndexedDbImagesToBase64(settings.footer.content);
-                footerContent = await headerFooterToTypst(footerWithImages, { title });
+                // Footer is inside context expression, so insideContext=true
+                footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true });
+            }
+
+            if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
+                const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
+                // Front page is in document body, NOT inside context, so insideContext=false
+                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false });
             }
 
             // 4. Generate Preamble
@@ -164,15 +180,23 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
                 ...settings,
                 header: headerContent,
                 headerMargins: settings?.header?.margins,
+                headerStartPage: settings?.header?.startPage || 1,
                 footer: footerContent,
                 footerMargins: settings?.footer?.margins,
+                footerStartPage: settings?.footer?.startPage || 1,
                 fontFamily: settings?.fontFamily || 'Inter',
+                frontPage: frontPageContent,
             };
 
             const preamble = generatePreamble(typstOptions);
 
             // 5. Combine source and process images (convert URLs to data URLs)
-            const fullSourceRaw = `${preamble}\n\n${typstBody}`;
+            // If front page is enabled, add it before the main content with a page break
+            let bodyContent = typstBody;
+            if (frontPageContent) {
+                bodyContent = `${frontPageContent}\n#pagebreak()\n\n${typstBody}`;
+            }
+            const fullSourceRaw = `${preamble}\n\n${bodyContent}`;
             const typstResult = await processTypstImages(fullSourceRaw);
             const fullSource = typstResult.source;
 

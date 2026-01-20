@@ -3,6 +3,9 @@ import { fixTypstUnit } from './client-compiler';
 
 interface SerializeContext {
     title?: string;
+    scaleImages?: boolean;
+    /** If true, content is for header/footer which is already wrapped in context expression */
+    insideContext?: boolean;
 }
 
 export function serializeNodesToTypst(nodes: Descendant[], context: SerializeContext = {}): string {
@@ -132,8 +135,8 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             const src = e.url || e.src || '';
 
             // Collect sizing arguments
-            // Apply 0.5 scaling factor for header/footer images
-            const imgScaleFactor = 0.25;
+            // Apply 0.25 scaling factor for header/footer images (when scaleImages is true)
+            const imgScaleFactor = context.scaleImages ? 0.25 : 1;
             const args: string[] = [];
 
             // Priority: width, then maxWidth/maxWidth
@@ -163,20 +166,138 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             return serializeTable(element, context);
 
         case 'placeholder':
-            if (element.placeholderType === 'page') {
-                return `#counter(page).display()`;
-            }
-            if (element.placeholderType === 'date') {
-                return `#datetime.today().display()`;
-            }
-            if (element.placeholderType === 'title') {
-                return escapeTypst(context.title || '');
-            }
-            return '';
+            return serializePlaceholder(element, context);
+
+        case 'vertical_spacer':
+            const spacerHeight = (element as any).height || 50;
+            return `#v(${spacerHeight}pt)\n`;
 
         default:
             return wrapAlign(`${children}\n`, align);
     }
+}
+
+/**
+ * Convert format string to Typst numbering pattern
+ */
+function formatToTypstNumbering(format: string | undefined): string {
+    switch (format) {
+        case 'lower-roman': return '"i"';
+        case 'upper-roman': return '"I"';
+        case 'lower-alpha': return '"a"';
+        case 'upper-alpha': return '"A"';
+        case 'decimal':
+        default: return '"1"';
+    }
+}
+
+/**
+ * Serialize a placeholder element to Typst
+ */
+function serializePlaceholder(element: TElement, context: SerializeContext): string {
+    const placeholderType = (element as any).placeholderType;
+    const format = (element as any).format;
+    const offset = (element as any).offset || 0;
+    const fontFamily = (element as any).fontFamily;
+    const fontSize = (element as any).fontSize;
+    const bold = (element as any).bold;
+    const italic = (element as any).italic;
+    const underline = (element as any).underline;
+
+    let content = '';
+
+    if (placeholderType === 'page') {
+        const numbering = formatToTypstNumbering(format);
+        if (offset !== 0) {
+            // Use counter.step with offset, then display
+            content = `#{ counter(page).update(n => n + ${offset}); counter(page).display(${numbering}); counter(page).update(n => n - ${offset}) }`;
+            // Simpler approach: just add offset to displayed value
+            content = `#numbering(${numbering}, counter(page).get().first() + ${offset})`;
+        } else {
+            content = `#counter(page).display(${numbering})`;
+        }
+    } else if (placeholderType === 'totalPages') {
+        const numbering = formatToTypstNumbering(format);
+        content = `#numbering(${numbering}, counter(page).final().first())`;
+    } else if (placeholderType === 'date') {
+        // Map format to Typst datetime display format
+        let dateFormat = '"[month]/[day]/[year]"'; // default
+        switch (format) {
+            case 'iso':
+                dateFormat = '"[year]-[month padding:zero]-[day padding:zero]"';
+                break;
+            case 'long':
+                dateFormat = '"[month repr:long] [day], [year]"';
+                break;
+            case 'short':
+                dateFormat = '"[month padding:none]/[day padding:none]/[year repr:last_two]"';
+                break;
+            case 'default':
+            default:
+                dateFormat = '"[month padding:zero]/[day padding:zero]/[year]"';
+                break;
+        }
+        content = `#datetime.today().display(${dateFormat})`;
+    } else if (placeholderType === 'title') {
+        content = escapeTypst(context.title || '');
+    }
+
+    // Check if content needs context (page numbers, total pages, dates need context)
+    // Title is just plain text and doesn't need context
+    const needsContext = placeholderType === 'page' || placeholderType === 'totalPages' || placeholderType === 'date';
+    
+    // If we're NOT inside a context (i.e., in body/front page) and content needs context,
+    // we must wrap the entire output in context
+    const wrapInContext = needsContext && !context.insideContext;
+
+    // Check if we need any styling
+    const hasStyles = bold || italic || underline || fontSize || fontFamily;
+    
+    if (!hasStyles) {
+        // No styling - just return content, wrapped in context if needed
+        if (wrapInContext) {
+            // Strip the # and wrap in context
+            const expr = content.startsWith('#') ? content.slice(1) : content;
+            return `#context ${expr}`;
+        }
+        return content;
+    }
+    
+    // Build style parameters
+    const styles: string[] = [];
+    if (bold) styles.push('weight: "bold"');
+    if (italic) styles.push('style: "italic"');
+    if (fontSize) styles.push(`size: ${fixTypstUnit(fontSize)}`);
+    if (fontFamily) {
+        const cleanFont = fontFamily.replace(/^['"]|['"]$/g, '').split(',')[0].trim();
+        styles.push(`font: "${cleanFont}"`);
+    }
+    
+    // Apply styling using #text()[...] wrapper
+    // For header/footer (insideContext=true): context propagates into content brackets
+    // For body (insideContext=false): we wrap everything in context at the end
+    let result = content;
+    
+    // Apply underline first (innermost)
+    if (underline) {
+        result = `#underline[${result}]`;
+    }
+    
+    // Apply text styling (outermost)
+    if (styles.length > 0) {
+        result = `#text(${styles.join(', ')})[${result}]`;
+    }
+    
+    // If content needs context and we're not already inside one, wrap in context
+    if (wrapInContext) {
+        // The result starts with # - we need to wrap the expression in context
+        // Result is like "#text(...)[#counter(...)]" or "#underline[#counter(...)]"
+        // We strip the leading # and wrap in #context
+        const expr = result.startsWith('#') ? result.slice(1) : result;
+        return `#context ${expr}`;
+    }
+    
+    return result;
 }
 
 function serializeTable(element: TElement, context: SerializeContext): string {

@@ -6,12 +6,14 @@ import {
   FileTextIcon,
   HashIcon,
   ImageIcon,
+  LayersIcon,
   Link2Icon,
   MinusIcon,
   PlusIcon,
   SmileIcon,
   TableIcon,
   UploadIcon,
+  UnfoldVerticalIcon,
 } from 'lucide-react';
 import { KEYS, PathApi } from 'platejs';
 import { type PlateEditor, useEditorRef } from 'platejs/react';
@@ -23,6 +25,7 @@ import * as React from 'react';
 import { useFilePicker } from 'use-file-picker';
 import { ImageUploadDialog } from './image-upload-dialog';
 import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
+import { KEY_VERTICAL_SPACER } from '@/components/plate-editor/plugins/vertical-spacer-kit';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,6 +79,11 @@ const insertBlockSimple = (editor: PlateEditor, type: string, data?: any) => {
         { type: KEYS.hr, children: [{ text: '' }] },
         { at: PathApi.next(path), select: true }
       );
+    } else if (type === KEY_VERTICAL_SPACER) {
+      editor.tf.insertNodes(
+        { type: KEY_VERTICAL_SPACER, children: [{ text: '' }], height: 50 },
+        { at: PathApi.next(path), select: true }
+      );
     } else {
       editor.tf.insertNodes(
         editor.api.create.block({ type }),
@@ -109,6 +117,11 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
           label: 'Image',
           value: KEYS.img,
         },
+        {
+          icon: <UnfoldVerticalIcon />,
+          label: 'Vertical Spacing',
+          value: KEY_VERTICAL_SPACER,
+        },
       ].map((item) => ({
         ...item,
         onSelect: (editor, value) => {
@@ -128,6 +141,12 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
           label: 'Page Number',
           value: KEY_PLACEHOLDER,
           data: { placeholderType: 'page', format: 'decimal', offset: 0 }
+        },
+        {
+          icon: <LayersIcon />,
+          label: 'Total Pages',
+          value: KEY_PLACEHOLDER,
+          data: { placeholderType: 'totalPages', format: 'decimal' }
         },
         {
           icon: <CalendarIcon />,
