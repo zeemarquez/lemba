@@ -50,11 +50,91 @@ export function TemplateEditor() {
     const [settings, setSettings] = useState(template?.settings);
     const [activeHeadingLevel, setActiveHeadingLevel] = useState<'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>('h1');
 
+    // Only update local settings when we switch templates
     useEffect(() => {
         if (template?.settings) {
             setSettings(template.settings);
         }
-    }, [activeTemplateId, template]);
+    }, [activeTemplateId]);
+
+    const updateSetting = (path: string, value: any) => {
+        setSettings(prev => {
+            if (!prev) return prev;
+            const newSettings = { ...prev };
+            const keys = path.split('.');
+            let current: any = newSettings;
+            for (let i = 0; i < keys.length - 1; i++) {
+                current[keys[i]] = { ...current[keys[i]] };
+                current = current[keys[i]];
+            }
+            current[keys[keys.length - 1]] = value;
+            return newSettings;
+        });
+    };
+
+    // Autosave local settings to store with debounce
+    useEffect(() => {
+        if (!settings || !template) return;
+
+        const timeoutId = setTimeout(() => {
+            const css = generateCss(settings);
+
+            // Check if settings actually changed to avoid unnecessary store updates
+            const currentStoreTemplate = useStore.getState().templates.find(t => t.id === template.id);
+            if (JSON.stringify(currentStoreTemplate?.settings) === JSON.stringify(settings)) {
+                return;
+            }
+
+            updateTemplate(template.id, { settings, css });
+            setActiveTemplateCss(css);
+
+            // Also persist to IndexedDB
+            useStore.getState().saveTemplate(template.id, { ...template, settings, css });
+        }, 500); // 500ms debounce
+
+        return () => clearTimeout(timeoutId);
+    }, [settings, template?.id, updateTemplate, setActiveTemplateCss]);
+
+    // Section definitions for the index
+    const sections = useMemo(() => [
+        { id: 'typography', label: 'Typography', icon: TypeIcon },
+        { id: 'headings', label: 'Headings', icon: HeadingIcon },
+        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
+        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
+        { id: 'header', label: 'Header', icon: ArrowUpFromLine },
+        { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
+    ], []);
+
+    const [activeSection, setActiveSection] = useState('typography');
+
+    const scrollToSection = (sectionId: string) => {
+        const element = document.getElementById(`section-${sectionId}`);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
+
+    // Intersection observer to track active section
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        const id = entry.target.id.replace('section-', '');
+                        setActiveSection(id);
+                    }
+                });
+            },
+            { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
+        );
+
+        sections.forEach((section) => {
+            const element = document.getElementById(`section-${section.id}`);
+            if (element) observer.observe(element);
+        });
+
+        return () => observer.disconnect();
+    }, [sections]);
 
     if (!template || !settings) {
         return (
@@ -72,7 +152,7 @@ export function TemplateEditor() {
         const margins = s.margins || { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' };
         const headerMargins = s.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
         const footerMargins = s.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
-        
+
         // Check for page number offset
         const headerMatch = s.header?.content?.match(/"offset":\s*(\d+)/);
         const footerMatch = s.footer?.content?.match(/"offset":\s*(\d+)/);
@@ -98,7 +178,7 @@ export function TemplateEditor() {
         const generateNumberingCss = () => {
             const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
             let css = '.prose { counter-reset: h1-counter; }\n';
-            
+
             // Add resets
             levels.forEach((level, index) => {
                 if (index < levels.length - 1) {
@@ -114,15 +194,15 @@ export function TemplateEditor() {
                 if (!settings?.enabled) return;
 
                 let contentString = `"${settings.prefix}"`;
-                
+
                 // Build the hierarchy string
                 for (let i = 0; i <= index; i++) {
                     const currentLevel = levels[i];
                     const currentSettings = (s as any)[currentLevel]?.numbering;
-                    
+
                     if (currentSettings?.enabled) {
                         contentString += ` counter(${currentLevel}-counter, ${currentSettings.style})`;
-                        
+
                         // Add separator if it's not the last enabled item
                         // Check if there are any subsequent enabled levels up to 'index'
                         let hasMoreEnabled = false;
@@ -138,7 +218,7 @@ export function TemplateEditor() {
                         }
                     }
                 }
-                
+
                 contentString += ` "${settings.suffix}"`;
 
                 css += `
@@ -296,86 +376,9 @@ export function TemplateEditor() {
         `;
     };
 
-    const updateSetting = (path: string, value: any) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            const newSettings = { ...prev };
-            const keys = path.split('.');
-            let current: any = newSettings;
-            for (let i = 0; i < keys.length - 1; i++) {
-                current[keys[i]] = { ...current[keys[i]] };
-                current = current[keys[i]];
-            }
-            current[keys[keys.length - 1]] = value;
-            return newSettings;
-        });
-    };
-
-    // Autosave: sync settings to store when they change
-    useEffect(() => {
-        if (!settings || !template) return;
-        const css = generateCss(settings);
-        
-        // Update local store state
-        updateTemplate(template.id, { settings, css });
-        setActiveTemplateCss(css);
-    }, [settings]);
-
-    // Persist to IndexedDB with debounce
-    useEffect(() => {
-        if (!template) return;
-
-        const timeoutId = setTimeout(() => {
-            // We need to fetch the latest template state from store because 'template' in dependency might be stale 
-            // if we only depended on settings. But 'template' comes from useStore hook which updates.
-            // However, we want to save the *current* state.
-            useStore.getState().saveTemplate(template.id, template);
-        }, 1000);
-
-        return () => clearTimeout(timeoutId);
-    }, [template]);
 
 
-    // Section definitions for the index
-    const sections = [
-        { id: 'typography', label: 'Typography', icon: TypeIcon },
-        { id: 'headings', label: 'Headings', icon: HeadingIcon },
-        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
-        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
-        { id: 'header', label: 'Header', icon: ArrowUpFromLine },
-        { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
-    ];
 
-    const [activeSection, setActiveSection] = useState('typography');
-
-    const scrollToSection = (sectionId: string) => {
-        const element = document.getElementById(`section-${sectionId}`);
-        if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    };
-
-    // Intersection observer to track active section
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            (entries) => {
-                entries.forEach((entry) => {
-                    if (entry.isIntersecting) {
-                        const id = entry.target.id.replace('section-', '');
-                        setActiveSection(id);
-                    }
-                });
-            },
-            { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
-        );
-
-        sections.forEach((section) => {
-            const element = document.getElementById(`section-${section.id}`);
-            if (element) observer.observe(element);
-        });
-
-        return () => observer.disconnect();
-    }, []);
 
     return (
         <div className="flex-1 flex bg-background min-h-0 app-chrome">
@@ -409,7 +412,7 @@ export function TemplateEditor() {
                                             {['Sans Serif', 'Serif', 'Monospace', 'Custom'].map((category, index) => {
                                                 const categoryFonts = allFontFamilies.filter(f => f.category === category);
                                                 if (categoryFonts.length === 0) return null;
-                                                
+
                                                 return (
                                                     <Fragment key={category}>
                                                         <div className={cn(
