@@ -184,7 +184,12 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
     const handleHeadingClick = (heading: HeadingItem) => {
         // Dispatch a custom event that editors can listen to for navigation
         const event = new CustomEvent('navigate-to-line', {
-            detail: { line: heading.line, headingId: heading.id }
+            detail: { 
+                line: heading.line, 
+                headingId: heading.id,
+                headingText: heading.text,
+                headingLevel: heading.level
+            }
         });
         window.dispatchEvent(event);
     };

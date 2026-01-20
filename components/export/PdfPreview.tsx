@@ -14,6 +14,14 @@ let pdfjsLib: any = null;
 // Debounce delay for preview generation (ms) - wait for user to stop typing
 const DEBOUNCE_DELAY = 500;
 
+// Interface for text item from PDF.js
+interface TextItem {
+    str: string;
+    transform: number[];
+    width: number;
+    height: number;
+}
+
 export function PdfPreview() {
     const { activeFileId, files, activeTemplateId, templates, previewQuality } = useStore();
     const [mounted, setMounted] = useState(false);
@@ -201,6 +209,207 @@ export function PdfPreview() {
         return () => window.removeEventListener('resize', handleResize);
     }, [viewMode, fitToWidth, fitToHeight]);
 
+    // Handle double-click on PDF pages to navigate to source
+    const handlePdfDoubleClick = useCallback(async (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
+        if (!pdfDocumentRef.current || !content) return;
+
+        // Get click position relative to the page image
+        // We need to capture these synchronously before the async operations
+        const target = event.currentTarget;
+        if (!target) return;
+        
+        const rect = target.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        const displayWidth = rect.width;
+        const displayHeight = rect.height;
+
+        try {
+            const page = await pdfDocumentRef.current.getPage(pageIndex + 1);
+            const textContent = await page.getTextContent();
+            const viewport = page.getViewport({ scale: 1.0 });
+
+            // Convert click position to PDF coordinates
+            // The image is scaled, so we need to adjust
+            const scaleX = viewport.width / displayWidth;
+            const scaleY = viewport.height / displayHeight;
+
+            const pdfX = clickX * scaleX;
+            const pdfY = viewport.height - (clickY * scaleY); // PDF Y is from bottom
+
+            // Find the closest text item to the click position
+            let closestItem: { text: string; distance: number } | null = null;
+            const textItems = textContent.items as TextItem[];
+
+            for (const item of textItems) {
+                if (!item.str || item.str.trim().length === 0) continue;
+
+                // Get item position from transform matrix [a, b, c, d, e, f]
+                // e = x position, f = y position
+                const itemX = item.transform[4];
+                const itemY = item.transform[5];
+                const itemWidth = item.width;
+                const itemHeight = Math.abs(item.transform[0]) || 12; // Approximate height from font size
+
+                // Check if click is within or near the text item bounds
+                const isWithinX = pdfX >= itemX - 5 && pdfX <= itemX + itemWidth + 5;
+                const isWithinY = pdfY >= itemY - 5 && pdfY <= itemY + itemHeight + 5;
+
+                if (isWithinX && isWithinY) {
+                    // Direct hit
+                    closestItem = { text: item.str, distance: 0 };
+                    break;
+                }
+
+                // Calculate distance for finding closest
+                const centerX = itemX + itemWidth / 2;
+                const centerY = itemY + itemHeight / 2;
+                const distance = Math.sqrt(Math.pow(pdfX - centerX, 2) + Math.pow(pdfY - centerY, 2));
+
+                if (!closestItem || distance < closestItem.distance) {
+                    closestItem = { text: item.str, distance };
+                }
+            }
+
+            if (closestItem && closestItem.distance < 100) {
+                // Search for this text in the markdown source
+                const searchText = closestItem.text.trim();
+                if (searchText.length < 2) return;
+
+                // Find the line in the source that contains this text
+                const lines = content.split('\n');
+                let foundLine = -1;
+                
+                // First, try to find an exact match
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    // Skip markdown syntax for comparison
+                    const cleanLine = line
+                        .replace(/^#+\s*/, '') // Remove heading markers
+                        .replace(/\*\*|__/g, '') // Remove bold
+                        .replace(/\*|_/g, '') // Remove italic
+                        .replace(/`/g, '') // Remove code
+                        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Replace links with text
+                        .trim();
+                    
+                    if (cleanLine.includes(searchText) || searchText.includes(cleanLine.substring(0, 20))) {
+                        foundLine = i + 1; // 1-based line number
+                        break;
+                    }
+                }
+
+                // If no exact match, try partial matching with normalized whitespace
+                if (foundLine === -1) {
+                    const normalizedSearch = searchText.replace(/\s+/g, ' ').toLowerCase();
+                    for (let i = 0; i < lines.length; i++) {
+                        const normalizedLine = lines[i]
+                            .replace(/^#+\s*/, '')
+                            .replace(/\*\*|__|[*_`]/g, '')
+                            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                            .replace(/\s+/g, ' ')
+                            .toLowerCase()
+                            .trim();
+                        
+                        if (normalizedLine.includes(normalizedSearch) || 
+                            (normalizedSearch.length > 5 && normalizedLine.includes(normalizedSearch.substring(0, 15)))) {
+                            foundLine = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (foundLine > 0) {
+                    // Dispatch navigation event to the editor
+                    const event = new CustomEvent('navigate-to-line', {
+                        detail: { 
+                            line: foundLine,
+                            headingText: searchText // Also pass the text for WYSIWYG mode
+                        }
+                    });
+                    window.dispatchEvent(event);
+                }
+            }
+        } catch (err) {
+            console.error('Error handling PDF double-click:', err);
+        }
+    }, [content]);
+
+    // Listen for navigation events from the outline and scroll to the corresponding page
+    const scrollToHeading = useCallback(async (headingText: string) => {
+        if (!pdfDocumentRef.current || !viewportRef.current) return;
+        
+        const pdf = pdfDocumentRef.current;
+        const numPages = pdf.numPages;
+        
+        // Calculate pages to skip (front page, TOC, and their empty pages after)
+        let pagesToSkip = 0;
+        if (settings?.frontPage?.enabled) {
+            pagesToSkip += 1 + (settings.frontPage.emptyPagesAfter || 0);
+        }
+        if (settings?.outline?.enabled) {
+            // TOC typically takes 1 page, but could be more - we'll skip at least 1
+            // plus any empty pages configured after it
+            pagesToSkip += 1 + (settings.outline.emptyPagesAfter || 0);
+        }
+        
+        // Start searching after the front matter pages
+        const startPage = Math.min(pagesToSkip + 1, numPages);
+        
+        // Search through each page for the heading text (starting after TOC)
+        for (let pageNum = startPage; pageNum <= numPages; pageNum++) {
+            try {
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items
+                    .map((item: any) => item.str)
+                    .join(' ');
+                
+                // Check if this page contains the heading text
+                // We normalize whitespace and do a case-insensitive search
+                const normalizedPageText = pageText.replace(/\s+/g, ' ').toLowerCase();
+                const normalizedHeading = headingText.replace(/\s+/g, ' ').toLowerCase();
+                
+                if (normalizedPageText.includes(normalizedHeading)) {
+                    // Found the page! Scroll to it
+                    const pageElements = viewportRef.current?.querySelectorAll('[data-page-index]');
+                    if (pageElements && pageElements[pageNum - 1]) {
+                        pageElements[pageNum - 1].scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start' 
+                        });
+                    } else {
+                        // Fallback: calculate approximate scroll position
+                        const pageContainer = viewportRef.current?.querySelector('.p-6');
+                        if (pageContainer) {
+                            const pageHeight = (pageDimensions?.height || 842) * scale + 24 + 20; // page + gap + label
+                            const scrollTop = (pageNum - 1) * pageHeight;
+                            viewportRef.current?.scrollTo({ 
+                                top: scrollTop, 
+                                behavior: 'smooth' 
+                            });
+                        }
+                    }
+                    return;
+                }
+            } catch (err) {
+                console.error(`Error searching page ${pageNum}:`, err);
+            }
+        }
+    }, [pageDimensions, scale, settings]);
+
+    useEffect(() => {
+        const handleNavigateToLine = (event: CustomEvent<{ headingText?: string }>) => {
+            if (event.detail.headingText) {
+                scrollToHeading(event.detail.headingText);
+            }
+        };
+        
+        window.addEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+        return () => {
+            window.removeEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+        };
+    }, [scrollToHeading]);
+
     const handleZoomIn = () => {
         setViewMode('zoom');
         setScale(prev => Math.min(prev + 0.1, 3.0));
@@ -318,13 +527,15 @@ export function PdfPreview() {
 
                     <div className="p-6 flex flex-col items-center min-h-full gap-6">
                         {pageImages.map((imageDataUrl, index) => (
-                            <div key={index} className="flex flex-col items-center">
+                            <div key={index} className="flex flex-col items-center" data-page-index={index}>
                                 <div
-                                    className="shadow-2xl bg-white dark:bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200 dark:border-zinc-800"
+                                    className="shadow-2xl bg-white dark:bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200 dark:border-zinc-800 cursor-pointer select-none"
                                     style={{
                                         width: pageDimensions ? pageDimensions.width * scale : 'auto',
                                         maxWidth: 'none', // Prevent interference from other styles
                                     }}
+                                    onDoubleClick={(e) => handlePdfDoubleClick(e, index)}
+                                    title="Double-click to navigate to this section in the editor"
                                 >
                                     <img
                                         src={imageDataUrl}
@@ -333,7 +544,7 @@ export function PdfPreview() {
                                             width: '100%',
                                             height: 'auto',
                                         }}
-                                        className="block"
+                                        className="block pointer-events-none"
                                         draggable={false}
                                     />
                                 </div>
