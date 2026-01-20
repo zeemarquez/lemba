@@ -2,10 +2,10 @@
 
 import { useStore, FileNode } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder } from "lucide-react";
+import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder, Loader2 } from "lucide-react";
 import dynamic from 'next/dynamic';
 const PdfPreview = dynamic(() => import("./PdfPreview").then(mod => mod.PdfPreview), { ssr: false });
-import { convertIndexedDbImagesToBase64 } from "@/hooks/use-indexed-db-image";
+import { usePdfCompiler } from "@/hooks/use-pdf-compiler";
 import {
     Dialog,
     DialogContent,
@@ -120,6 +120,10 @@ export function ExportSidebar() {
 
     const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
     const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+
+    // Use client-side PDF compiler
+    const { compilePdf, isInitialized } = usePdfCompiler();
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
 
@@ -146,53 +150,24 @@ export function ExportSidebar() {
         templatesRoot ? filterTree(templatesRoot.children || [], ['.mdt']) : [],
         [templatesRoot]);
 
-    const handlePrint = async () => {
-        if (!activeFileId) return;
+    const handleExport = async () => {
+        if (!activeFileId || !isInitialized) return;
 
         const activeFile = files.find(f => f.id === activeFileId);
         if (!activeFile) return;
 
+        setIsExporting(true);
+
         try {
-            // Convert any IndexedDB image URLs to base64 before sending to server
-            const markdownWithBase64Images = await convertIndexedDbImagesToBase64(activeFile.content);
-
-            // Also convert IndexedDB images in header/footer content
-            let settingsWithBase64 = activeTemplate?.settings;
-            if (settingsWithBase64) {
-                settingsWithBase64 = { ...settingsWithBase64 };
-                if (settingsWithBase64.header?.content) {
-                    settingsWithBase64.header = {
-                        ...settingsWithBase64.header,
-                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.header.content),
-                    };
-                }
-                if (settingsWithBase64.footer?.content) {
-                    settingsWithBase64.footer = {
-                        ...settingsWithBase64.footer,
-                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.footer.content),
-                    };
-                }
-            }
-
-            const response = await fetch('/api/export-pdf', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    markdown: markdownWithBase64Images,
-                    title: activeFile.name.replace(/\.[^/.]+$/, ""),
-                    css: activeTemplate?.css || '',
-                    settings: settingsWithBase64,
-                }),
+            // Compile PDF using client-side WASM compiler
+            const pdfBuffer = await compilePdf({
+                markdown: activeFile.content,
+                title: activeFile.name.replace(/\.[^/.]+$/, ""),
+                settings: activeTemplate?.settings,
             });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to export PDF');
-            }
-
-            const blob = await response.blob();
+            // Create blob and download
+            const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -204,6 +179,8 @@ export function ExportSidebar() {
         } catch (error) {
             console.error('Export error:', error);
             alert('Error exporting PDF. Please try again.');
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -323,9 +300,22 @@ export function ExportSidebar() {
             </div>
 
             <div className="p-4 bg-background shrink-0">
-                <Button className="w-full shadow-sm" onClick={handlePrint} disabled={!activeFileId}>
-                    <SquareArrowOutUpRight size={16} className="mr-2" />
-                    Export
+                <Button 
+                    className="w-full shadow-sm" 
+                    onClick={handleExport} 
+                    disabled={!activeFileId || !isInitialized || isExporting}
+                >
+                    {isExporting ? (
+                        <>
+                            <Loader2 size={16} className="mr-2 animate-spin" />
+                            Exporting...
+                        </>
+                    ) : (
+                        <>
+                            <SquareArrowOutUpRight size={16} className="mr-2" />
+                            Export
+                        </>
+                    )}
                 </Button>
             </div>
         </div>

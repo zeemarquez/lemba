@@ -1,5 +1,5 @@
 import type { Descendant, TElement, TText } from 'platejs';
-import { fixTypstUnit } from './compiler';
+import { fixTypstUnit } from './client-compiler';
 
 interface SerializeContext {
     title?: string;

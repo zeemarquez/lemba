@@ -2,9 +2,9 @@
 
 import { useStore } from "@/lib/store";
 import { useEffect, useState, useRef, useCallback } from "react";
-import { ZoomIn, ZoomOut, MoveHorizontal, MoveVertical, Loader2 } from "lucide-react";
+import { ZoomIn, ZoomOut, MoveHorizontal, MoveVertical, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { convertIndexedDbImagesToBase64 } from "@/hooks/use-indexed-db-image";
+import { usePdfCompiler } from "@/hooks/use-pdf-compiler";
 import { cn } from "@/lib/utils";
 
 
@@ -27,6 +27,9 @@ export function PdfPreview() {
     const lastContentHashRef = useRef<string>('');
     const viewportRef = useRef<HTMLDivElement>(null);
     const pdfDocumentRef = useRef<any>(null);
+
+    // Use client-side PDF compiler
+    const { compilePdf, isInitialized, initError } = usePdfCompiler();
 
     useEffect(() => {
         const initPdfJs = async () => {
@@ -118,9 +121,9 @@ export function PdfPreview() {
         }
     }, []);
 
-    // Fetch and render preview
+    // Fetch and render preview using client-side compilation
     const fetchPreview = useCallback(async () => {
-        if (!activeFile) return;
+        if (!activeFile || !isInitialized) return;
 
         const currentHash = getContentHash(content, settings, previewQuality);
 
@@ -133,42 +136,15 @@ export function PdfPreview() {
         setError(null);
 
         try {
-            const markdownWithBase64Images = await convertIndexedDbImagesToBase64(content);
-            let settingsWithBase64 = settings;
-            if (settingsWithBase64) {
-                settingsWithBase64 = { ...settingsWithBase64 };
-                if (settingsWithBase64.header?.content) {
-                    settingsWithBase64.header = {
-                        ...settingsWithBase64.header,
-                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.header.content),
-                    };
-                }
-                if (settingsWithBase64.footer?.content) {
-                    settingsWithBase64.footer = {
-                        ...settingsWithBase64.footer,
-                        content: await convertIndexedDbImagesToBase64(settingsWithBase64.footer.content),
-                    };
-                }
-            }
-
-            const response = await fetch('/api/preview-pdf', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    markdown: markdownWithBase64Images,
-                    title: activeFile.name.replace(/\.[^/.]+$/, ""),
-                    settings: settingsWithBase64,
-                    quality: previewQuality,
-                }),
+            // Compile PDF using client-side WASM compiler
+            const pdfBuffer = await compilePdf({
+                markdown: content,
+                title: activeFile.name.replace(/\.[^/.]+$/, ""),
+                settings: settings,
             });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to generate preview');
-            }
-
-            const arrayBuffer = await response.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            // Load PDF with PDF.js
+            const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
             const pdf = await loadingTask.promise;
             pdfDocumentRef.current = pdf;
 
@@ -185,7 +161,7 @@ export function PdfPreview() {
         } finally {
             setIsLoading(false);
         }
-    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length, renderPages, scale, viewMode, fitToWidth, fitToHeight]);
+    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length, renderPages, scale, viewMode, fitToWidth, fitToHeight, compilePdf, isInitialized]);
 
     // Update rendering when scale changes (debounced)
     useEffect(() => {
@@ -199,7 +175,7 @@ export function PdfPreview() {
 
     // Debounced preview generation
     useEffect(() => {
-        if (!activeFile) return;
+        if (!activeFile || !isInitialized) return;
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(() => {
             fetchPreview();
@@ -207,14 +183,14 @@ export function PdfPreview() {
         return () => {
             if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         };
-    }, [content, settings, activeFile, fetchPreview]);
+    }, [content, settings, activeFile, fetchPreview, isInitialized]);
 
     // Initial load
     useEffect(() => {
-        if (activeFile && pageImages.length === 0) {
+        if (activeFile && pageImages.length === 0 && isInitialized) {
             fetchPreview();
         }
-    }, [activeFile]);
+    }, [activeFile, isInitialized]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -239,6 +215,31 @@ export function PdfPreview() {
         return (
             <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center">
                 <p className="text-[10px] text-muted-foreground">Loading...</p>
+            </div>
+        );
+    }
+
+    // Show initialization error if compiler failed to load
+    if (initError) {
+        return (
+            <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center p-4">
+                <div className="flex flex-col items-center gap-2 text-center">
+                    <AlertCircle size={24} className="text-destructive" />
+                    <p className="text-sm font-medium text-destructive">Failed to load PDF compiler</p>
+                    <p className="text-xs text-muted-foreground">{initError}</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Show loading while compiler initializes
+    if (!isInitialized) {
+        return (
+            <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={20} className="animate-spin text-muted-foreground" />
+                    <p className="text-[10px] text-muted-foreground">Initializing PDF compiler...</p>
+                </div>
             </div>
         );
     }
