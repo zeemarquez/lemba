@@ -3,14 +3,15 @@
 import { useStore, FileNode } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder } from "lucide-react";
-import { PdfPreview } from "@/components/export/PdfPreview";
+import dynamic from 'next/dynamic';
+const PdfPreview = dynamic(() => import("./PdfPreview").then(mod => mod.PdfPreview), { ssr: false });
 import { convertIndexedDbImagesToBase64 } from "@/hooks/use-indexed-db-image";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
 } from "@/components/plate-ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -33,14 +34,14 @@ const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] 
     }).filter((n): n is FileNode => n !== null);
 };
 
-const TreeItem = ({ 
-    node, 
-    activeId, 
-    onSelect, 
-    level = 0 
-}: { 
-    node: FileNode; 
-    activeId: string | null; 
+const TreeItem = ({
+    node,
+    activeId,
+    onSelect,
+    level = 0
+}: {
+    node: FileNode;
+    activeId: string | null;
     onSelect: (id: string) => void;
     level?: number;
 }) => {
@@ -70,31 +71,31 @@ const TreeItem = ({
             >
                 <span className="flex items-center justify-center w-4 h-4 shrink-0 text-muted-foreground/50">
                     {hasChildren && (
-                        <ChevronRight 
-                            size={12} 
-                            className={cn("transition-transform", expanded && "rotate-90")} 
+                        <ChevronRight
+                            size={12}
+                            className={cn("transition-transform", expanded && "rotate-90")}
                         />
                     )}
                 </span>
-                
+
                 {node.type === 'folder' ? (
                     <Folder size={14} className="text-blue-400/80 shrink-0" />
                 ) : (
                     <FileText size={14} className={cn("text-muted-foreground shrink-0", activeId === node.id && "text-primary")} />
                 )}
-                
+
                 <span className="truncate">{displayName}</span>
                 {node.type === 'file' && activeId === node.id && <Check size={14} className="ml-auto mr-2 opacity-50" />}
             </div>
-            
+
             {expanded && hasChildren && node.children && (
                 <div>
                     {node.children.map(child => (
-                        <TreeItem 
-                            key={child.id} 
-                            node={child} 
-                            activeId={activeId} 
-                            onSelect={onSelect} 
+                        <TreeItem
+                            key={child.id}
+                            node={child}
+                            activeId={activeId}
+                            onSelect={onSelect}
                             level={level + 1}
                         />
                     ))}
@@ -105,13 +106,13 @@ const TreeItem = ({
 };
 
 export function ExportSidebar() {
-    const { 
-        activeFileId, 
-        files, 
-        toggleRightSidebar, 
-        rightSidebarExpanded, 
-        activeTemplateId, 
-        templates, 
+    const {
+        activeFileId,
+        files,
+        toggleRightSidebar,
+        rightSidebarExpanded,
+        activeTemplateId,
+        templates,
         setActiveTemplate,
         fileTree,
         openFile
@@ -121,7 +122,7 @@ export function ExportSidebar() {
     const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
-    
+
     // Find active file for display name (recursively search in tree if not in flat files list)
     // Actually, store 'files' only contains open files. We need to find name from tree or activeFileId path.
     const getFileName = (path: string | null) => {
@@ -137,13 +138,13 @@ export function ExportSidebar() {
     const templatesRoot = fileTree.find(n => n.name === 'Templates');
 
     // Filter trees starting from the specific roots
-    const mdFilesTree = useMemo(() => 
-        filesRoot ? filterTree(filesRoot.children || [], ['.md']) : [], 
-    [filesRoot]);
-    
-    const templateFilesTree = useMemo(() => 
-        templatesRoot ? filterTree(templatesRoot.children || [], ['.mdt']) : [], 
-    [templatesRoot]);
+    const mdFilesTree = useMemo(() =>
+        filesRoot ? filterTree(filesRoot.children || [], ['.md']) : [],
+        [filesRoot]);
+
+    const templateFilesTree = useMemo(() =>
+        templatesRoot ? filterTree(templatesRoot.children || [], ['.mdt']) : [],
+        [templatesRoot]);
 
     const handlePrint = async () => {
         if (!activeFileId) return;
@@ -154,7 +155,7 @@ export function ExportSidebar() {
         try {
             // Convert any IndexedDB image URLs to base64 before sending to server
             const markdownWithBase64Images = await convertIndexedDbImagesToBase64(activeFile.content);
-            
+
             // Also convert IndexedDB images in header/footer content
             let settingsWithBase64 = activeTemplate?.settings;
             if (settingsWithBase64) {
@@ -172,7 +173,7 @@ export function ExportSidebar() {
                     };
                 }
             }
-            
+
             const response = await fetch('/api/export-pdf', {
                 method: 'POST',
                 headers: {
@@ -242,11 +243,11 @@ export function ExportSidebar() {
                 <div className="flex-1 flex flex-col min-h-0 h-full">
                     {/* Controls */}
                     <div className="flex items-center gap-2 shrink-0 mb-3">
-                         {/* File Selector */}
+                        {/* File Selector */}
                         <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
                             <DialogTrigger asChild>
-                                <Button 
-                                    variant="outline" 
+                                <Button
+                                    variant="outline"
                                     className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
                                     title={activeFileName || 'Select File'}
                                 >
@@ -282,8 +283,8 @@ export function ExportSidebar() {
                         {/* Template Selector */}
                         <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
                             <DialogTrigger asChild>
-                                <Button 
-                                    variant="outline" 
+                                <Button
+                                    variant="outline"
                                     className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
                                     title={activeTemplate?.name || 'Select Template'}
                                 >
@@ -291,7 +292,7 @@ export function ExportSidebar() {
                                     <span className="truncate">{activeTemplate?.name || 'Select'}</span>
                                 </Button>
                             </DialogTrigger>
-                             <DialogContent className="p-0 gap-0 max-w-sm">
+                            <DialogContent className="p-0 gap-0 max-w-sm">
                                 <DialogHeader className="p-4 pb-2">
                                     <DialogTitle className="text-sm font-medium">Select Template</DialogTitle>
                                 </DialogHeader>
@@ -308,7 +309,7 @@ export function ExportSidebar() {
                                                 }}
                                             />
                                         ))}
-                                         {templateFilesTree.length === 0 && (
+                                        {templateFilesTree.length === 0 && (
                                             <div className="text-xs text-muted-foreground text-center py-4">No templates found</div>
                                         )}
                                     </div>
