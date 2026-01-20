@@ -130,9 +130,9 @@ export async function processTypstImages(typstSource: string): Promise<{ source:
         }
     }
 
-    // Final sanity check
-    const finalMatches = newSource.match(/image\s*\(\s*["']([^"']+)["']/g) || [];
-    console.log(`[Typst] [ImageManager] Final source images:`, finalMatches);
+    // Final sanity check: log all lines containing image() calls to verify layout/alignment
+    const finalMatches = newSource.split('\n').filter(line => line.includes('image('));
+    console.log(`[Typst] [ImageManager] Final source image lines:`, finalMatches);
 
     return { source: newSource, images };
 }

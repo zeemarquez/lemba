@@ -105,14 +105,34 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
 
         case 'img':
         case 'image':
-            const widthArg = (element as any).width ? `, width: ${fixTypstUnit((element as any).width)}` : '';
-            const src = (element as any).url || (element as any).src || '';
-            const img = `image("${escapeTypstString(src)}"${widthArg})`;
+            const e = element as any;
+            const src = e.url || e.src || '';
 
-            if ((element as any).caption) {
-                return `#figure(${img}, caption: [${children}])`;
+            // Collect sizing arguments
+            const args: string[] = [];
+
+            // Priority: width, then maxWidth/maxWidth
+            if (e.width) {
+                args.push(`width: ${fixTypstUnit(e.width)}`);
+            } else if (e.style?.width) {
+                args.push(`width: ${fixTypstUnit(e.style.width)}`);
             }
-            return wrapAlign(`#${img}`, align);
+
+            if (e.height) {
+                args.push(`height: ${fixTypstUnit(e.height)}`);
+            } else if (e.style?.height) {
+                args.push(`height: ${fixTypstUnit(e.style.height)}`);
+            }
+
+            const imgArgs = args.length > 0 ? `, ${args.join(', ')}` : '';
+            const imgCall = `image("${escapeTypstString(src)}"${imgArgs})`;
+
+            if (e.caption) {
+                return `#figure(${imgCall}, caption: [${children}])`;
+            }
+
+            // If it's a block level image (default in markdown usually), we can use the # prefix
+            return wrapAlign(`#${imgCall}`, align);
 
         case 'table':
             return serializeTable(element, context);

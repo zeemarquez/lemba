@@ -41,11 +41,23 @@ function escapeTypst(text: string): string {
 
 /**
  * Escapes a string to be used as a Typst string literal "..."
- * Typst strings use backslashes for escaping, so we must double them.
  */
 function escapeTypstString(text: string): string {
     if (!text) return '';
     return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Normalizes a unit for Typst (e.g. 500 -> 500pt, 50% -> 50%, 100px -> 100pt)
+ */
+function fixTypstUnit(value: string | number | undefined): string {
+    if (value === undefined || value === null || value === '') return '';
+    const s = String(value).trim();
+    if (/^\d+(\.\d+)?$/.test(s)) return s + 'pt';
+    if (s.toLowerCase().endsWith('px')) {
+        return s.toLowerCase().replace('px', 'pt');
+    }
+    return s;
 }
 
 function processToken(token: any): string {
@@ -87,16 +99,69 @@ function processToken(token: any): string {
             if (token.text.match(/<!--\s*pagebreak\s*-->/i)) {
                 return '#pagebreak()\n\n';
             }
-            // Check for <img> tags
-            const imgMatch = token.text.match(/<img\s+[^>]*src=["']([^"']+)["']/i);
+            // Parse <img> tags for sizing and alignment (Plate serializes resized images as HTML)
+            const imgMatch = token.text.match(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/i);
             if (imgMatch) {
-                return `#image("${escapeTypstString(imgMatch[1])}")\n\n`;
+                const src = imgMatch[1];
+
+                // 1. Parse Width/Height (search in both property and style formats)
+                // Looks for: width="100", width: 100px, width: 50%
+                const widthMatch = token.text.match(/width[:=]\s*["']?(\d+(?:px|%)?)["']?/i);
+                const heightMatch = token.text.match(/height[:=]\s*["']?(\d+(?:px|%)?)["']?/i);
+
+                let args = '';
+                if (widthMatch) args += `, width: ${fixTypstUnit(widthMatch[1])}`;
+                if (heightMatch) args += `, height: ${fixTypstUnit(heightMatch[1])}`;
+
+                const imgCall = `#image("${escapeTypstString(src)}"${args})`;
+
+                // 2. Parse Alignment
+                const alignMatch = token.text.match(/data-align=["'](left|center|right)["']/i);
+                let align = alignMatch ? alignMatch[1] : undefined;
+
+                if (!align) {
+                    if (token.text.includes('margin-left: auto') && token.text.includes('margin-right: auto')) {
+                        align = 'center';
+                    } else if (token.text.includes('margin-left: auto')) {
+                        align = 'right';
+                    }
+                }
+
+                if (align === 'center') return `#align(center)[${imgCall}]\n\n`;
+                if (align === 'right') return `#align(right)[${imgCall}]\n\n`;
+                return `${imgCall}\n\n`;
             }
             return '';
         case 'hr':
             return '#line(length: 100%)\n\n';
         case 'image':
-            return `#image("${escapeTypstString(token.href)}")\n\n`;
+            // Check for common markdown image size extension: ![alt](url){width=50%}
+            // or just url?size=200x200
+            let href = token.href;
+            let width = '';
+            let height = '';
+
+            // Handle URL query params like ?width=200
+            if (href.includes('?')) {
+                try {
+                    const [baseUrl, query] = href.split('?');
+                    const params = new URLSearchParams(query);
+                    if (params.has('width')) {
+                        width = fixTypstUnit(params.get('width')!);
+                        // Keep the query in href for fetches, or strip if it's local?
+                        // Usually safer to keep it.
+                    }
+                    if (params.has('height')) {
+                        height = fixTypstUnit(params.get('height')!);
+                    }
+                } catch { }
+            }
+
+            let extraArgs = '';
+            if (width) extraArgs += `, width: ${width}`;
+            if (height) extraArgs += `, height: ${height}`;
+
+            return `#image("${escapeTypstString(href)}"${extraArgs})\n\n`;
         case 'katex':
             return `$ ${fixMathForTypst(token.text)} $\n\n`;
         default:
@@ -155,7 +220,14 @@ function parseInline(tokens: any[]): string {
                 output += `#link("${escapeTypstString(token.href)}")[${parseInline(token.tokens)}]`;
                 break;
             case 'image':
-                output += `#image("${escapeTypstString(token.href)}")`;
+                // Inline images in typst are just #image calls
+                let href = token.href;
+                let w = '';
+                if (href.includes('?')) {
+                    const params = new URLSearchParams(href.split('?')[1]);
+                    if (params.has('width')) w = fixTypstUnit(params.get('width')!);
+                }
+                output += `#image("${escapeTypstString(href)}"${w ? `, width: ${w}` : ''})`;
                 break;
             case 'inlineKatex':
                 output += `$${fixMathForTypst(token.text)}$`;
