@@ -84,7 +84,8 @@ function processToken(token: any): string {
             return `#quote(block: true)[${parseTokens(token.tokens)}]\n\n`;
         case 'table':
             const cols = token.header.length;
-            let tableContent = `#table(\n  columns: (${'auto, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
+            // Use 1fr for each column to make the table expand to full width
+            let tableContent = `#table(\n  columns: (${'1fr, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
             token.header.forEach((cell: any) => {
                 tableContent += `  [*${parseInline(cell.tokens)}*],\n`;
             });

@@ -32,6 +32,29 @@ function escapeTypstString(text: string): string {
     return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+/**
+ * Scales a dimension value by a factor (for header/footer image sizing)
+ * Supports: 100, 100px, 100pt, 100%, 100mm, 100cm, 100em
+ */
+function scaleTypstUnit(value: string | number | undefined, factor: number): string {
+    if (value === undefined || value === null || value === '') return '';
+    const s = String(value).trim();
+    
+    // Match number with optional unit
+    const match = s.match(/^(-?\d+(?:\.\d+)?)(px|pt|%|mm|cm|em|in)?$/i);
+    if (match) {
+        const num = parseFloat(match[1]);
+        const unit = match[2] || 'pt';
+        const scaled = num * factor;
+        // Convert px to pt
+        const finalUnit = unit.toLowerCase() === 'px' ? 'pt' : unit;
+        return `${scaled}${finalUnit}`;
+    }
+    
+    // If no match, return as-is through fixTypstUnit
+    return fixTypstUnit(value);
+}
+
 function serializeNode(node: Descendant, context: SerializeContext): string {
     if ('text' in node) {
         return serializeTextNode(node as TText);
@@ -109,19 +132,21 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             const src = e.url || e.src || '';
 
             // Collect sizing arguments
+            // Apply 0.5 scaling factor for header/footer images
+            const imgScaleFactor = 0.25;
             const args: string[] = [];
 
             // Priority: width, then maxWidth/maxWidth
             if (e.width) {
-                args.push(`width: ${fixTypstUnit(e.width)}`);
+                args.push(`width: ${scaleTypstUnit(e.width, imgScaleFactor)}`);
             } else if (e.style?.width) {
-                args.push(`width: ${fixTypstUnit(e.style.width)}`);
+                args.push(`width: ${scaleTypstUnit(e.style.width, imgScaleFactor)}`);
             }
 
             if (e.height) {
-                args.push(`height: ${fixTypstUnit(e.height)}`);
+                args.push(`height: ${scaleTypstUnit(e.height, imgScaleFactor)}`);
             } else if (e.style?.height) {
-                args.push(`height: ${fixTypstUnit(e.style.height)}`);
+                args.push(`height: ${scaleTypstUnit(e.style.height, imgScaleFactor)}`);
             }
 
             const imgArgs = args.length > 0 ? `, ${args.join(', ')}` : '';
@@ -163,18 +188,59 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         if (row.children && row.children.length > maxCols) maxCols = row.children.length;
     });
 
-    const columns = `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
+    // Use 1fr for each column to make the table expand to full width
+    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+
+    // Check if borders should be hidden by examining cell borders
+    // Plate stores borders on each cell, not on the table element
+    // When "No Border" is selected, cells have borders.{top,right,bottom,left}.size = 0
+    let hideBorders = false;
+    
+    // Check table-level borderNone first
+    if ((element as any).borderNone) {
+        hideBorders = true;
+    } else {
+        // Check the first cell's borders as a representative
+        const firstRow = rows[0];
+        if (firstRow?.children?.length > 0) {
+            const firstCell = firstRow.children[0] as any;
+            const cellBorders = firstCell?.borders;
+            if (cellBorders) {
+                // If all border sizes are explicitly 0, hide borders
+                const hasNoBorders = 
+                    (cellBorders.top?.size === 0 || cellBorders.top?.size === '0') &&
+                    (cellBorders.right?.size === 0 || cellBorders.right?.size === '0') &&
+                    (cellBorders.bottom?.size === 0 || cellBorders.bottom?.size === '0') &&
+                    (cellBorders.left?.size === 0 || cellBorders.left?.size === '0');
+                if (hasNoBorders) {
+                    hideBorders = true;
+                }
+            }
+        }
+    }
 
     let content = `#table(\n  columns: ${columns},\n`;
+    
+    // Add stroke: none if borders should be hidden
+    if (hideBorders) {
+        content += `  stroke: none,\n`;
+    }
 
     rows.forEach(row => {
         (row.children as TElement[]).forEach(cell => {
             const cellContent = serializeNodesToTypst(cell.children, context).trim();
             const isHeader = cell.type === 'th';
-            if (isHeader) {
-                content += `  [*${cellContent}*],\n`;
+            const verticalAlign = (cell as any).verticalAlign as string | undefined;
+            
+            const finalContent = isHeader ? `*${cellContent}*` : cellContent;
+            
+            // Use table.cell for individual cell alignment
+            if (verticalAlign === 'middle') {
+                content += `  table.cell(align: horizon)[${finalContent}],\n`;
+            } else if (verticalAlign === 'bottom') {
+                content += `  table.cell(align: bottom)[${finalContent}],\n`;
             } else {
-                content += `  [${cellContent}],\n`;
+                content += `  [${finalContent}],\n`;
             }
         });
     });
