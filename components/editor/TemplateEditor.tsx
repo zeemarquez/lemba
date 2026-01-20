@@ -12,26 +12,17 @@ import {
     DropdownMenuTrigger,
 } from "@/components/plate-ui/dropdown-menu";
 
+// Available fonts in Typst WASM compiler (from typst.ts text assets)
+// These are the only built-in fonts that work for PDF export
 const FONT_FAMILIES = [
-    // Sans Serif
-    { label: 'Inter (Modern Sans)', value: 'Inter, sans-serif', category: 'Sans Serif' },
-    { label: 'Roboto (Clean)', value: 'Roboto, sans-serif', category: 'Sans Serif' },
-    { label: 'Open Sans (Neutral)', value: "'Open Sans', sans-serif", category: 'Sans Serif' },
-    { label: 'Montserrat (Modern)', value: 'Montserrat, sans-serif', category: 'Sans Serif' },
-    { label: 'Outfit (Geometric)', value: "'Outfit', sans-serif", category: 'Sans Serif' },
-    { label: 'System Default', value: 'system-ui, sans-serif', category: 'Sans Serif' },
-
-    // Serif
-    { label: 'Times New Roman (Academic)', value: "'Times New Roman', serif", category: 'Serif' },
-    { label: 'Georgia (Classic Serif)', value: "'Georgia', serif", category: 'Serif' },
-    { label: 'Merriweather (Readable)', value: 'Merriweather, serif', category: 'Serif' },
-    { label: 'Playfair Display (Elegant)', value: "'Playfair Display', serif", category: 'Serif' },
-    { label: 'Lora (Contemporary)', value: 'Lora, serif', category: 'Serif' },
-
-    // Mono
-    { label: 'JetBrains Mono (Code)', value: "'JetBrains Mono', monospace", category: 'Monospace' },
-    { label: 'Fira Code (Ligatures)', value: "'Fira Code', monospace", category: 'Monospace' },
-    { label: 'Source Code Pro (Clean Mono)', value: "'Source Code Pro', monospace", category: 'Monospace' },
+    // Serif - Libertinus Serif (the main text font)
+    { label: 'Libertinus Serif (Classic)', value: "'Libertinus Serif', serif", category: 'Serif' },
+    
+    // Monospace - DejaVu Sans Mono
+    { label: 'DejaVu Sans Mono (Code)', value: "'DejaVu Sans Mono', monospace", category: 'Monospace' },
+    
+    // Math/Academic - New Computer Modern
+    { label: 'New Computer Modern (Academic)', value: "'New Computer Modern', serif", category: 'Serif' },
 ];
 
 export function TemplateEditor() {

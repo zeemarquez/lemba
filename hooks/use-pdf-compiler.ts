@@ -8,10 +8,13 @@ import {
     generatePreamble, 
     initializeCompiler,
     resetCompiler,
+    setCustomFonts,
+    FontData,
     TypstOptions 
 } from '@/lib/typst/client-compiler';
 import { processTypstImages } from '@/lib/typst/client-image-manager';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
+import { useStore } from '@/lib/store';
 
 // Settings type that matches the template settings from the store
 export interface TemplateSettings {
@@ -68,6 +71,14 @@ async function headerFooterToTypst(content: string, context: { title?: string })
 
 
 /**
+ * Convert Blob to Uint8Array
+ */
+async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
+    const arrayBuffer = await blob.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+}
+
+/**
  * Hook for compiling PDFs using client-side Typst WASM
  */
 export function usePdfCompiler(): UsePdfCompilerReturn {
@@ -77,22 +88,46 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     const [initError, setInitError] = useState<string | null>(null);
     
     const initializingRef = useRef(false);
+    const customFonts = useStore((state) => state.customFonts);
+    const fontsLoadedRef = useRef<string>('');
 
-    // Initialize compiler on mount
+    // Initialize compiler on mount and when custom fonts change
     useEffect(() => {
-        if (initializingRef.current) return;
-        initializingRef.current = true;
-
-        initializeCompiler()
-            .then(() => {
-                setIsInitialized(true);
-                console.log('[usePdfCompiler] Compiler initialized');
-            })
-            .catch((e) => {
+        const initWithFonts = async () => {
+            try {
+                // Convert store fonts to FontData format
+                const fontDataPromises = customFonts.map(async (font): Promise<FontData> => ({
+                    family: font.family,
+                    data: await blobToUint8Array(font.blob)
+                }));
+                const fontData = await Promise.all(fontDataPromises);
+                
+                // Create a signature to detect changes
+                const fontSignature = customFonts.map(f => `${f.family}-${f.blob.size}`).join(',');
+                
+                // Only reinit if fonts changed or first init
+                if (fontsLoadedRef.current !== fontSignature || !initializingRef.current) {
+                    console.log('[usePdfCompiler] Loading fonts:', customFonts.map(f => f.family).join(', ') || 'none');
+                    
+                    // Set custom fonts (this will trigger reinit if needed)
+                    await setCustomFonts(fontData);
+                    
+                    // Initialize compiler
+                    await initializeCompiler();
+                    
+                    fontsLoadedRef.current = fontSignature;
+                    initializingRef.current = true;
+                    setIsInitialized(true);
+                    console.log('[usePdfCompiler] Compiler initialized with fonts');
+                }
+            } catch (e: any) {
                 console.error('[usePdfCompiler] Failed to initialize compiler:', e);
                 setInitError(e.message || 'Failed to initialize PDF compiler');
-            });
-    }, []);
+            }
+        };
+
+        initWithFonts();
+    }, [customFonts]);
 
     const compilePdf = useCallback(async (options: CompileOptions): Promise<ArrayBuffer> => {
         const { markdown, title, settings } = options;

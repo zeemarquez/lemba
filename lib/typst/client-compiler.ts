@@ -1,8 +1,9 @@
 'use client';
 
 export interface FontData {
-    family: string;
+    family: string;        // User-provided family name
     data: Uint8Array;
+    internalName?: string; // Actual font family name from file metadata
 }
 
 export interface TypstOptions {
@@ -20,6 +21,142 @@ export interface TypstOptions {
     h4?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h5?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
     h6?: { fontSize?: string; color?: string; textAlign?: string; borderBottom?: boolean };
+}
+
+// Track loaded custom fonts to avoid re-adding them
+const loadedCustomFonts = new Set<string>();
+
+// Custom font families that have been registered (for font mapping)
+// Maps user-provided name -> internal font name from file
+const registeredCustomFontFamilies = new Map<string, string>();
+
+/**
+ * Parse font family name from TTF/OTF/WOFF font file
+ * Reads the 'name' table to extract the font family (nameID 1)
+ */
+function parseFontFamilyName(data: Uint8Array): string | null {
+    try {
+        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        
+        // Check for TrueType/OpenType signature
+        const signature = view.getUint32(0, false);
+        const isTTF = signature === 0x00010000 || signature === 0x74727565; // 'true'
+        const isOTF = signature === 0x4F54544F; // 'OTTO'
+        const isWOFF = signature === 0x774F4646; // 'wOFF'
+        const isWOFF2 = signature === 0x774F4632; // 'wOF2'
+        
+        if (!isTTF && !isOTF && !isWOFF && !isWOFF2) {
+            console.warn('[Typst] Unknown font format, signature:', signature.toString(16));
+            return null;
+        }
+        
+        // For WOFF/WOFF2, the structure is different - tables are compressed
+        // We need to find the 'name' table differently
+        let numTables: number;
+        let tableOffset: number;
+        let tableEntrySize: number;
+        
+        if (isWOFF) {
+            // WOFF header: signature(4), flavor(4), length(4), numTables(2), reserved(2), ...
+            numTables = view.getUint16(12, false);
+            tableOffset = 44; // WOFF table directory starts at offset 44
+            tableEntrySize = 20; // Each WOFF table entry is 20 bytes
+        } else if (isWOFF2) {
+            // WOFF2 is more complex with compressed tables - skip for now
+            console.warn('[Typst] WOFF2 font parsing not fully supported, using filename as fallback');
+            return null;
+        } else {
+            // TTF/OTF: offset subtable starts at 0
+            numTables = view.getUint16(4, false);
+            tableOffset = 12;
+            tableEntrySize = 16;
+        }
+        
+        // Find 'name' table
+        let nameTableOffset = 0;
+        let nameTableCompLength = 0;
+        let nameTableOrigLength = 0;
+        
+        for (let i = 0; i < numTables; i++) {
+            const entryOffset = tableOffset + i * tableEntrySize;
+            const tag = String.fromCharCode(
+                view.getUint8(entryOffset),
+                view.getUint8(entryOffset + 1),
+                view.getUint8(entryOffset + 2),
+                view.getUint8(entryOffset + 3)
+            );
+            if (tag === 'name') {
+                if (isWOFF) {
+                    // WOFF: tag(4), offset(4), compLength(4), origLength(4), origChecksum(4)
+                    nameTableOffset = view.getUint32(entryOffset + 4, false);
+                    nameTableCompLength = view.getUint32(entryOffset + 8, false);
+                    nameTableOrigLength = view.getUint32(entryOffset + 12, false);
+                } else {
+                    // TTF/OTF: tag(4), checksum(4), offset(4), length(4)
+                    nameTableOffset = view.getUint32(entryOffset + 8, false);
+                }
+                break;
+            }
+        }
+        
+        if (nameTableOffset === 0) {
+            console.warn('[Typst] No name table found in font');
+            return null;
+        }
+        
+        // For WOFF, check if table is compressed (compLength !== origLength)
+        if (isWOFF && nameTableCompLength !== nameTableOrigLength) {
+            console.warn('[Typst] WOFF name table is compressed, cannot parse');
+            return null;
+        }
+        
+        // Parse name table
+        const nameCount = view.getUint16(nameTableOffset + 2, false);
+        const stringOffset = view.getUint16(nameTableOffset + 4, false);
+        
+        // Look for font family name (nameID 1) - prefer Windows platform
+        let fallbackName: string | null = null;
+        
+        for (let i = 0; i < nameCount; i++) {
+            const recordOffset = nameTableOffset + 6 + i * 12;
+            const platformID = view.getUint16(recordOffset, false);
+            const encodingID = view.getUint16(recordOffset + 2, false);
+            const nameID = view.getUint16(recordOffset + 6, false);
+            const length = view.getUint16(recordOffset + 8, false);
+            const offset = view.getUint16(recordOffset + 10, false);
+            
+            // nameID 1 = Font Family
+            if (nameID === 1) {
+                const strOffset = nameTableOffset + stringOffset + offset;
+                
+                // Platform 3 (Windows), Encoding 1 (Unicode BMP) - UTF-16BE
+                if (platformID === 3 && encodingID === 1) {
+                    let name = '';
+                    for (let j = 0; j < length; j += 2) {
+                        name += String.fromCharCode(view.getUint16(strOffset + j, false));
+                    }
+                    if (name) {
+                        return name; // Windows platform is preferred
+                    }
+                }
+                // Platform 1 (Macintosh), Encoding 0 (Roman) - ASCII
+                else if (platformID === 1 && encodingID === 0) {
+                    let name = '';
+                    for (let j = 0; j < length; j++) {
+                        name += String.fromCharCode(view.getUint8(strOffset + j));
+                    }
+                    if (name && !fallbackName) {
+                        fallbackName = name;
+                    }
+                }
+            }
+        }
+        
+        return fallbackName;
+    } catch (e) {
+        console.error('[Typst] Error parsing font:', e);
+        return null;
+    }
 }
 
 export function fixTypstUnit(value: string | number | undefined): string {
@@ -85,32 +222,64 @@ export function generatePreamble(options: TypstOptions): string {
 
     // Map common font names to fonts from typst.ts text assets
     // Available: DejaVu Sans Mono, Libertinus Serif, New Computer Modern
+    // Plus any custom fonts that have been registered
     let cleanedFont = fontFamily.split(',')[0].replace(/['"]/g, '').trim();
-    const fontMap: Record<string, string> = {
-        // Serif fonts -> Libertinus Serif
-        'times new roman': 'Libertinus Serif',
-        'georgia': 'Libertinus Serif',
-        'serif': 'Libertinus Serif',
-        'linux libertine': 'Libertinus Serif',
-        'libertinus serif': 'Libertinus Serif',
-        // Sans-serif fonts -> Libertinus Serif (no sans in text assets, use serif as fallback)
-        'inter': 'Libertinus Serif',
-        'arial': 'Libertinus Serif',
-        'helvetica': 'Libertinus Serif',
-        'verdana': 'Libertinus Serif',
-        'sans-serif': 'Libertinus Serif',
-        // Monospace fonts -> DejaVu Sans Mono
-        'jetbrains mono': 'DejaVu Sans Mono',
-        'fira code': 'DejaVu Sans Mono',
-        'source code pro': 'DejaVu Sans Mono',
-        'consolas': 'DejaVu Sans Mono',
-        'monaco': 'DejaVu Sans Mono',
-        'dejavu sans mono': 'DejaVu Sans Mono',
-        'monospace': 'DejaVu Sans Mono',
-        // Math font
-        'computer modern': 'New Computer Modern',
-    };
-    cleanedFont = fontMap[cleanedFont.toLowerCase()] || 'Libertinus Serif';
+    const cleanedFontLower = cleanedFont.toLowerCase();
+    
+    console.log(`[Typst] [generatePreamble] Input fontFamily: "${fontFamily}", cleaned: "${cleanedFont}"`);
+    console.log(`[Typst] [generatePreamble] Registered custom fonts:`, Array.from(registeredCustomFontFamilies.entries()));
+    
+    // Check if this is a registered custom font first (case-insensitive check)
+    // registeredCustomFontFamilies maps user-provided name -> internal font name
+    let customFontInternalName: string | undefined;
+    for (const [userFontName, internalName] of registeredCustomFontFamilies.entries()) {
+        if (userFontName.toLowerCase() === cleanedFontLower) {
+            customFontInternalName = internalName;
+            break;
+        }
+    }
+    
+    if (customFontInternalName) {
+        // Use the internal font name that Typst will recognize
+        cleanedFont = customFontInternalName;
+        console.log(`[Typst] [generatePreamble] Using custom font: "${fontFamily}" -> "${cleanedFont}"`);
+    } else {
+        // Fall back to built-in fonts
+        const fontMap: Record<string, string> = {
+            // Serif fonts -> Libertinus Serif
+            'times new roman': 'Libertinus Serif',
+            'georgia': 'Libertinus Serif',
+            'serif': 'Libertinus Serif',
+            'linux libertine': 'Libertinus Serif',
+            'libertinus serif': 'Libertinus Serif',
+            'merriweather': 'Libertinus Serif',
+            'playfair display': 'Libertinus Serif',
+            'lora': 'Libertinus Serif',
+            // Sans-serif fonts -> Libertinus Serif (no sans in text assets, use serif as fallback)
+            'inter': 'Libertinus Serif',
+            'arial': 'Libertinus Serif',
+            'helvetica': 'Libertinus Serif',
+            'verdana': 'Libertinus Serif',
+            'sans-serif': 'Libertinus Serif',
+            'roboto': 'Libertinus Serif',
+            'open sans': 'Libertinus Serif',
+            'montserrat': 'Libertinus Serif',
+            'outfit': 'Libertinus Serif',
+            'system-ui': 'Libertinus Serif',
+            // Monospace fonts -> DejaVu Sans Mono
+            'jetbrains mono': 'DejaVu Sans Mono',
+            'fira code': 'DejaVu Sans Mono',
+            'source code pro': 'DejaVu Sans Mono',
+            'consolas': 'DejaVu Sans Mono',
+            'monaco': 'DejaVu Sans Mono',
+            'dejavu sans mono': 'DejaVu Sans Mono',
+            'monospace': 'DejaVu Sans Mono',
+            // Math font
+            'computer modern': 'New Computer Modern',
+        };
+        cleanedFont = fontMap[cleanedFontLower] || 'Libertinus Serif';
+        console.log(`[Typst] Mapped font "${fontFamily}" -> "${cleanedFont}"`);
+    }
 
     return `
 #set page(
@@ -170,7 +339,7 @@ export async function initializeCompiler(): Promise<void> {
             console.log('[Typst] [Client] Initializing WASM compiler...');
             
             const typstModule = await import('@myriaddreamin/typst.ts');
-            const { createTypstCompiler, initOptions } = typstModule;
+            const { createTypstCompiler, initOptions, loadFonts } = typstModule;
             
             // Get the preloadFontAssets function from initOptions namespace
             const preloadFontAssets = initOptions.preloadFontAssets;
@@ -178,23 +347,50 @@ export async function initializeCompiler(): Promise<void> {
             // Create the compiler
             typstCompiler = createTypstCompiler();
             
-            // Initialize with WASM from CDN and preload default font assets
+            // Prepare beforeBuild hooks
+            const beforeBuildHooks: any[] = [
+                // Load built-in text fonts (includes DejaVu Sans Mono, Libertinus Serif, New Computer Modern)
+                preloadFontAssets({
+                    assets: ['text'],
+                })
+            ];
+            
+            // Add custom fonts if any are pending
+            if (pendingCustomFonts.length > 0) {
+                console.log(`[Typst] [Client] Loading ${pendingCustomFonts.length} custom fonts...`);
+                console.log(`[Typst] [Client] Font mapping:`, Array.from(registeredCustomFontFamilies.entries()));
+                
+                // Convert FontData to Uint8Array for loadFonts
+                const customFontData = pendingCustomFonts.map(f => f.data);
+                
+                // Add custom fonts loader
+                beforeBuildHooks.push(
+                    loadFonts(customFontData, { assets: false })
+                );
+            }
+            
+            // Initialize with WASM from CDN and fonts
             await typstCompiler.init({
                 getModule: () => {
                     const wasmUrl = `${CDN_BASE}/@myriaddreamin/typst-ts-web-compiler@${TYPST_VERSION}/pkg/typst_ts_web_compiler_bg.wasm`;
                     console.log('[Typst] [Client] Fetching WASM from:', wasmUrl);
                     return fetch(wasmUrl);
                 },
-                // Use the library's built-in font loading
-                beforeBuild: [
-                    preloadFontAssets({
-                        assets: ['text'], // Load text fonts (includes DejaVu Sans Mono, Libertinus Serif, New Computer Modern)
-                    })
-                ]
+                beforeBuild: beforeBuildHooks
             });
             
             isInitialized = true;
             console.log('[Typst] [Client] WASM compiler initialized successfully');
+            console.log('[Typst] [Client] Built-in fonts: Libertinus Serif, DejaVu Sans Mono, New Computer Modern');
+            
+            if (registeredCustomFontFamilies.size > 0) {
+                const fontList = Array.from(registeredCustomFontFamilies.entries())
+                    .map(([user, internal]) => user === internal ? user : `${user} -> ${internal}`)
+                    .join(', ');
+                console.log(`[Typst] [Client] Custom fonts loaded: ${fontList}`);
+            } else {
+                console.log('[Typst] [Client] No custom fonts loaded');
+            }
         } catch (error) {
             console.error('[Typst] [Client] Failed to initialize compiler:', error);
             initPromise = null;
@@ -214,6 +410,66 @@ export interface CompileArgs {
     source: string;
     images?: TypstImage[];
     fonts?: FontData[];
+}
+
+// Store pending custom fonts to be loaded on next init
+let pendingCustomFonts: FontData[] = [];
+
+/**
+ * Register custom fonts to be loaded with the compiler
+ * If compiler is already initialized, it will be reinitialized with the new fonts
+ * @param fonts Array of font data with family name and binary data
+ */
+export async function setCustomFonts(fonts: FontData[]): Promise<void> {
+    // Check if fonts have changed
+    const currentFontIds = Array.from(loadedCustomFonts).sort().join(',');
+    const newFontIds = fonts.map(f => `${f.family}-${f.data.length}`).sort().join(',');
+    
+    if (currentFontIds === newFontIds && isInitialized) {
+        console.log('[Typst] [Client] Custom fonts unchanged, skipping reinit');
+        return;
+    }
+
+    console.log(`[Typst] [Client] Setting ${fonts.length} custom fonts:`, fonts.map(f => f.family));
+
+    // Update pending fonts
+    pendingCustomFonts = fonts;
+    
+    // Pre-populate font family mapping by parsing font files NOW
+    // This ensures generatePreamble can use the correct names even before init completes
+    registeredCustomFontFamilies.clear();
+    loadedCustomFonts.clear();
+    
+    for (const font of fonts) {
+        const fontId = `${font.family}-${font.data.length}`;
+        loadedCustomFonts.add(fontId);
+        
+        // Parse the internal font family name from the font file
+        const internalName = parseFontFamilyName(font.data);
+        if (internalName) {
+            console.log(`[Typst] [Client] Pre-parsed font "${font.family}" -> internal: "${internalName}"`);
+            registeredCustomFontFamilies.set(font.family, internalName);
+        } else {
+            console.log(`[Typst] [Client] Could not parse internal name for "${font.family}", using as-is`);
+            registeredCustomFontFamilies.set(font.family, font.family);
+        }
+    }
+
+    // If compiler is already initialized, we need to reinitialize to add new fonts
+    if (isInitialized) {
+        console.log('[Typst] [Client] Custom fonts changed, reinitializing compiler...');
+        isInitialized = false;
+        initPromise = null;
+        typstCompiler = null;
+        await initializeCompiler();
+    }
+}
+
+/**
+ * Get list of registered custom font family names (returns user-provided names)
+ */
+export function getRegisteredCustomFonts(): string[] {
+    return Array.from(registeredCustomFontFamilies.keys());
 }
 
 /**
@@ -302,7 +558,21 @@ export async function compileTypstToPdf({ source }: CompileArgs): Promise<Uint8A
         
         if (!result.result) {
             const diagnostics = result.diagnostics || [];
-            const errorMsg = diagnostics.map((d: any) => d.message || JSON.stringify(d)).join('\n') || 'Compilation failed';
+            let errorMsg = diagnostics.map((d: any) => d.message || JSON.stringify(d)).join('\n') || 'Compilation failed';
+            
+            // Add helpful info about available fonts if there's a font error
+            if (errorMsg.toLowerCase().includes('font')) {
+                const availableFonts = ['Libertinus Serif', 'DejaVu Sans Mono', 'New Computer Modern'];
+                const customFontsList = Array.from(registeredCustomFontFamilies.entries())
+                    .map(([user, internal]) => `${user} (internal: ${internal})`);
+                errorMsg += `\n\nAvailable built-in fonts: ${availableFonts.join(', ')}`;
+                if (customFontsList.length > 0) {
+                    errorMsg += `\nLoaded custom fonts: ${customFontsList.join(', ')}`;
+                } else {
+                    errorMsg += `\nNo custom fonts loaded.`;
+                }
+            }
+            
             throw new Error(errorMsg);
         }
 
