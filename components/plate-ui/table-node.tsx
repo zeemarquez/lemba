@@ -447,8 +447,11 @@ function VerticalAlignDropdownMenu({
       
       // If cells are selected via table selection, use those
       if (selectedCells && selectedCells.length > 0) {
-        for (const [, path] of selectedCells) {
-          editor.tf.setNodes({ verticalAlign: align }, { at: path });
+        for (const cell of selectedCells) {
+          const path = editor.api.findPath(cell);
+          if (path) {
+            editor.tf.setNodes({ verticalAlign: align }, { at: path });
+          }
         }
       } else if (editor.selection) {
         // Otherwise, find the cell at the current selection
