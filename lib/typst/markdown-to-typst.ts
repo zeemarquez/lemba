@@ -199,16 +199,23 @@ function convertLatexToTypst(latex: string): string {
 function parseInline(tokens: any[]): string {
     if (!tokens) return '';
     let output = '';
-    for (const token of tokens) {
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const nextToken = tokens[i + 1];
         switch (token.type) {
             case 'text':
                 output += escapeTypst(token.text);
                 break;
             case 'strong':
-                output += `*${parseInline(token.tokens)}*`;
+                // In Typst, *bold* followed immediately by a word character causes "unclosed delimiter"
+                // We need to add #[] (empty content) to separate the closing * from the following text
+                const needsSeparator = nextToken?.type === 'text' && /^[a-zA-Z0-9]/.test(nextToken.text || '');
+                output += `*${parseInline(token.tokens)}*${needsSeparator ? '#[]' : ''}`;
                 break;
             case 'em':
-                output += `_${parseInline(token.tokens)}_`;
+                // Same issue applies to italic with underscore
+                const needsItalicSeparator = nextToken?.type === 'text' && /^[a-zA-Z0-9]/.test(nextToken.text || '');
+                output += `_${parseInline(token.tokens)}_${needsItalicSeparator ? '#[]' : ''}`;
                 break;
             case 'codespan':
                 output += `\`${token.text.replace(/`/g, '\\`')}\``;

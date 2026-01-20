@@ -64,16 +64,34 @@ function scaleTypstUnit(value: string | number | undefined, factor: number): str
     return fixTypstUnit(value);
 }
 
-function serializeNode(node: Descendant, context: SerializeContext): string {
+function serializeNode(node: Descendant, context: SerializeContext, nextSibling?: Descendant): string {
     if ('text' in node) {
-        return serializeTextNode(node as TText);
+        return serializeTextNode(node as TText, nextSibling);
     } else {
         return serializeElementNode(node as TElement, context);
     }
 }
 
-function serializeTextNode(node: TText): string {
+/**
+ * Check if the next sibling starts with a word character (letter or digit).
+ * In Typst, *bold* or _italic_ followed immediately by a word character causes "unclosed delimiter" error.
+ */
+function nextStartsWithWordChar(nextSibling?: Descendant): boolean {
+    if (!nextSibling) return false;
+    if ('text' in nextSibling) {
+        const text = (nextSibling as TText).text || '';
+        return /^[a-zA-Z0-9]/.test(text);
+    }
+    return false;
+}
+
+function serializeTextNode(node: TText, nextSibling?: Descendant): string {
     let text = escapeTypst(node.text || '');
+
+    // Check if we need to add separator after bold/italic to prevent "unclosed delimiter" error
+    // This happens when *bold* or _italic_ is immediately followed by a word character
+    const needsBoldSeparator = node.bold && nextStartsWithWordChar(nextSibling);
+    const needsItalicSeparator = node.italic && !node.bold && nextStartsWithWordChar(nextSibling);
 
     if (node.bold) text = `*${text}*`;
     if (node.italic) text = `_${text}_`;
@@ -92,11 +110,16 @@ function serializeTextNode(node: TText): string {
         return `#text(${styles.join(', ')})[${text}]`;
     }
 
+    // Add #[] separator after bold/italic if next text starts with word character
+    if (needsBoldSeparator || needsItalicSeparator) {
+        text += '#[]';
+    }
+
     return text;
 }
 
 function serializeElementNode(element: TElement, context: SerializeContext): string {
-    const children = element.children?.map(c => serializeNode(c, context)).join('') || '';
+    const children = element.children?.map((c, i, arr) => serializeNode(c, context, arr[i + 1])).join('') || '';
 
     const wrapAlign = (content: string, align?: string) => {
         if (align === 'center') return `#align(center)[${content}]`;
