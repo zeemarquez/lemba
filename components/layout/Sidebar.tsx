@@ -1,6 +1,7 @@
 "use client";
 
 import { useStore, FileNode } from "@/lib/store";
+import { browserStorage } from "@/lib/browser-storage";
 import { cn } from "@/lib/utils";
 import {
     FileText,
@@ -41,12 +42,22 @@ export function Sidebar() {
         setSettingsOpen,
         isLoadingFileTree,
         fetchFonts,
-        restoreSession
+        restoreSession,
+        templates
     } = useStore();
 
     const [mounted, setMounted] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
-    const [dialogConfig, setDialogConfig] = useState({
+    const [dialogConfig, setDialogConfig] = useState<{
+        title: string;
+        description: string;
+        placeholder: string;
+        defaultValue: string;
+        confirmLabel: string;
+        onConfirm: (val: string) => Promise<void>;
+        uploadAccept?: string;
+        onUpload?: (fileName: string, content: string) => Promise<void>;
+    }>({
         title: "",
         description: "",
         placeholder: "",
@@ -66,7 +77,7 @@ export function Sidebar() {
     const handleCreateFile = () => {
         setDialogConfig({
             title: "Create New File",
-            description: "Enter a name for the new file.",
+            description: "Enter a name for the new file, or upload an existing .md file.",
             placeholder: "MyNote.md",
             defaultValue: "",
             confirmLabel: "Create File",
@@ -74,6 +85,12 @@ export function Sidebar() {
                 const fileName = name.endsWith('.md') ? name : `${name}.md`;
                 const path = `Files/${fileName}`;
                 await createFile(path);
+            },
+            uploadAccept: ".md",
+            onUpload: async (fileName, content) => {
+                const finalName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+                const path = `Files/${finalName}`;
+                await createFile(path, content);
             }
         });
         setDialogOpen(true);
@@ -97,7 +114,7 @@ export function Sidebar() {
     const handleCreateTemplate = () => {
         setDialogConfig({
             title: "Create New Template",
-            description: "Enter a name for the new template.",
+            description: "Enter a name for the new template, or upload an existing .mdt file.",
             placeholder: "MyTemplate.mdt",
             defaultValue: "",
             confirmLabel: "Create Template",
@@ -129,6 +146,23 @@ export function Sidebar() {
                 
                 // @ts-ignore
                 await createTemplate(path, newTemplate);
+            },
+            uploadAccept: ".mdt",
+            onUpload: async (fileName, content) => {
+                const finalName = fileName.endsWith('.mdt') ? fileName : `${fileName}.mdt`;
+                const path = `Templates/${finalName}`;
+                
+                try {
+                    const uploadedTemplate = JSON.parse(content);
+                    // Update the id and name to match the new path
+                    uploadedTemplate.id = path;
+                    uploadedTemplate.name = finalName.replace('.mdt', '');
+                    // @ts-ignore
+                    await createTemplate(path, uploadedTemplate);
+                } catch (e) {
+                    console.error('Failed to parse template file:', e);
+                    throw new Error('Invalid template file format');
+                }
             }
         });
         setDialogOpen(true);
@@ -188,6 +222,47 @@ export function Sidebar() {
         // Target is the folder we are dropping into
         const newPath = `${target.id}/${source.name}`;
         await moveItem(source.id, newPath);
+    };
+
+    const handleExportFile = async (node: FileNode) => {
+        try {
+            const content = await browserStorage.readFile(node.id);
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = node.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export file:', error);
+        }
+    };
+
+    const handleExportTemplate = async (node: FileNode) => {
+        try {
+            const template = templates.find(t => t.id === node.id);
+            if (!template) {
+                console.error('Template not found:', node.id);
+                return;
+            }
+            const content = JSON.stringify(template, null, 2);
+            const blob = new Blob([content], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            // Ensure the file has .mdt extension
+            const fileName = node.name.endsWith('.mdt') ? node.name : `${node.name}.mdt`;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export template:', error);
+        }
     };
 
     const filesRoot = fileTree.find(n => n.name === 'Files');
@@ -283,6 +358,7 @@ export function Sidebar() {
                                     onRename={handleRename}
                                     onDelete={handleDelete}
                                     onMove={handleMove}
+                                    onExport={handleExportFile}
                                 />
                             )}
                             
@@ -320,6 +396,7 @@ export function Sidebar() {
                                     onRename={handleRename}
                                     onDelete={handleDelete}
                                     onMove={handleMove}
+                                    onExport={handleExportTemplate}
                                 />
                             )}
 

@@ -1,5 +1,5 @@
 import { FileNode } from "@/lib/store";
-import { ChevronRight, FileText, Folder, Trash2, Edit, LayoutTemplate } from "lucide-react";
+import { ChevronRight, FileText, Folder, Trash2, Edit, LayoutTemplate, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useDrag, useDrop } from "react-dnd";
@@ -17,6 +17,7 @@ interface FileTreeProps {
     onRename: (node: FileNode) => void;
     onDelete: (node: FileNode) => void;
     onMove: (source: FileNode, target: FileNode) => void;
+    onExport?: (node: FileNode) => void;
     level?: number;
 }
 
@@ -26,7 +27,8 @@ const FileTreeItem = ({
     onSelect, 
     onRename, 
     onDelete, 
-    onMove, 
+    onMove,
+    onExport,
     level = 0 
 }: { 
     node: FileNode; 
@@ -35,6 +37,7 @@ const FileTreeItem = ({
     onRename: (node: FileNode) => void;
     onDelete: (node: FileNode) => void;
     onMove: (source: FileNode, target: FileNode) => void;
+    onExport?: (node: FileNode) => void;
     level: number;
 }) => {
     const [expanded, setExpanded] = useState(false);
@@ -127,6 +130,12 @@ const FileTreeItem = ({
                         <Edit className="mr-2 h-4 w-4" />
                         Rename
                     </ContextMenuItem>
+                    {node.type === 'file' && onExport && (
+                        <ContextMenuItem onClick={(e) => { e.stopPropagation(); onExport(node); }}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Export
+                        </ContextMenuItem>
+                    )}
                     <ContextMenuItem 
                         onClick={(e) => { e.stopPropagation(); onDelete(node); }}
                         className="text-destructive focus:text-destructive"
@@ -145,6 +154,7 @@ const FileTreeItem = ({
                     onRename={onRename}
                     onDelete={onDelete}
                     onMove={onMove}
+                    onExport={onExport}
                     level={level + 1} 
                 />
             )}
@@ -164,6 +174,7 @@ export function FileTree(props: FileTreeProps) {
                     onRename={props.onRename}
                     onDelete={props.onDelete}
                     onMove={props.onMove}
+                    onExport={props.onExport}
                     level={props.level || 0}
                 />
             ))}

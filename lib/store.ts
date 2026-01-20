@@ -249,7 +249,31 @@ export const useStore = create<AppState>()(
                 fetchFileTree: async () => {
                     set({ isLoadingFileTree: true });
                     try {
-                        const { tree } = await browserStorage.list();
+                        let { tree } = await browserStorage.list();
+                        
+                        // Check if Files folder has any files
+                        const filesRoot = tree.find(n => n.name === 'Files');
+                        const hasFiles = filesRoot?.children && filesRoot.children.length > 0;
+                        
+                        // If no files exist, load the default showcase file from /default/
+                        if (!hasFiles) {
+                            try {
+                                const response = await fetch('/default/Lorem Ipsum.md');
+                                if (response.ok) {
+                                    const content = await response.text();
+                                    const path = 'Files/Lorem Ipsum.md';
+                                    await browserStorage.createFile(path, content);
+                                    // Re-fetch tree after creating default file
+                                    const result = await browserStorage.list();
+                                    tree = result.tree;
+                                    // Open the default file
+                                    setTimeout(() => get().openFile(path), 100);
+                                }
+                            } catch (err) {
+                                console.error('Failed to load default showcase file:', err);
+                            }
+                        }
+                        
                         set({ fileTree: tree });
                     } catch (error) {
                         console.error('Failed to fetch file tree:', error);
@@ -268,8 +292,17 @@ export const useStore = create<AppState>()(
                         if (!defaultExists) {
                             const path = 'Templates/Default.mdt';
                             try {
-                                // Create the default template file
-                                await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
+                                // Try to fetch the default template from /default/ folder
+                                const response = await fetch('/default/Default.mdt');
+                                if (response.ok) {
+                                    const templateData = await response.json();
+                                    // Update the id to match the storage path
+                                    templateData.id = path;
+                                    await browserStorage.createTemplate(path, templateData);
+                                } else {
+                                    // Fallback to hardcoded DEFAULT_TEMPLATE if fetch fails
+                                    await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
+                                }
 
                                 // Re-fetch to get the file with correct metadata
                                 templates = await browserStorage.listTemplates();
@@ -278,6 +311,14 @@ export const useStore = create<AppState>()(
                                 get().fetchFileTree();
                             } catch (err) {
                                 console.error('Failed to create default template:', err);
+                                // Fallback to hardcoded DEFAULT_TEMPLATE
+                                try {
+                                    await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
+                                    templates = await browserStorage.listTemplates();
+                                    get().fetchFileTree();
+                                } catch (fallbackErr) {
+                                    console.error('Failed to create fallback template:', fallbackErr);
+                                }
                             }
                         }
 
