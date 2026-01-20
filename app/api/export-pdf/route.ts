@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+// import puppeteer from 'puppeteer'; // Removed to use dynamic import
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
@@ -9,14 +9,14 @@ import { serializeNodesToHtml, processHtmlImageCaptions } from '@/lib/plate/seri
 // Create a configured marked instance for reliable math rendering
 function createMarkedInstance() {
     const instance = new Marked();
-    
+
     // Add KaTeX extension first
     instance.use(markedKatex({
         throwOnError: false,
         output: 'html',
         nonStandard: true, // Allow single $ for inline math
     }));
-    
+
     // Add highlight extension
     instance.use(markedHighlight({
         emptyLangClass: 'hljs',
@@ -26,7 +26,7 @@ function createMarkedInstance() {
             return hljs.highlight(code, { language }).value;
         }
     }));
-    
+
     return instance;
 }
 
@@ -36,7 +36,7 @@ const markedInstance = createMarkedInstance();
 // Supports both JSON (Plate Value) and legacy markdown formats
 async function headerFooterToHtml(content: string, context: { title?: string }): Promise<string> {
     if (!content) return '';
-    
+
     // Try JSON first (new format with alignment preserved)
     try {
         const parsed = JSON.parse(content);
@@ -46,14 +46,14 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
     } catch {
         // Not JSON, try markdown
     }
-    
+
     // Fallback to markdown conversion (legacy format)
     let html = markedInstance.parse(content) as string;
-    
+
     // Replace title and date in markdown (page is handled by CSS)
     if (context.title) html = html.replace(/{title}/g, context.title);
     html = html.replace(/{date}/g, new Date().toLocaleDateString());
-    
+
     return html;
 }
 
@@ -61,7 +61,7 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
 function generateNumberingCss(settings: any): string {
     const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
     let css = `body { counter-reset: h1-counter h2-counter h3-counter h4-counter h5-counter h6-counter; }\n`;
-    
+
     // Add counter resets for child levels
     levels.forEach((level, index) => {
         if (index < levels.length - 1) {
@@ -76,20 +76,20 @@ function generateNumberingCss(settings: any): string {
         if (!levelSettings?.enabled) return;
 
         let contentParts: string[] = [];
-        
+
         // Add prefix
         if (levelSettings.prefix) {
             contentParts.push(`"${levelSettings.prefix}"`);
         }
-        
+
         // Build the hierarchy string with counters
         for (let i = 0; i <= index; i++) {
             const currentLevel = levels[i];
             const currentSettings = settings?.[currentLevel]?.numbering;
-            
+
             if (currentSettings?.enabled) {
                 contentParts.push(`counter(${currentLevel}-counter, ${currentSettings.style})`);
-                
+
                 // Add separator if there are more enabled levels after this one
                 let hasMoreEnabled = false;
                 for (let j = i + 1; j <= index; j++) {
@@ -98,13 +98,13 @@ function generateNumberingCss(settings: any): string {
                         break;
                     }
                 }
-                
+
                 if (hasMoreEnabled && currentSettings.separator) {
                     contentParts.push(`"${currentSettings.separator}"`);
                 }
             }
         }
-        
+
         // Add suffix
         if (levelSettings.suffix) {
             contentParts.push(`"${levelSettings.suffix} "`);
@@ -127,13 +127,13 @@ function generateNumberingCss(settings: any): string {
 export function generatePdfCss(settings: any): string {
     const headerMargins = settings?.header?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
     const footerMargins = settings?.footer?.margins || { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' };
-    
+
     // Generate heading numbering CSS
     const numberingCss = generateNumberingCss(settings);
-    
+
     // Note: Page margins are handled by Puppeteer's margin option, not CSS
     // This ensures consistent margins on ALL pages
-    
+
     return `
         *, *::before, *::after {
             box-sizing: border-box;
@@ -348,7 +348,7 @@ export async function POST(req: Request) {
         const headerMatch = settings?.header?.content?.match(/"offset":\s*(\d+)/);
         const footerMatch = settings?.footer?.content?.match(/"offset":\s*(\d+)/);
         const offset = headerMatch ? parseInt(headerMatch[1]) : (footerMatch ? parseInt(footerMatch[1]) : 0);
-        
+
         if (offset > 0) {
             pdfCss += `\nbody { counter-reset: page ${offset}; }`;
         }
@@ -382,10 +382,24 @@ export async function POST(req: Request) {
         `;
 
         // Launch puppeteer
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-        });
+        // Launch puppeteer
+        if (process.env.VERCEL) {
+            const chromium = await import('@sparticuz/chromium').then(mod => mod.default) as any;
+            const puppeteerCore = await import('puppeteer-core').then(mod => mod.default);
+
+            browser = await puppeteerCore.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+            });
+        } else {
+            const puppeteer = await import('puppeteer').then(mod => mod.default);
+            browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+            });
+        }
 
         const page = await browser.newPage();
 

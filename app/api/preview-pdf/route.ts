@@ -1,4 +1,4 @@
-import puppeteer, { Browser } from 'puppeteer';
+import { Browser } from 'puppeteer-core';
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { markedHighlight } from "marked-highlight";
@@ -14,16 +14,29 @@ const BROWSER_IDLE_TIMEOUT = 60000; // Close browser after 1 minute of inactivit
 
 async function getBrowser(): Promise<Browser> {
     browserLastUsed = Date.now();
-    
+
     if (browserInstance && browserInstance.connected) {
         return browserInstance;
     }
-    
-    browserInstance = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-    });
-    
+
+    if (process.env.VERCEL) {
+        const chromium = await import('@sparticuz/chromium').then(mod => mod.default) as any;
+        const puppeteerCore = await import('puppeteer-core').then(mod => mod.default);
+
+        browserInstance = await puppeteerCore.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+        }) as Browser;
+    } else {
+        const puppeteer = await import('puppeteer').then(mod => mod.default);
+        browserInstance = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+        }) as unknown as Browser;
+    }
+
     // Set up auto-close on idle
     const checkIdle = setInterval(async () => {
         if (Date.now() - browserLastUsed > BROWSER_IDLE_TIMEOUT && browserInstance) {
@@ -32,20 +45,20 @@ async function getBrowser(): Promise<Browser> {
             clearInterval(checkIdle);
         }
     }, 10000);
-    
-    return browserInstance;
+
+    return browserInstance as Browser;
 }
 
 // Create a configured marked instance for reliable math rendering
 function createMarkedInstance() {
     const instance = new Marked();
-    
+
     instance.use(markedKatex({
         throwOnError: false,
         output: 'html',
         nonStandard: true,
     }));
-    
+
     instance.use(markedHighlight({
         emptyLangClass: 'hljs',
         langPrefix: 'hljs language-',
@@ -54,7 +67,7 @@ function createMarkedInstance() {
             return hljs.highlight(code, { language }).value;
         }
     }));
-    
+
     return instance;
 }
 
@@ -62,7 +75,7 @@ const markedInstance = createMarkedInstance();
 
 async function headerFooterToHtml(content: string, context: { title?: string }): Promise<string> {
     if (!content) return '';
-    
+
     try {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -71,11 +84,11 @@ async function headerFooterToHtml(content: string, context: { title?: string }):
     } catch {
         // Not JSON, try markdown
     }
-    
+
     let html = markedInstance.parse(content) as string;
     if (context.title) html = html.replace(/{title}/g, context.title);
     html = html.replace(/{date}/g, new Date().toLocaleDateString());
-    
+
     return html;
 }
 
@@ -115,7 +128,7 @@ export async function POST(req: Request) {
         const headerMatch = settings?.header?.content?.match(/"offset":\s*(\d+)/);
         const footerMatch = settings?.footer?.content?.match(/"offset":\s*(\d+)/);
         const offset = headerMatch ? parseInt(headerMatch[1]) : (footerMatch ? parseInt(footerMatch[1]) : 0);
-        
+
         if (offset > 0) {
             pdfCss += `\nbody { counter-reset: page ${offset}; }`;
         }
@@ -146,11 +159,11 @@ export async function POST(req: Request) {
         const browser = await getBrowser();
 
         const page = await browser.newPage();
-        
+
         try {
             // Use domcontentloaded instead of networkidle0 for speed (fonts may still be loading)
             await page.setContent(fullHtml, { waitUntil: 'domcontentloaded' });
-            
+
             // Small delay for fonts to load
             await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -169,10 +182,10 @@ export async function POST(req: Request) {
 
             // Convert PDF pages to images using a new page
             const pdfPage = await browser.newPage();
-            
+
             try {
                 const pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
-                
+
                 // Use pdf.js with configurable resolution based on quality setting
                 await pdfPage.setContent(`
                     <!DOCTYPE html>
@@ -216,9 +229,9 @@ export async function POST(req: Request) {
                     return await (window as any).renderPdfPages(pdfBase64, scale, jpegQuality);
                 }, pdfBase64, qualityConfig.scale, qualityConfig.jpegQuality);
 
-                return NextResponse.json({ 
+                return NextResponse.json({
                     pages: images,
-                    pageCount: images.length 
+                    pageCount: images.length
                 });
             } finally {
                 await pdfPage.close();
