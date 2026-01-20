@@ -28,8 +28,7 @@ export async function POST(req: Request) {
         const { markdown, title, settings } = await req.json();
 
         // 1. Convert Body Markdown to Typst
-        const typstResult = await processTypstImages(markdownToTypst(markdown || ''));
-        const typstBody = typstResult.source;
+        const typstBody = markdownToTypst(markdown || '');
 
         // 3. Prepare Header/Footer
         const headerContent = settings?.header?.enabled && settings?.header?.content
@@ -51,9 +50,10 @@ export async function POST(req: Request) {
 
         const preamble = generatePreamble(typstOptions);
 
-        // 5. Combine
-        // We ensure body starts cleanly
-        const fullSource = `${preamble}\n\n${typstBody}`;
+        // 5. Combine and Process Images for the entire document
+        const fullSourceRaw = `${preamble}\n\n${typstBody}`;
+        const typstResult = await processTypstImages(fullSourceRaw);
+        const fullSource = typstResult.source;
 
         // 6. Compile
         // This returns a Buffer

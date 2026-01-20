@@ -21,8 +21,7 @@ export async function POST(req: Request) {
 
 
         // 1. Convert
-        const typstResult = await processTypstImages(markdownToTypst(markdown || ''));
-        const typstBody = typstResult.source;
+        const typstBody = markdownToTypst(markdown || '');
 
         // 2. Headers/Footers
         const headerContent = settings?.header?.enabled && settings?.header?.content
@@ -42,8 +41,10 @@ export async function POST(req: Request) {
 
         const preamble = generatePreamble(typstOptions);
 
-        // 4. Combine
-        const fullSource = `${preamble}\n\n${typstBody}`;
+        // 4. Combine and process images
+        const fullSourceRaw = `${preamble}\n\n${typstBody}`;
+        const typstResult = await processTypstImages(fullSourceRaw);
+        const fullSource = typstResult.source;
 
         // 5. Compile to PDF
         const pdfBuffer = await compileTypstToPdf({
