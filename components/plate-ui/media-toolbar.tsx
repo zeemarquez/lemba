@@ -148,11 +148,11 @@ export function MediaToolbar({
               Caption
             </CaptionButton>
 
-            <Button 
-              size="sm" 
-              variant="ghost" 
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => setIsEditingLabel(true)}
-              className={cn(element.id && 'text-primary')}
+              className={cn((element as any).id && 'text-primary')}
             >
               Label
             </Button>

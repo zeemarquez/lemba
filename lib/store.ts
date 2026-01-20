@@ -9,7 +9,7 @@ export interface FileNode {
     children?: FileNode[];
 }
 
-export interface File {
+export interface AppStateFile {
     id: string; // relative path
     name: string;
     content: string;
@@ -84,12 +84,12 @@ interface AppState {
     // File System State
     fileTree: FileNode[];
     isLoadingFileTree: boolean;
-    
+
     // Editor State
-    files: File[]; // Cache of loaded files
+    files: AppStateFile[]; // Cache of loaded files
     activeFileId: string | null;
     openTabs: { id: string; type: 'file' | 'template' }[];
-    
+
     // UI State
     leftSidebarExpanded: boolean;
     rightSidebarExpanded: boolean;
@@ -99,7 +99,7 @@ interface AppState {
     editorViewMode: 'source' | 'editing' | 'viewing' | 'suggestion';
     uiIconSize: 'small' | 'normal' | 'big';
     uiFontSize: 'small' | 'normal' | 'big';
-    
+
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
 
@@ -116,14 +116,14 @@ interface AppState {
     fetchTemplates: () => Promise<void>;
     fetchFonts: () => Promise<void>;
     restoreSession: () => Promise<void>;
-    
+
     createFile: (path: string, content?: string) => Promise<void>;
     createFolder: (path: string) => Promise<void>;
-    
+
     // Template Actions
     createTemplate: (path: string, template: Template) => Promise<void>;
     saveTemplate: (path: string, template: Template) => Promise<void>;
-    
+
     deleteItem: (path: string, type: 'file' | 'folder') => Promise<void>;
     renameItem: (oldPath: string, newPath: string) => Promise<void>;
     moveItem: (sourcePath: string, destinationPath: string) => Promise<void>;
@@ -136,7 +136,7 @@ interface AppState {
     openFile: (path: string) => Promise<void>;
     saveFile: (path: string, content: string) => Promise<void>;
     openTemplate: (id: string) => void;
-    
+
     // Legacy/UI Actions
     closeTab: (id: string) => void;
     toggleLeftSidebar: () => void;
@@ -147,14 +147,14 @@ interface AppState {
     setPreviewQuality: (quality: 'low' | 'medium' | 'high') => void;
     setUiIconSize: (size: 'small' | 'normal' | 'big') => void;
     setUiFontSize: (size: 'small' | 'normal' | 'big') => void;
-    
+
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
     updateTemplateCss: (id: string, css: string) => void;
     setActiveTemplate: (id: string) => void;
     setActiveTemplateCss: (css: string) => void;
     setEditorViewMode: (mode: 'source' | 'editing' | 'viewing' | 'suggestion') => void;
-    
+
     // Helper to update local file content state (for editor changes before save)
     updateFileContent: (id: string, content: string) => void;
 }
@@ -221,36 +221,36 @@ export const useStore = create<AppState>()(
                 fetchTemplates: async () => {
                     try {
                         let templates = await browserStorage.listTemplates();
-                        
+
                         // Check if Default template exists
                         const defaultExists = templates.some(t => t.name === 'Default');
-                        
+
                         if (!defaultExists) {
-                             const path = 'Templates/Default.mdt';
-                             try {
-                                 // Create the default template file
-                                 await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
-                                 
-                                 // Re-fetch to get the file with correct metadata
-                                 templates = await browserStorage.listTemplates();
-                                 
-                                 // Trigger file tree refresh so it shows in sidebar
-                                 get().fetchFileTree();
-                             } catch (err) {
-                                 console.error('Failed to create default template:', err);
-                             }
+                            const path = 'Templates/Default.mdt';
+                            try {
+                                // Create the default template file
+                                await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
+
+                                // Re-fetch to get the file with correct metadata
+                                templates = await browserStorage.listTemplates();
+
+                                // Trigger file tree refresh so it shows in sidebar
+                                get().fetchFileTree();
+                            } catch (err) {
+                                console.error('Failed to create default template:', err);
+                            }
                         }
 
                         set({ templates });
-                        
+
                         // Set active template if needed
                         const state = get();
                         if ((!state.activeTemplateId || state.activeTemplateId === 'default') && templates.length > 0) {
-                             const defaultT = templates.find(t => t.name === 'Default') || templates[0];
-                             set({ 
-                                 activeTemplateId: defaultT.id,
-                                 activeTemplateCss: defaultT.css 
-                             });
+                            const defaultT = templates.find(t => t.name === 'Default') || templates[0];
+                            set({
+                                activeTemplateId: defaultT.id,
+                                activeTemplateCss: defaultT.css
+                            });
                         }
                     } catch (error) {
                         console.error('Failed to fetch templates:', error);
@@ -341,7 +341,7 @@ export const useStore = create<AppState>()(
                     try {
                         await browserStorage.delete(path, type);
                         await get().fetchFileTree();
-                        
+
                         const { openTabs } = get();
                         if (type === 'file' && openTabs.some(t => t.id === path)) {
                             get().closeTab(path);
@@ -403,7 +403,7 @@ export const useStore = create<AppState>()(
                     if (!existingFile) {
                         try {
                             const content = await browserStorage.readFile(path);
-                            const newFile: File = {
+                            const newFile: AppStateFile = {
                                 id: path,
                                 name: path.split('/').pop() || path,
                                 content: content,

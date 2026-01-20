@@ -50,7 +50,7 @@ const pageBreakRules = {
   html: {
     deserialize: (mdastNode: any, _deco: any, options: any) => {
       const value = mdastNode.value?.trim();
-      
+
       // Check for page break comment
       if (value === '<!-- pagebreak -->') {
         return {
@@ -58,10 +58,10 @@ const pageBreakRules = {
           children: [{ text: '' }],
         };
       }
-      
+
       // Handle image HTML (original html deserialize logic will be merged)
       const imgMatch = value?.match(/<img[^>]*src="([^"]*)"[^>]*>/);
-      
+
       if (imgMatch) {
         const url = imgMatch[1];
         const widthMatch = value.match(/width\s*:\s*(\d+)px/);
@@ -72,7 +72,7 @@ const pageBreakRules = {
         // Try data-align first, then fall back to detecting margin pattern
         const dataAlignMatch = value.match(/data-align\s*=\s*"(left|center|right)"/i);
         let align: string | undefined;
-        
+
         if (dataAlignMatch) {
           align = dataAlignMatch[1];
         } else if (value.includes('margin-left: auto') && value.includes('margin-right: auto')) {
@@ -82,7 +82,7 @@ const pageBreakRules = {
         } else if (value.includes('margin-left: 0')) {
           align = 'left';
         }
-        
+
         return {
           type: getPluginType(options.editor, KEYS.img),
           url,
@@ -95,7 +95,7 @@ const pageBreakRules = {
           children: [{ text: '' }],
         };
       }
-      
+
       // Return as text for other HTML
       return { text: mdastNode.value };
     },
@@ -111,7 +111,7 @@ const imageRules = {
         const styles: string[] = ['display: block'];
         if (width) styles.push(`width: ${width}px`);
         if (height) styles.push(`height: ${height}px`);
-        
+
         // Apply alignment via margin
         if (align === 'center') {
           styles.push('margin-left: auto', 'margin-right: auto');
@@ -120,22 +120,22 @@ const imageRules = {
         } else {
           styles.push('margin-left: 0', 'margin-right: auto');
         }
-        
+
         let attrs = `src="${url}"`;
         if (alt) attrs += ` alt="${alt}"`;
         if (id) attrs += ` id="${id}"`;
         attrs += ` style="${styles.join('; ')}"`;
         // Store alignment as data attribute for deserialization
         if (align) attrs += ` data-align="${align}"`;
-        
+
         // Handle caption
         if (caption && Array.isArray(caption) && caption.length > 0) {
-          const captionText = NodeApi.string({ children: caption });
+          const captionText = NodeApi.string({ children: caption } as any);
           if (captionText) {
             attrs += ` figcaption="${captionText.replace(/"/g, '&quot;')}"`;
           }
         }
-        
+
         return {
           type: 'html',
           value: `<img ${attrs} />`,
@@ -164,7 +164,7 @@ export const MarkdownKit = [
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention],
-      rules: { ...mathRules, ...imageRules, ...pageBreakRules },
+      rules: { ...mathRules, ...imageRules, ...pageBreakRules } as any,
     },
   }),
 ];
@@ -182,7 +182,7 @@ export const MarkdownKit = [
  */
 export function preprocessMathDelimiters(markdown: string): string {
   if (!markdown) return markdown;
-  
+
   // Match single-line $$...$$ that is NOT already multi-line
   // Uses negative lookahead/lookbehind to ensure we're matching $$...$$ not $...$
   // Pattern explanation:
@@ -213,7 +213,7 @@ export function preprocessMathDelimiters(markdown: string): string {
  */
 export function postprocessMathDelimiters(markdown: string): string {
   if (!markdown) return markdown;
-  
+
   // Convert multi-line block math to single-line format
   // Match: $$ newline content newline $$
   return markdown.replace(
