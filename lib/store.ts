@@ -81,6 +81,9 @@ export interface Template {
             content: string;
         };
         codeBlockTheme?: string;
+        tables?: {
+            preventPageBreak: boolean;
+        };
     }
 }
 
@@ -183,6 +186,7 @@ const DEFAULT_TEMPLATE: Template = {
         header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
+        tables: { preventPageBreak: false },
     }
 };
 

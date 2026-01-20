@@ -6,6 +6,10 @@ interface SerializeContext {
     scaleImages?: boolean;
     /** If true, content is for header/footer which is already wrapped in context expression */
     insideContext?: boolean;
+    /** Table settings from template */
+    tables?: {
+        preventPageBreak?: boolean;
+    };
 }
 
 export function serializeNodesToTypst(nodes: Descendant[], context: SerializeContext = {}): string {
@@ -340,11 +344,11 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         }
     }
 
-    let content = `#table(\n  columns: ${columns},\n`;
+    let tableContent = `table(\n  columns: ${columns},\n`;
     
     // Add stroke: none if borders should be hidden
     if (hideBorders) {
-        content += `  stroke: none,\n`;
+        tableContent += `  stroke: none,\n`;
     }
 
     rows.forEach(row => {
@@ -357,15 +361,21 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             
             // Use table.cell for individual cell alignment
             if (verticalAlign === 'middle') {
-                content += `  table.cell(align: horizon)[${finalContent}],\n`;
+                tableContent += `  table.cell(align: horizon)[${finalContent}],\n`;
             } else if (verticalAlign === 'bottom') {
-                content += `  table.cell(align: bottom)[${finalContent}],\n`;
+                tableContent += `  table.cell(align: bottom)[${finalContent}],\n`;
             } else {
-                content += `  [${finalContent}],\n`;
+                tableContent += `  [${finalContent}],\n`;
             }
         });
     });
 
-    content += `)\n`;
-    return content;
+    tableContent += `)`;
+    
+    // Wrap in block(breakable: false) if table continuity (prevent page break) is enabled
+    if (context.tables?.preventPageBreak) {
+        return `#block(breakable: false, ${tableContent})\n`;
+    }
+    
+    return `#${tableContent}\n`;
 }

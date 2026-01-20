@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown, FileText } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Baseline, ChevronDown, FileText, TableIcon } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -92,6 +92,7 @@ export function TemplateEditor() {
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
+        { id: 'tables', label: 'Tables', icon: TableIcon },
         { id: 'front-page', label: 'Front Page', icon: FileText },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
@@ -814,6 +815,40 @@ export function TemplateEditor() {
                                     <option value="solarized-light">Solarized Light</option>
                                     <option value="solarized-dark">Solarized Dark</option>
                                 </select>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Tables Section */}
+                    <section id="section-tables" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <TableIcon size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Tables</h2>
+                        </div>
+
+                        <div className="p-10 bg-card border border-border rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Prevent Page Break Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Prevent page breaks</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, tables will try to stay on a single page instead of being split across pages.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('tables.preventPageBreak', !settings.tables?.preventPageBreak)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.tables?.preventPageBreak ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.tables?.preventPageBreak ? "left-7" : "left-1"
+                                    )} />
+                                </button>
                             </div>
                         </div>
                     </section>

@@ -33,6 +33,7 @@ export interface TemplateSettings {
     header?: { enabled?: boolean; content?: string; startPage?: number; margins?: { bottom: string; left: string; right: string } };
     footer?: { enabled?: boolean; content?: string; startPage?: number; margins?: { top: string; left: string; right: string } };
     frontPage?: { enabled?: boolean; content?: string };
+    tables?: { preventPageBreak?: boolean };
     [key: string]: unknown;
 }
 
@@ -54,8 +55,9 @@ export interface UsePdfCompilerReturn {
  * Convert Plate/markdown content to Typst
  * @param scaleImages - If true, applies scaling to images (used for header/footer)
  * @param insideContext - If true, content will be rendered inside a context expression (header/footer)
+ * @param tables - Table settings from template
  */
-async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean }): Promise<string> {
+async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean } }): Promise<string> {
     if (!content) return '';
 
     try {
@@ -65,7 +67,8 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
             return serializeNodesToTypst(parsed, { 
                 title: context.title, 
                 scaleImages: context.scaleImages,
-                insideContext: context.insideContext 
+                insideContext: context.insideContext,
+                tables: context.tables
             });
         }
     } catch {
@@ -150,7 +153,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             const markdownWithImages = await convertIndexedDbImagesToBase64(markdown || '');
 
             // 2. Convert Markdown to Typst
-            const typstBody = markdownToTypst(markdownWithImages);
+            const typstBody = markdownToTypst(markdownWithImages, { tables: settings?.tables });
 
             // 3. Prepare Header/Footer/Front Page
             let headerContent = '';
@@ -172,7 +175,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
                 const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
                 // Front page is in document body, NOT inside context, so insideContext=false
-                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false });
+                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables });
             }
 
             // 4. Generate Preamble

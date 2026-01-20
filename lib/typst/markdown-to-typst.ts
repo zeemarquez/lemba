@@ -1,7 +1,13 @@
 import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 
-export function markdownToTypst(markdown: string): string {
+export interface MarkdownToTypstOptions {
+    tables?: {
+        preventPageBreak?: boolean;
+    };
+}
+
+export function markdownToTypst(markdown: string, options: MarkdownToTypstOptions = {}): string {
     const instance = new Marked();
 
     instance.use(markedKatex({
@@ -13,13 +19,13 @@ export function markdownToTypst(markdown: string): string {
     const tokens = instance.lexer(markdown || '');
     console.log(`[Typst] [Markdown] Lexed ${tokens.length} tokens.`);
 
-    return parseTokens(tokens);
+    return parseTokens(tokens, options);
 }
 
-function parseTokens(tokens: any[]): string {
+function parseTokens(tokens: any[], options: MarkdownToTypstOptions = {}): string {
     let output = '';
     for (const token of tokens) {
-        output += processToken(token);
+        output += processToken(token, options);
     }
     return output;
 }
@@ -60,7 +66,7 @@ function fixTypstUnit(value: string | number | undefined): string {
     return s;
 }
 
-function processToken(token: any): string {
+function processToken(token: any, options: MarkdownToTypstOptions = {}): string {
     switch (token.type) {
         case 'space':
             return '';
@@ -74,28 +80,33 @@ function processToken(token: any): string {
         case 'list':
             const listType = token.ordered ? '+' : '-';
             return token.items.map((item: any) => {
-                const content = parseTokens(item.tokens).trim();
+                const content = parseTokens(item.tokens, options).trim();
                 const indented = content.split('\n').join('\n  ');
                 return `${listType} ${indented}\n`;
             }).join('') + '\n';
         case 'code':
             return "```" + (token.lang || '') + "\n" + token.text + "\n```\n\n";
         case 'blockquote':
-            return `#quote(block: true)[${parseTokens(token.tokens)}]\n\n`;
+            return `#quote(block: true)[${parseTokens(token.tokens, options)}]\n\n`;
         case 'table':
             const cols = token.header.length;
             // Use 1fr for each column to make the table expand to full width
-            let tableContent = `#table(\n  columns: (${'1fr, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
+            let tableInner = `table(\n  columns: (${'1fr, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
             token.header.forEach((cell: any) => {
-                tableContent += `  [*${parseInline(cell.tokens)}*],\n`;
+                tableInner += `  [*${parseInline(cell.tokens)}*],\n`;
             });
             token.rows.forEach((row: any) => {
                 row.forEach((cell: any) => {
-                    tableContent += `  [${parseInline(cell.tokens)}],\n`;
+                    tableInner += `  [${parseInline(cell.tokens)}],\n`;
                 });
             });
-            tableContent += ')\n\n';
-            return tableContent;
+            tableInner += ')';
+            
+            // Wrap in block(breakable: false) if table continuity (prevent page break) is enabled
+            if (options.tables?.preventPageBreak) {
+                return `#block(breakable: false, ${tableInner})\n\n`;
+            }
+            return `#${tableInner}\n\n`;
         case 'html':
             if (token.text.match(/<!--\s*pagebreak\s*-->/i)) {
                 return '#pagebreak()\n\n';
