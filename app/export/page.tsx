@@ -394,7 +394,7 @@ export default function ExportPage() {
                         </div>
                     )}
 
-                    <PdfPreview />
+                    <PdfPreview isStandaloneWindow />
                 </div>
             </div>
 

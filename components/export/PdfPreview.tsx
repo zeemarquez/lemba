@@ -22,7 +22,12 @@ interface TextItem {
     height: number;
 }
 
-export function PdfPreview() {
+interface PdfPreviewProps {
+    /** When true, enables landscape detection for horizontal page layout in standalone windows */
+    isStandaloneWindow?: boolean;
+}
+
+export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
     const { activeFileId, files, activeTemplateId, templates, previewQuality } = useStore();
     const [mounted, setMounted] = useState(false);
     const [pageImages, setPageImages] = useState<string[]>([]);
@@ -38,7 +43,13 @@ export function PdfPreview() {
     const pdfDocumentRef = useRef<any>(null);
 
     // Detect if window is landscape (wider than tall) for horizontal page layout
+    // Only applies in standalone window mode
     useEffect(() => {
+        if (!isStandaloneWindow) {
+            setIsLandscape(false);
+            return;
+        }
+        
         const checkLandscape = () => {
             setIsLandscape(window.innerWidth > window.innerHeight);
         };
@@ -46,7 +57,7 @@ export function PdfPreview() {
         checkLandscape();
         window.addEventListener('resize', checkLandscape);
         return () => window.removeEventListener('resize', checkLandscape);
-    }, []);
+    }, [isStandaloneWindow]);
 
     // Use client-side PDF compiler
     const { compilePdf, isInitialized, initError } = usePdfCompiler();
