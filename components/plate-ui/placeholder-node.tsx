@@ -8,7 +8,8 @@ import {
   ChevronDownIcon,
   BoldIcon,
   ItalicIcon,
-  UnderlineIcon
+  UnderlineIcon,
+  VariableIcon
 } from 'lucide-react';
 import type { TElement } from 'platejs';
 import type { PlateElementProps } from 'platejs/react';
@@ -37,13 +38,14 @@ import { Button } from './button';
 import { Input } from './input';
 
 export interface TPlaceholderElement extends TElement {
-  placeholderType: 'page' | 'date' | 'title' | 'totalPages';
+  placeholderType: 'page' | 'date' | 'title' | 'totalPages' | 'variable';
   format?: string;
   fontFamily?: string;
   fontSize?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  variableName?: string; // For variable placeholders, stores the variable name
 }
 
 // Available fonts in Typst WASM compiler (from typst.ts text assets)
@@ -98,6 +100,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
       case 'totalPages': return <HashIcon className="size-3 mr-1" />;
       case 'date': return <CalendarIcon className="size-3 mr-1" />;
       case 'title': return <FileTextIcon className="size-3 mr-1" />;
+      case 'variable': return <VariableIcon className="size-3 mr-1" />;
       default: return null;
     }
   };
@@ -108,6 +111,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
       case 'totalPages': return 'Total Pages';
       case 'date': return 'Current Date';
       case 'title': return 'File Title';
+      case 'variable': return element.variableName || 'Variable';
       default: return 'Placeholder';
     }
   };
@@ -115,13 +119,15 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
   return (
     <PlateElement
       {...props}
+      as="span"
+      className="inline"
     >
       <span
         contentEditable={false}
         className={cn(
-          'inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 align-baseline font-medium text-xs text-zinc-900 border border-zinc-200 shadow-sm transition-all',
-          !readOnly && 'cursor-pointer hover:bg-zinc-200',
-          selected && focused && 'ring-2 ring-zinc-900 ring-offset-1'
+          'inline-flex items-center rounded-md bg-muted px-2 py-0.5 align-baseline font-medium text-xs text-foreground border border-border shadow-sm transition-all',
+          !readOnly && 'cursor-pointer hover:bg-accent',
+          selected && focused && 'ring-2 ring-ring ring-offset-1'
         )}
         style={{
           fontFamily: element.fontFamily || undefined,
@@ -139,22 +145,22 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
             </span>
           </PopoverTrigger>
           <PopoverContent className="w-64 p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 pb-2 border-b">
-              <Settings2Icon className="size-4 text-zinc-500" />
+            <div className="flex items-center gap-2 pb-2 border-b border-border">
+              <Settings2Icon className="size-4 text-muted-foreground" />
               <h4 className="font-semibold text-sm">{getLabel()} Settings</h4>
             </div>
 
             {/* Font Settings - shared by all placeholder types */}
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Font Family</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Font Family</label>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none hover:bg-zinc-100 flex items-center justify-between">
+                    <button className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-xs outline-none hover:bg-accent flex items-center justify-between">
                       <span style={{ fontFamily: element.fontFamily || 'inherit' }}>
                         {allFontFamilies.find(f => f.value === (element.fontFamily || ''))?.label || 'Inherit'}
                       </span>
-                      <ChevronDownIcon className="size-3 text-zinc-400" />
+                      <ChevronDownIcon className="size-3 text-muted-foreground" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-56 max-h-[300px] overflow-y-auto">
@@ -165,8 +171,8 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                       return (
                         <Fragment key={category}>
                           <div className={cn(
-                            "px-2 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider",
-                            index > 0 && "mt-1 border-t border-zinc-100 pt-2"
+                            "px-2 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider",
+                            index > 0 && "mt-1 border-t border-border pt-2"
                           )}>
                             {category}
                           </div>
@@ -175,7 +181,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                               key={font.value}
                               className={cn(
                                 "text-xs cursor-pointer",
-                                (element.fontFamily || '') === font.value && "bg-zinc-100 font-semibold"
+                                (element.fontFamily || '') === font.value && "bg-accent font-semibold"
                               )}
                               style={{ fontFamily: font.value || 'inherit' }}
                               onSelect={() => updateElement({ fontFamily: font.value })}
@@ -190,7 +196,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                 </DropdownMenu>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Font Size</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Font Size</label>
                 <Input
                   type="text"
                   placeholder="e.g. 12px"
@@ -200,14 +206,14 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Style</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Style</label>
                 <div className="flex gap-1">
                   <button
                     className={cn(
                       "p-1.5 rounded-md border transition-colors",
                       element.bold 
-                        ? "bg-zinc-900 text-white border-zinc-900" 
-                        : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100"
+                        ? "bg-primary text-primary-foreground border-primary" 
+                        : "bg-muted text-muted-foreground border-border hover:bg-accent"
                     )}
                     onClick={() => updateElement({ bold: !element.bold })}
                     title="Bold"
@@ -218,8 +224,8 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                     className={cn(
                       "p-1.5 rounded-md border transition-colors",
                       element.italic 
-                        ? "bg-zinc-900 text-white border-zinc-900" 
-                        : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100"
+                        ? "bg-primary text-primary-foreground border-primary" 
+                        : "bg-muted text-muted-foreground border-border hover:bg-accent"
                     )}
                     onClick={() => updateElement({ italic: !element.italic })}
                     title="Italic"
@@ -230,8 +236,8 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
                     className={cn(
                       "p-1.5 rounded-md border transition-colors",
                       element.underline 
-                        ? "bg-zinc-900 text-white border-zinc-900" 
-                        : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100"
+                        ? "bg-primary text-primary-foreground border-primary" 
+                        : "bg-muted text-muted-foreground border-border hover:bg-accent"
                     )}
                     onClick={() => updateElement({ underline: !element.underline })}
                     title="Underline"
@@ -245,9 +251,9 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
             {/* Type Specific Settings */}
             {element.placeholderType === 'date' && (
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Date Format</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Date Format</label>
                 <select
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                  className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-xs outline-none text-foreground"
                   value={element.format || 'default'}
                   onChange={(e) => updateElement({ format: e.target.value })}
                 >
@@ -260,9 +266,9 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
 
             {element.placeholderType === 'page' && (
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Number Format</label>
                 <select
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                  className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-xs outline-none text-foreground"
                   value={element.format || 'decimal'}
                   onChange={(e) => updateElement({ format: e.target.value })}
                 >
@@ -275,9 +281,9 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
 
             {element.placeholderType === 'totalPages' && (
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-zinc-400">Number Format</label>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Number Format</label>
                 <select
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs outline-none"
+                  className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-xs outline-none text-foreground"
                   value={element.format || 'decimal'}
                   onChange={(e) => updateElement({ format: e.target.value })}
                 >
@@ -288,7 +294,7 @@ export function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>
               </div>
             )}
 
-            <div className="pt-2 border-t flex justify-end">
+            <div className="pt-2 border-t border-border flex justify-end">
               <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setOpen(false)}>
                 Close
               </Button>

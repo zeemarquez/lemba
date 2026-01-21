@@ -34,6 +34,12 @@ interface HeadingStyle {
     };
 }
 
+// Document variable definition (name only, value is per-document)
+export interface TemplateVariable {
+    id: string;
+    name: string;
+}
+
 export interface Template {
     id: string;
     name: string;
@@ -52,6 +58,7 @@ export interface Template {
         };
         startPageNumber?: number;
         watermark?: string;
+        variables?: TemplateVariable[];
         h1: HeadingStyle;
         h2: HeadingStyle;
         h3: HeadingStyle;

@@ -16,6 +16,7 @@ import {
 import { processTypstImages } from '@/lib/typst/client-image-manager';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import { useStore } from '@/lib/store';
+import { parseVariablesFromFrontmatter } from '@/components/export/ExportSidebar';
 
 // Heading numbering settings
 interface HeadingNumbering {
@@ -111,8 +112,9 @@ export interface UsePdfCompilerReturn {
  * @param insideContext - If true, content will be rendered inside a context expression (header/footer)
  * @param tables - Table settings from template
  * @param pageNumberOffset - Calculated page number offset from startPageNumber setting
+ * @param variables - Variable values from document frontmatter
  */
-async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean }; pageNumberOffset?: number }): Promise<string> {
+async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean }; pageNumberOffset?: number; variables?: Record<string, string> }): Promise<string> {
     if (!content) return '';
 
     try {
@@ -124,7 +126,8 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
                 scaleImages: context.scaleImages,
                 insideContext: context.insideContext,
                 tables: context.tables,
-                pageNumberOffset: context.pageNumberOffset
+                pageNumberOffset: context.pageNumberOffset,
+                variables: context.variables
             });
         }
     } catch {
@@ -207,6 +210,9 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
 
             // 1. Convert IndexedDB images to base64/data URLs in markdown
             const markdownWithImages = await convertIndexedDbImagesToBase64(markdown || '');
+            
+            // 1.5. Parse variable values from frontmatter
+            const variables = parseVariablesFromFrontmatter(markdownWithImages);
 
             // 2. Convert Markdown to Typst
             const typstBody = markdownToTypst(markdownWithImages, { tables: settings?.tables });
@@ -224,19 +230,19 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             if (settings?.header?.enabled && settings?.header?.content) {
                 const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);
                 // Header is inside context expression, so insideContext=true
-                headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset });
+                headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables });
             }
             
             if (settings?.footer?.enabled && settings?.footer?.content) {
                 const footerWithImages = await convertIndexedDbImagesToBase64(settings.footer.content);
                 // Footer is inside context expression, so insideContext=true
-                footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset });
+                footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables });
             }
 
             if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
                 const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
                 // Front page is in document body, NOT inside context, so insideContext=false
-                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset });
+                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables });
             }
 
             // 4. Generate Preamble

@@ -1,8 +1,8 @@
 "use client";
 
-import { useStore, FileNode } from "@/lib/store";
+import { useStore, FileNode, TemplateVariable } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder, Loader2 } from "lucide-react";
+import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder, Loader2, Variable } from "lucide-react";
 import dynamic from 'next/dynamic';
 const PdfPreview = dynamic(() => import("./PdfPreview").then(mod => mod.PdfPreview), { ssr: false });
 import { usePdfCompiler } from "@/hooks/use-pdf-compiler";
@@ -15,7 +15,60 @@ import {
 } from "@/components/plate-ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { Input } from "@/components/plate-ui/input";
+
+// Helper to parse frontmatter from markdown content
+export function parseVariablesFromFrontmatter(content: string): Record<string, string> {
+    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
+    const match = content.match(frontmatterRegex);
+    if (!match) return {};
+    
+    const frontmatter = match[1];
+    const variables: Record<string, string> = {};
+    
+    // Parse YAML-like key: value pairs
+    const lines = frontmatter.split('\n');
+    for (const line of lines) {
+        const colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+            const key = line.slice(0, colonIndex).trim();
+            const value = line.slice(colonIndex + 1).trim();
+            // Remove quotes if present
+            variables[key] = value.replace(/^["']|["']$/g, '');
+        }
+    }
+    
+    return variables;
+}
+
+// Helper to update frontmatter with variable values
+export function updateFrontmatterVariables(content: string, variables: Record<string, string>): string {
+    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
+    
+    // Build new frontmatter content
+    const entries = Object.entries(variables).filter(([_, v]) => v.trim() !== '');
+    if (entries.length === 0) {
+        // Remove frontmatter if no variables
+        return content.replace(frontmatterRegex, '');
+    }
+    
+    const newFrontmatter = entries.map(([key, value]) => {
+        // Quote values that contain special characters
+        const needsQuotes = /[:#\[\]{}|>&*!?]/.test(value) || value.includes('\n');
+        return `${key}: ${needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value}`;
+    }).join('\n');
+    
+    const frontmatterBlock = `---\n${newFrontmatter}\n---\n`;
+    
+    if (frontmatterRegex.test(content)) {
+        // Replace existing frontmatter
+        return content.replace(frontmatterRegex, frontmatterBlock);
+    } else {
+        // Add frontmatter at the beginning
+        return frontmatterBlock + content;
+    }
+}
 
 // Helper to filter tree
 const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] => {
@@ -115,17 +168,50 @@ export function ExportSidebar() {
         templates,
         setActiveTemplate,
         fileTree,
-        openFile
+        openFile,
+        updateFileContent,
+        saveFile
     } = useStore();
 
     const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
     const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+    const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
+    const [variableValues, setVariableValues] = useState<Record<string, string>>({});
 
     // Use client-side PDF compiler
     const { compilePdf, isInitialized } = usePdfCompiler();
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
+    const templateVariables = activeTemplate?.settings?.variables || [];
+    
+    // Get active file content
+    const activeFile = files.find(f => f.id === activeFileId);
+    
+    // Parse variable values from frontmatter when file changes
+    useEffect(() => {
+        if (activeFile?.content) {
+            const parsed = parseVariablesFromFrontmatter(activeFile.content);
+            setVariableValues(parsed);
+        } else {
+            setVariableValues({});
+        }
+    }, [activeFile?.content, activeFileId]);
+    
+    // Save variable values to frontmatter
+    const handleSaveVariables = async () => {
+        if (!activeFile || !activeFileId) return;
+        
+        const updatedContent = updateFrontmatterVariables(activeFile.content, variableValues);
+        updateFileContent(activeFileId, updatedContent);
+        await saveFile(activeFileId, updatedContent);
+        setIsVariablesDialogOpen(false);
+    };
+    
+    // Count how many template variables have values
+    const filledVariablesCount = templateVariables.filter(
+        (v: TemplateVariable) => v.name && variableValues[v.name]?.trim()
+    ).length;
 
     // Find active file for display name (recursively search in tree if not in flat files list)
     // Actually, store 'files' only contains open files. We need to find name from tree or activeFileId path.
@@ -294,6 +380,61 @@ export function ExportSidebar() {
                             </DialogContent>
                         </Dialog>
                     </div>
+
+                    {/* Variables Button - only show if template has variables */}
+                    {templateVariables.length > 0 && (
+                        <div className="shrink-0 mb-3">
+                            <Dialog open={isVariablesDialogOpen} onOpenChange={setIsVariablesDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className="w-full h-8 text-xs justify-start px-2 font-normal bg-background"
+                                        title="Set variable values"
+                                    >
+                                        <Variable size={14} className="mr-2 opacity-50 shrink-0" />
+                                        <span className="truncate">Variables</span>
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="p-0 gap-0 w-[300px]">
+                                    <DialogHeader className="p-3 pb-0">
+                                        <DialogTitle className="text-sm font-medium">Variables</DialogTitle>
+                                        <p className="text-[10px] text-muted-foreground pt-1">
+                                            Values stored in document.
+                                        </p>
+                                    </DialogHeader>
+                                    <div className="px-3 pb-3 pt-4 space-y-3">
+                                        {templateVariables.filter((v: TemplateVariable) => v.name.trim()).map((variable: TemplateVariable) => (
+                                            <div key={variable.id} className="flex items-center gap-2">
+                                                <span className="text-xs font-medium text-muted-foreground w-20 shrink-0 truncate">
+                                                    {variable.name}
+                                                </span>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Value"
+                                                    className="h-8 text-sm flex-1"
+                                                    value={variableValues[variable.name] || ''}
+                                                    onChange={(e) => setVariableValues(prev => ({
+                                                        ...prev,
+                                                        [variable.name]: e.target.value
+                                                    }))}
+                                                />
+                                            </div>
+                                        ))}
+                                        <div className="flex justify-end pt-2">
+                                            <Button
+                                                size="sm"
+                                                className="h-7 text-xs"
+                                                onClick={handleSaveVariables}
+                                                disabled={!activeFile}
+                                            >
+                                                Save
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+                    )}
 
                     <PdfPreview />
                 </div>

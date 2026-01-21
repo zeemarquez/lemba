@@ -30,6 +30,8 @@ interface SerializeContext {
     };
     /** Global page number offset from template settings */
     pageNumberOffset?: number;
+    /** Variable values from document frontmatter */
+    variables?: Record<string, string>;
 }
 
 export function serializeNodesToTypst(nodes: Descendant[], context: SerializeContext = {}): string {
@@ -286,10 +288,14 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
         content = `#datetime.today().display(${dateFormat})`;
     } else if (placeholderType === 'title') {
         content = escapeTypst(context.title || '');
+    } else if (placeholderType === 'variable') {
+        const variableName = (element as any).variableName;
+        const variableValue = context.variables?.[variableName] || '';
+        content = escapeTypst(variableValue);
     }
 
     // Check if content needs context (page numbers, total pages, dates need context)
-    // Title is just plain text and doesn't need context
+    // Title, variables are just plain text and don't need context
     const needsContext = placeholderType === 'page' || placeholderType === 'totalPages' || placeholderType === 'date';
     
     // If we're NOT inside a context (i.e., in body/front page) and content needs context,

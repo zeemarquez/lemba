@@ -1,7 +1,9 @@
 "use client";
 
-import { useStore } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List } from "lucide-react";
+import { useStore, TemplateVariable } from "@/lib/store";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2 } from "lucide-react";
+import { Input } from "@/components/plate-ui/input";
+import { Button } from "@/components/plate-ui/button";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { cn } from "@/lib/utils";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
@@ -88,6 +90,7 @@ export function TemplateEditor() {
 
     // Section definitions for the index
     const sections = useMemo(() => [
+        { id: 'variables', label: 'Variables', icon: Variable },
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
@@ -99,7 +102,7 @@ export function TemplateEditor() {
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
     ], []);
 
-    const [activeSection, setActiveSection] = useState('typography');
+    const [activeSection, setActiveSection] = useState('variables');
 
     const scrollToSection = (sectionId: string) => {
         const element = document.getElementById(`section-${sectionId}`);
@@ -382,6 +385,66 @@ export function TemplateEditor() {
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-8 w-full space-y-12 pb-24">
+
+                    {/* Variables Section */}
+                    <section id="section-variables" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <Variable size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Variables</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            <p className="text-sm text-muted-foreground">
+                                Define document variables that can be inserted into headers and footers. Variable values are set per-document when exporting.
+                            </p>
+                            
+                            <div className="space-y-3">
+                                {(settings.variables || []).map((variable: TemplateVariable, index: number) => (
+                                    <div key={variable.id} className="flex items-center gap-3">
+                                        <Input
+                                            type="text"
+                                            placeholder="Variable name"
+                                            className="flex-1 bg-muted/50 border border-border rounded-xl px-4 py-3 text-sm"
+                                            value={variable.name}
+                                            onChange={(e) => {
+                                                const newVariables = [...(settings.variables || [])];
+                                                newVariables[index] = { ...variable, name: e.target.value };
+                                                updateSetting('variables', newVariables);
+                                            }}
+                                        />
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                                            onClick={() => {
+                                                const newVariables = (settings.variables || []).filter((_: TemplateVariable, i: number) => i !== index);
+                                                updateSetting('variables', newVariables);
+                                            }}
+                                        >
+                                            <Trash2 size={16} />
+                                        </Button>
+                                    </div>
+                                ))}
+                                
+                                <Button
+                                    variant="outline"
+                                    className="w-full rounded-xl border-dashed"
+                                    onClick={() => {
+                                        const newVariable: TemplateVariable = {
+                                            id: `var-${Date.now()}`,
+                                            name: ''
+                                        };
+                                        updateSetting('variables', [...(settings.variables || []), newVariable]);
+                                    }}
+                                >
+                                    <Plus size={16} className="mr-2" />
+                                    Add Variable
+                                </Button>
+                            </div>
+                        </div>
+                    </section>
 
                     {/* Typography Section */}
                     <section id="section-typography" className="space-y-8 scroll-mt-16">

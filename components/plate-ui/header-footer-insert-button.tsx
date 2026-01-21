@@ -14,6 +14,7 @@ import {
   TableIcon,
   UploadIcon,
   UnfoldVerticalIcon,
+  VariableIcon,
 } from 'lucide-react';
 import { KEYS, PathApi } from 'platejs';
 import { type PlateEditor, useEditorRef } from 'platejs/react';
@@ -32,6 +33,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/plate-ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/plate-ui/dialog';
+import { useStore } from '@/lib/store';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 import { ToolbarButton, ToolbarMenuGroup } from './toolbar';
 
@@ -97,6 +107,21 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
   const editor = useEditorRef();
   const [open, setOpen] = React.useState(false);
   const [imageDialogOpen, setImageDialogOpen] = React.useState(false);
+  const [variableDialogOpen, setVariableDialogOpen] = React.useState(false);
+  
+  // Get template variables from the active template
+  const { activeTemplateId, templates } = useStore();
+  const activeTemplate = templates.find(t => t.id === activeTemplateId);
+  const templateVariables = activeTemplate?.settings?.variables || [];
+
+  const insertVariable = (variableName: string) => {
+    insertBlockSimple(editor, KEY_PLACEHOLDER, { 
+      placeholderType: 'variable', 
+      variableName 
+    });
+    setVariableDialogOpen(false);
+    editor.tf.focus();
+  };
 
   const groups: Group[] = [
     {
@@ -160,10 +185,20 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
           value: KEY_PLACEHOLDER,
           data: { placeholderType: 'title' }
         },
+        {
+          icon: <VariableIcon />,
+          label: 'Variable',
+          value: 'variable',
+          data: { placeholderType: 'variable' }
+        },
       ].map((item) => ({
         ...item,
         onSelect: (editor, value) => {
-          insertBlockSimple(editor, value, item.data);
+          if (value === 'variable') {
+            setVariableDialogOpen(true);
+          } else {
+            insertBlockSimple(editor, KEY_PLACEHOLDER, item.data);
+          }
         },
       })),
     },
@@ -232,6 +267,38 @@ export function HeaderFooterInsertButton(props: DropdownMenuProps) {
         open={imageDialogOpen}
         onOpenChange={setImageDialogOpen}
       />
+
+      {/* Variable Selection Dialog */}
+      <Dialog open={variableDialogOpen} onOpenChange={setVariableDialogOpen}>
+        <DialogContent className="p-0 gap-0 w-[200px]">
+          <DialogHeader className="p-3 pb-2">
+            <DialogTitle className="text-sm font-medium">Select Variable</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="max-h-[200px] p-2 pt-0">
+            <div className="flex flex-col">
+              {templateVariables.length > 0 ? (
+                templateVariables.filter(v => v.name.trim()).map((variable) => (
+                  <button
+                    key={variable.id}
+                    className={cn(
+                      "flex items-center gap-2 py-1.5 px-2 text-xs rounded-sm cursor-pointer transition-colors",
+                      "hover:bg-accent hover:text-accent-foreground text-left"
+                    )}
+                    onClick={() => insertVariable(variable.name)}
+                  >
+                    <VariableIcon size={12} className="text-muted-foreground shrink-0" />
+                    <span className="truncate">{variable.name}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="text-xs text-muted-foreground text-center py-4 px-2">
+                  No variables defined.
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

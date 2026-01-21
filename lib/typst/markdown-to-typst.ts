@@ -26,6 +26,12 @@ export interface MarkdownToTypstOptions {
     };
 }
 
+// Strip frontmatter from markdown content
+function stripFrontmatter(content: string): string {
+    const frontmatterRegex = /^---\n[\s\S]*?\n---\n?/;
+    return content.replace(frontmatterRegex, '');
+}
+
 export function markdownToTypst(markdown: string, options: MarkdownToTypstOptions = {}): string {
     const instance = new Marked();
 
@@ -35,7 +41,10 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
         nonStandard: true,
     }));
 
-    const tokens = instance.lexer(markdown || '');
+    // Strip frontmatter (used for variables) before parsing
+    const markdownWithoutFrontmatter = stripFrontmatter(markdown || '');
+    
+    const tokens = instance.lexer(markdownWithoutFrontmatter);
     console.log(`[Typst] [Markdown] Lexed ${tokens.length} tokens.`);
 
     return parseTokens(tokens, options);
