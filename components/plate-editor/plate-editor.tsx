@@ -11,7 +11,7 @@ import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
 import { SourceEditor } from '@/components/editor/SourceEditor';
 import { preprocessMathDelimiters, postprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
-import { BaseEditor, Path, Node } from 'slate';
+import { Path, Node } from 'slate';
 
 interface PlateEditorProps {
   content: string;
@@ -68,27 +68,39 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     const headingText = headingMatch[1].trim();
     
     // Find the heading node in the editor
-    const nodes = Array.from(Node.nodes(editor as BaseEditor));
-    for (const [node, path] of nodes) {
-      if ('type' in node && typeof node.type === 'string' && node.type.startsWith('h')) {
-        // Get the text content of this heading
-        const textContent = Node.string(node);
-        if (textContent.trim() === headingText) {
-          // Select the heading and scroll to it
-          try {
-            editor.tf.select(editor.api.start(path));
-            // Scroll the heading into view
-            const domNode = editor.api.toDOMNode(node);
-            if (domNode) {
-              domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Use editor.children directly and iterate with proper typing
+    const findHeadingNode = (nodes: typeof editor.children, basePath: Path = []): void => {
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const path = [...basePath, i];
+        
+        if ('type' in node && typeof node.type === 'string' && node.type.startsWith('h')) {
+          // Get the text content of this heading
+          const textContent = Node.string(node);
+          if (textContent.trim() === headingText) {
+            // Select the heading and scroll to it
+            try {
+              editor.tf.select(editor.api.start(path));
+              // Scroll the heading into view
+              const domNode = editor.api.toDOMNode(node);
+              if (domNode) {
+                domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            } catch (e) {
+              // Ignore selection errors
             }
-          } catch (e) {
-            // Ignore selection errors
+            return;
           }
-          break;
+        }
+        
+        // Recursively check children if they exist
+        if ('children' in node && Array.isArray(node.children)) {
+          findHeadingNode(node.children as typeof editor.children, path);
         }
       }
-    }
+    };
+    
+    findHeadingNode(editor.children);
   }, [editorViewMode, content, editor]);
 
   useEffect(() => {
