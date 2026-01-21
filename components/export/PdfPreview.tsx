@@ -30,11 +30,23 @@ export function PdfPreview() {
     const [scale, setScale] = useState(0.8);
     const [viewMode, setViewMode] = useState<'zoom' | 'FitH' | 'FitV'>('FitH');
     const [error, setError] = useState<string | null>(null);
+    const [isLandscape, setIsLandscape] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
     const lastContentHashRef = useRef<string>('');
     const viewportRef = useRef<HTMLDivElement>(null);
     const pdfDocumentRef = useRef<any>(null);
+
+    // Detect if window is landscape (wider than tall) for horizontal page layout
+    useEffect(() => {
+        const checkLandscape = () => {
+            setIsLandscape(window.innerWidth > window.innerHeight);
+        };
+        
+        checkLandscape();
+        window.addEventListener('resize', checkLandscape);
+        return () => window.removeEventListener('resize', checkLandscape);
+    }, []);
 
     // Use client-side PDF compiler
     const { compilePdf, isInitialized, initError } = usePdfCompiler();
@@ -78,12 +90,16 @@ export function PdfPreview() {
     }, []);
 
     const [pageDimensions, setPageDimensions] = useState<{ width: number, height: number } | null>(null);
+    // Render scale for the actual image quality (fixed, not tied to display scale)
+    const renderScaleRef = useRef(2.0);
 
-    const renderPages = useCallback(async (pdf: any, currentScale: number) => {
+    const renderPages = useCallback(async (pdf: any) => {
         const images: string[] = [];
+        const renderScale = renderScaleRef.current;
+        
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale: currentScale * 2 }); // Render at 2x for sharpness
+            const viewport = page.getViewport({ scale: renderScale });
 
             if (i === 1) {
                 const baseViewport = page.getViewport({ scale: 1.0 });
@@ -103,7 +119,7 @@ export function PdfPreview() {
                 canvas: canvas as any
             }).promise;
 
-            images.push(canvas.toDataURL('image/webp', 0.8));
+            images.push(canvas.toDataURL('image/webp', 0.9));
         }
         setPageImages(images);
     }, []);
@@ -156,7 +172,7 @@ export function PdfPreview() {
             const pdf = await loadingTask.promise;
             pdfDocumentRef.current = pdf;
 
-            await renderPages(pdf, scale);
+            await renderPages(pdf);
             lastContentHashRef.current = currentHash;
 
             // Apply fit mode after PDF loads
@@ -169,17 +185,7 @@ export function PdfPreview() {
         } finally {
             setIsLoading(false);
         }
-    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length, renderPages, scale, viewMode, fitToWidth, fitToHeight, compilePdf, isInitialized]);
-
-    // Update rendering when scale changes (debounced)
-    useEffect(() => {
-        if (pdfDocumentRef.current && !isLoading) {
-            const timer = setTimeout(() => {
-                renderPages(pdfDocumentRef.current!, scale);
-            }, 300);
-            return () => clearTimeout(timer);
-        }
-    }, [scale, renderPages, isLoading]);
+    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length, renderPages, viewMode, fitToWidth, fitToHeight, compilePdf, isInitialized]);
 
     // Debounced preview generation
     useEffect(() => {
@@ -208,131 +214,6 @@ export function PdfPreview() {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, [viewMode, fitToWidth, fitToHeight]);
-
-    // Handle double-click on PDF pages to navigate to source
-    const handlePdfDoubleClick = useCallback(async (event: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
-        if (!pdfDocumentRef.current || !content) return;
-
-        // Get click position relative to the page image
-        // We need to capture these synchronously before the async operations
-        const target = event.currentTarget;
-        if (!target) return;
-        
-        const rect = target.getBoundingClientRect();
-        const clickX = event.clientX - rect.left;
-        const clickY = event.clientY - rect.top;
-        const displayWidth = rect.width;
-        const displayHeight = rect.height;
-
-        try {
-            const page = await pdfDocumentRef.current.getPage(pageIndex + 1);
-            const textContent = await page.getTextContent();
-            const viewport = page.getViewport({ scale: 1.0 });
-
-            // Convert click position to PDF coordinates
-            // The image is scaled, so we need to adjust
-            const scaleX = viewport.width / displayWidth;
-            const scaleY = viewport.height / displayHeight;
-
-            const pdfX = clickX * scaleX;
-            const pdfY = viewport.height - (clickY * scaleY); // PDF Y is from bottom
-
-            // Find the closest text item to the click position
-            let closestItem: { text: string; distance: number } | null = null;
-            const textItems = textContent.items as TextItem[];
-
-            for (const item of textItems) {
-                if (!item.str || item.str.trim().length === 0) continue;
-
-                // Get item position from transform matrix [a, b, c, d, e, f]
-                // e = x position, f = y position
-                const itemX = item.transform[4];
-                const itemY = item.transform[5];
-                const itemWidth = item.width;
-                const itemHeight = Math.abs(item.transform[0]) || 12; // Approximate height from font size
-
-                // Check if click is within or near the text item bounds
-                const isWithinX = pdfX >= itemX - 5 && pdfX <= itemX + itemWidth + 5;
-                const isWithinY = pdfY >= itemY - 5 && pdfY <= itemY + itemHeight + 5;
-
-                if (isWithinX && isWithinY) {
-                    // Direct hit
-                    closestItem = { text: item.str, distance: 0 };
-                    break;
-                }
-
-                // Calculate distance for finding closest
-                const centerX = itemX + itemWidth / 2;
-                const centerY = itemY + itemHeight / 2;
-                const distance = Math.sqrt(Math.pow(pdfX - centerX, 2) + Math.pow(pdfY - centerY, 2));
-
-                if (!closestItem || distance < closestItem.distance) {
-                    closestItem = { text: item.str, distance };
-                }
-            }
-
-            if (closestItem && closestItem.distance < 100) {
-                // Search for this text in the markdown source
-                const searchText = closestItem.text.trim();
-                if (searchText.length < 2) return;
-
-                // Find the line in the source that contains this text
-                const lines = content.split('\n');
-                let foundLine = -1;
-                
-                // First, try to find an exact match
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    // Skip markdown syntax for comparison
-                    const cleanLine = line
-                        .replace(/^#+\s*/, '') // Remove heading markers
-                        .replace(/\*\*|__/g, '') // Remove bold
-                        .replace(/\*|_/g, '') // Remove italic
-                        .replace(/`/g, '') // Remove code
-                        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Replace links with text
-                        .trim();
-                    
-                    if (cleanLine.includes(searchText) || searchText.includes(cleanLine.substring(0, 20))) {
-                        foundLine = i + 1; // 1-based line number
-                        break;
-                    }
-                }
-
-                // If no exact match, try partial matching with normalized whitespace
-                if (foundLine === -1) {
-                    const normalizedSearch = searchText.replace(/\s+/g, ' ').toLowerCase();
-                    for (let i = 0; i < lines.length; i++) {
-                        const normalizedLine = lines[i]
-                            .replace(/^#+\s*/, '')
-                            .replace(/\*\*|__|[*_`]/g, '')
-                            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-                            .replace(/\s+/g, ' ')
-                            .toLowerCase()
-                            .trim();
-                        
-                        if (normalizedLine.includes(normalizedSearch) || 
-                            (normalizedSearch.length > 5 && normalizedLine.includes(normalizedSearch.substring(0, 15)))) {
-                            foundLine = i + 1;
-                            break;
-                        }
-                    }
-                }
-
-                if (foundLine > 0) {
-                    // Dispatch navigation event to the editor
-                    const event = new CustomEvent('navigate-to-line', {
-                        detail: { 
-                            line: foundLine,
-                            headingText: searchText // Also pass the text for WYSIWYG mode
-                        }
-                    });
-                    window.dispatchEvent(event);
-                }
-            }
-        } catch (err) {
-            console.error('Error handling PDF double-click:', err);
-        }
-    }, [content]);
 
     // Listen for navigation events from the outline and scroll to the corresponding page
     const scrollToHeading = useCallback(async (headingText: string) => {
@@ -410,15 +291,203 @@ export function PdfPreview() {
         };
     }, [scrollToHeading]);
 
-    const handleZoomIn = () => {
-        setViewMode('zoom');
-        setScale(prev => Math.min(prev + 0.1, 3.0));
-    };
+    // Zoom with scroll position adjustment to keep content centered
+    const zoomAtPoint = useCallback((newScale: number, clientX?: number, clientY?: number) => {
+        const viewport = viewportRef.current;
+        if (!viewport) {
+            setScale(newScale);
+            return;
+        }
 
-    const handleZoomOut = () => {
+        const oldScale = scale;
+        const clampedNewScale = Math.max(0.1, Math.min(3.0, newScale));
+        
+        if (clampedNewScale === oldScale) return;
+
+        // Get the point to zoom around (default to center of viewport)
+        const rect = viewport.getBoundingClientRect();
+        const pointX = clientX !== undefined ? clientX - rect.left : rect.width / 2;
+        const pointY = clientY !== undefined ? clientY - rect.top : rect.height / 2;
+
+        // Current scroll position
+        const scrollLeft = viewport.scrollLeft;
+        const scrollTop = viewport.scrollTop;
+
+        // Point in content coordinates before zoom
+        const contentX = scrollLeft + pointX;
+        const contentY = scrollTop + pointY;
+
+        // Calculate the ratio of scale change
+        const scaleRatio = clampedNewScale / oldScale;
+
+        // New scroll position to keep the same content point under the cursor/center
+        const newScrollLeft = contentX * scaleRatio - pointX;
+        const newScrollTop = contentY * scaleRatio - pointY;
+
+        setScale(clampedNewScale);
+        
+        // Use requestAnimationFrame to ensure scroll happens after render
+        requestAnimationFrame(() => {
+            viewport.scrollLeft = Math.max(0, newScrollLeft);
+            viewport.scrollTop = Math.max(0, newScrollTop);
+        });
+    }, [scale]);
+
+    const handleZoomIn = useCallback(() => {
         setViewMode('zoom');
-        setScale(prev => Math.max(prev - 0.1, 0.1));
-    };
+        zoomAtPoint(scale + 0.1);
+    }, [scale, zoomAtPoint]);
+
+    const handleZoomOut = useCallback(() => {
+        setViewMode('zoom');
+        zoomAtPoint(scale - 0.1);
+    }, [scale, zoomAtPoint]);
+
+    // Handle Ctrl+scroll wheel zoom and trackpad pinch gestures
+    // Using window-level listener like Three.js does to properly intercept browser zoom
+    const lastGestureScale = useRef(1);
+    const isHovering = useRef(false);
+    const scaleRef = useRef(scale);
+    
+    // Keep scaleRef in sync
+    useEffect(() => {
+        scaleRef.current = scale;
+    }, [scale]);
+
+    // Track mouse enter/leave to know when pointer is over our component
+    const handleMouseEnter = useCallback(() => {
+        isHovering.current = true;
+    }, []);
+
+    const handleMouseLeave = useCallback(() => {
+        isHovering.current = false;
+    }, []);
+
+    // Window-level wheel listener to intercept browser zoom
+    useEffect(() => {
+        const handleWheel = (e: WheelEvent) => {
+            // Only handle when Ctrl/Cmd is pressed (browsers set ctrlKey for pinch gestures)
+            if (!e.ctrlKey && !e.metaKey) return;
+            
+            // Only handle when pointer is over our component
+            if (!isHovering.current) return;
+
+            // Prevent browser zoom
+            e.preventDefault();
+
+            const viewport = viewportRef.current;
+            if (!viewport) return;
+
+            // deltaY is negative when zooming in (scroll up / pinch out)
+            // deltaY is positive when zooming out (scroll down / pinch in)
+            const zoomSensitivity = 0.008;
+            const delta = -e.deltaY * zoomSensitivity;
+            
+            const oldScale = scaleRef.current;
+            const newScale = Math.max(0.1, Math.min(3.0, oldScale + delta));
+            
+            if (newScale === oldScale) return;
+
+            // Zoom centered on mouse position
+            const rect = viewport.getBoundingClientRect();
+            const pointX = e.clientX - rect.left;
+            const pointY = e.clientY - rect.top;
+
+            const scrollLeft = viewport.scrollLeft;
+            const scrollTop = viewport.scrollTop;
+
+            const contentX = scrollLeft + pointX;
+            const contentY = scrollTop + pointY;
+
+            const scaleRatio = newScale / oldScale;
+
+            const newScrollLeft = contentX * scaleRatio - pointX;
+            const newScrollTop = contentY * scaleRatio - pointY;
+
+            scaleRef.current = newScale;
+            setViewMode(prev => prev === 'zoom' ? prev : 'zoom');
+            setScale(newScale);
+
+            requestAnimationFrame(() => {
+                viewport.scrollLeft = Math.max(0, newScrollLeft);
+                viewport.scrollTop = Math.max(0, newScrollTop);
+            });
+        };
+
+        // Attach to window with passive: false - this is how Three.js does it
+        window.addEventListener('wheel', handleWheel, { passive: false });
+
+        return () => {
+            window.removeEventListener('wheel', handleWheel);
+        };
+    }, []);
+
+    // Safari gesture events for trackpad pinch
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const handleGestureStart = (e: Event) => {
+            e.preventDefault();
+            lastGestureScale.current = 1;
+        };
+
+        const handleGestureChange = (e: Event) => {
+            e.preventDefault();
+            
+            const viewport = viewportRef.current;
+            if (!viewport) return;
+            
+            const gestureEvent = e as unknown as { scale: number; clientX: number; clientY: number };
+            const delta = gestureEvent.scale / lastGestureScale.current;
+            lastGestureScale.current = gestureEvent.scale;
+            
+            const oldScale = scaleRef.current;
+            const newScale = Math.max(0.1, Math.min(3.0, oldScale * delta));
+            
+            if (newScale === oldScale) return;
+
+            // Zoom centered on gesture position
+            const rect = viewport.getBoundingClientRect();
+            const pointX = (gestureEvent.clientX || rect.left + rect.width / 2) - rect.left;
+            const pointY = (gestureEvent.clientY || rect.top + rect.height / 2) - rect.top;
+
+            const scrollLeft = viewport.scrollLeft;
+            const scrollTop = viewport.scrollTop;
+
+            const contentX = scrollLeft + pointX;
+            const contentY = scrollTop + pointY;
+
+            const scaleRatio = newScale / oldScale;
+
+            const newScrollLeft = contentX * scaleRatio - pointX;
+            const newScrollTop = contentY * scaleRatio - pointY;
+
+            scaleRef.current = newScale;
+            setViewMode(prev => prev === 'zoom' ? prev : 'zoom');
+            setScale(newScale);
+
+            requestAnimationFrame(() => {
+                viewport.scrollLeft = Math.max(0, newScrollLeft);
+                viewport.scrollTop = Math.max(0, newScrollTop);
+            });
+        };
+
+        const handleGestureEnd = (e: Event) => {
+            e.preventDefault();
+        };
+
+        // Safari gesture events (only available on Safari/WebKit)
+        container.addEventListener('gesturestart', handleGestureStart, { passive: false });
+        container.addEventListener('gesturechange', handleGestureChange, { passive: false });
+        container.addEventListener('gestureend', handleGestureEnd, { passive: false });
+
+        return () => {
+            container.removeEventListener('gesturestart', handleGestureStart);
+            container.removeEventListener('gesturechange', handleGestureChange);
+            container.removeEventListener('gestureend', handleGestureEnd);
+        };
+    }, []);
 
     if (!mounted) {
         return (
@@ -468,6 +537,8 @@ export function PdfPreview() {
             <div
                 className="flex-1 flex flex-col overflow-hidden rounded border shadow-lg bg-zinc-100 dark:bg-zinc-950 h-full relative"
                 ref={containerRef}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
             >
                 {/* Top Bar */}
                 <div className="flex items-center justify-between px-2 py-1 bg-background border-b shrink-0 z-20">
@@ -525,17 +596,29 @@ export function PdfPreview() {
                         </div>
                     )}
 
-                    <div className="p-6 flex flex-col items-center min-h-full gap-6">
+                    <div 
+                        className={cn(
+                            "p-6 flex items-center gap-6",
+                            isLandscape ? "flex-row min-w-full" : "flex-col min-h-full"
+                        )}
+                        style={{
+                            minWidth: isLandscape 
+                                ? undefined 
+                                : (pageDimensions ? pageDimensions.width * scale + 48 : 'auto'),
+                            minHeight: isLandscape 
+                                ? (pageDimensions ? pageDimensions.height * scale + 48 : 'auto')
+                                : undefined,
+                        }}
+                    >
                         {pageImages.map((imageDataUrl, index) => (
-                            <div key={index} className="flex flex-col items-center" data-page-index={index}>
+                            <div key={index} className="flex flex-col items-center shrink-0" data-page-index={index}>
                                 <div
-                                    className="shadow-2xl bg-white dark:bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200 dark:border-zinc-800 cursor-pointer select-none"
+                                    className="shadow-2xl bg-white dark:bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200 dark:border-zinc-800 select-none"
                                     style={{
                                         width: pageDimensions ? pageDimensions.width * scale : 'auto',
-                                        maxWidth: 'none', // Prevent interference from other styles
+                                        maxWidth: 'none',
+                                        willChange: 'width',
                                     }}
-                                    onDoubleClick={(e) => handlePdfDoubleClick(e, index)}
-                                    title="Double-click to navigate to this section in the editor"
                                 >
                                     <img
                                         src={imageDataUrl}
@@ -543,6 +626,7 @@ export function PdfPreview() {
                                         style={{
                                             width: '100%',
                                             height: 'auto',
+                                            imageRendering: 'auto',
                                         }}
                                         className="block pointer-events-none"
                                         draggable={false}
