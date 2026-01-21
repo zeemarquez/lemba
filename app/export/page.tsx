@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/plate-ui/input";
 import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/components/export/ExportSidebar";
+import { useCustomFonts } from "@/hooks/use-custom-fonts";
 
 // Helper to filter tree
 const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] => {
@@ -116,7 +117,11 @@ export default function ExportPage() {
         openFile,
         updateFileContent,
         saveFile,
-        setExportWindowOpen
+        setExportWindowOpen,
+        fetchFileTree,
+        fetchTemplates,
+        fetchFonts,
+        restoreSession
     } = useStore();
 
     const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
@@ -124,6 +129,10 @@ export default function ExportPage() {
     const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+    const [isInitializing, setIsInitializing] = useState(true);
+
+    // Initialize custom fonts
+    useCustomFonts();
 
     const { compilePdf, isInitialized } = usePdfCompiler();
 
@@ -132,6 +141,21 @@ export default function ExportPage() {
     
     const activeFile = files.find(f => f.id === activeFileId);
     
+    // Initialize store data on mount (same as main app does in Sidebar)
+    useEffect(() => {
+        const init = async () => {
+            setIsInitializing(true);
+            await Promise.all([
+                fetchFileTree(),
+                fetchTemplates(),
+                fetchFonts(),
+            ]);
+            await restoreSession();
+            setIsInitializing(false);
+        };
+        init();
+    }, [fetchFileTree, fetchTemplates, fetchFonts, restoreSession]);
+
     // Handle window close - reset exportWindowOpen state
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -216,6 +240,18 @@ export default function ExportPage() {
             setIsExporting(false);
         }
     };
+
+    // Show loading state while initializing
+    if (isInitializing) {
+        return (
+            <div className="h-screen flex flex-col bg-background items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="h-screen flex flex-col bg-background">
