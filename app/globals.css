@@ -127,6 +127,22 @@
     @apply bg-background text-foreground;
   }
 
+  /* Electron frameless window layout */
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Content area below Electron title bar */
+  .electron-content {
+    height: 100%;
+  }
+
+  /* When Electron title bar is present, adjust content height */
+  body:has(> div > div > [data-electron-titlebar]) .electron-content {
+    height: calc(100% - 2rem); /* 2rem = h-8 title bar height */
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

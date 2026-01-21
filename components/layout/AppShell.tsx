@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <DndProvider backend={HTML5Backend}>
-            <div className="h-screen w-full bg-background text-foreground overflow-hidden flex flex-col">
+            <div className="h-full w-full bg-background text-foreground overflow-hidden flex flex-col">
                 <ResizablePanelGroup id="main-panel-group" direction="horizontal" className="flex-1 w-full h-full">
                     {/* Left Sidebar */}
                     <ResizablePanel

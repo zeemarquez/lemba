@@ -244,7 +244,7 @@ export default function ExportPage() {
     // Show loading state while initializing
     if (isInitializing) {
         return (
-            <div className="h-screen flex flex-col bg-background items-center justify-center">
+            <div className="h-full flex flex-col bg-background items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
                     <Loader2 size={24} className="animate-spin text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">Loading...</p>
@@ -254,7 +254,7 @@ export default function ExportPage() {
     }
 
     return (
-        <div className="h-screen flex flex-col bg-background">
+        <div className="h-full flex flex-col bg-background">
             {/* Export Header */}
             <div className="p-2 flex items-center justify-between shrink-0 border-b">
                 <span className="font-semibold text-sm px-2">Export</span>

@@ -2,11 +2,21 @@
   "name": "modern-markdown-editor",
   "version": "0.1.0",
   "private": true,
+  "description": "A modern markdown editor with PDF export capabilities",
+  "author": "zeemarquez",
+  "license": "MIT",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "electron:build:all": "npm run build && electron-builder --win --mac --linux"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.39",
@@ -74,6 +84,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "dedent": "^1.7.1",
+    "electron-squirrel-startup": "^1.0.1",
     "framer-motion": "^12.26.2",
     "highlight.js": "^11.11.1",
     "html2canvas-pro": "^1.6.4",
@@ -123,10 +134,100 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.2",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.zeemarquez.modern-markdown-editor",
+    "productName": "Modern Markdown Editor",
+    "copyright": "Copyright © 2024-2026 zeemarquez",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "electron/**/*",
+      "out/**/*"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [],
+    "publish": {
+      "provider": "github",
+      "owner": "zeemarquez",
+      "repo": "modern-markdown-editor"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icon.ico",
+      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icon.icns",
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icons",
+      "category": "Office",
+      "artifactName": "${productName}-${version}-Linux-${arch}.${ext}"
+    }
   }
 }
