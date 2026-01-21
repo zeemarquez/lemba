@@ -142,6 +142,7 @@ interface AppState {
     // UI State
     leftSidebarExpanded: boolean;
     rightSidebarExpanded: boolean;
+    exportWindowOpen: boolean;
     sidebarView: 'explorer' | 'templates';
     currentView: 'file' | 'template';
     isSettingsOpen: boolean;
@@ -197,6 +198,7 @@ interface AppState {
     toggleRightSidebar: () => void;
     setSidebarView: (view: 'explorer' | 'templates') => void;
     setRightSidebarOpen: (isOpen: boolean) => void;
+    setExportWindowOpen: (isOpen: boolean) => void;
     setSettingsOpen: (isOpen: boolean) => void;
     setPreviewQuality: (quality: 'low' | 'medium' | 'high') => void;
     setUiIconSize: (size: 'small' | 'normal' | 'big') => void;
@@ -266,6 +268,7 @@ export const useStore = create<AppState>()(
                 openTabs: [],
                 leftSidebarExpanded: true,
                 rightSidebarExpanded: true,
+                exportWindowOpen: false,
                 sidebarView: 'explorer',
                 templates: [],
                 activeTemplateId: null,
@@ -604,6 +607,7 @@ export const useStore = create<AppState>()(
                 toggleRightSidebar: () => set((state) => ({ rightSidebarExpanded: !state.rightSidebarExpanded })),
                 setSidebarView: (view) => set({ sidebarView: view }),
                 setRightSidebarOpen: (isOpen) => set({ rightSidebarExpanded: isOpen }),
+                setExportWindowOpen: (isOpen) => set({ exportWindowOpen: isOpen }),
                 setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
                 setPreviewQuality: (quality) => set({ previewQuality: quality }),
                 setUiIconSize: (size) => set({ uiIconSize: size }),

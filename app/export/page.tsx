@@ -2,9 +2,9 @@
 
 import { useStore, FileNode, TemplateVariable } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { SquareArrowOutUpRight, PanelRightClose, PanelRightOpen, FileText, LayoutTemplate, Check, ChevronRight, Folder, Loader2, Variable, AppWindow } from "lucide-react";
+import { SquareArrowOutUpRight, FileText, LayoutTemplate, Check, ChevronRight, Folder, Loader2, Variable } from "lucide-react";
 import dynamic from 'next/dynamic';
-const PdfPreview = dynamic(() => import("./PdfPreview").then(mod => mod.PdfPreview), { ssr: false });
+const PdfPreview = dynamic(() => import("@/components/export/PdfPreview").then(mod => mod.PdfPreview), { ssr: false });
 import { usePdfCompiler } from "@/hooks/use-pdf-compiler";
 import {
     Dialog,
@@ -17,71 +17,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/plate-ui/input";
-
-// Helper to parse frontmatter from markdown content
-export function parseVariablesFromFrontmatter(content: string): Record<string, string> {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-    const match = content.match(frontmatterRegex);
-    if (!match) return {};
-    
-    const frontmatter = match[1];
-    const variables: Record<string, string> = {};
-    
-    // Parse YAML-like key: value pairs
-    const lines = frontmatter.split('\n');
-    for (const line of lines) {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex > 0) {
-            const key = line.slice(0, colonIndex).trim();
-            const value = line.slice(colonIndex + 1).trim();
-            // Remove quotes if present
-            variables[key] = value.replace(/^["']|["']$/g, '');
-        }
-    }
-    
-    return variables;
-}
-
-// Helper to update frontmatter with variable values
-export function updateFrontmatterVariables(content: string, variables: Record<string, string>): string {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-    
-    // Build new frontmatter content
-    const entries = Object.entries(variables).filter(([_, v]) => v.trim() !== '');
-    if (entries.length === 0) {
-        // Remove frontmatter if no variables
-        return content.replace(frontmatterRegex, '');
-    }
-    
-    const newFrontmatter = entries.map(([key, value]) => {
-        // Quote values that contain special characters
-        const needsQuotes = /[:#\[\]{}|>&*!?]/.test(value) || value.includes('\n');
-        return `${key}: ${needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value}`;
-    }).join('\n');
-    
-    const frontmatterBlock = `---\n${newFrontmatter}\n---\n`;
-    
-    if (frontmatterRegex.test(content)) {
-        // Replace existing frontmatter
-        return content.replace(frontmatterRegex, frontmatterBlock);
-    } else {
-        // Add frontmatter at the beginning
-        return frontmatterBlock + content;
-    }
-}
+import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/components/export/ExportSidebar";
 
 // Helper to filter tree
 const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] => {
     return nodes.map(node => {
         if (node.type === 'folder') {
             const children = node.children ? filterTree(node.children, allowedExtensions) : [];
-            // Keep folder if it has children or if it's a folder (if we want to show empty folders, but let's hide them if empty after filter)
             if (children.length > 0) {
                 return { ...node, children };
             }
             return null;
         }
-        // Check extension
         const hasExtension = allowedExtensions.some(ext => node.name.endsWith(ext));
         return hasExtension ? node : null;
     }).filter((n): n is FileNode => n !== null);
@@ -158,20 +105,18 @@ const TreeItem = ({
     );
 };
 
-export function ExportSidebar() {
+export default function ExportPage() {
     const {
         activeFileId,
         files,
-        toggleRightSidebar,
-        rightSidebarExpanded,
-        setExportWindowOpen,
         activeTemplateId,
         templates,
         setActiveTemplate,
         fileTree,
         openFile,
         updateFileContent,
-        saveFile
+        saveFile,
+        setExportWindowOpen
     } = useStore();
 
     const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
@@ -180,16 +125,25 @@ export function ExportSidebar() {
     const [isExporting, setIsExporting] = useState(false);
     const [variableValues, setVariableValues] = useState<Record<string, string>>({});
 
-    // Use client-side PDF compiler
     const { compilePdf, isInitialized } = usePdfCompiler();
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
     const templateVariables = activeTemplate?.settings?.variables || [];
     
-    // Get active file content
     const activeFile = files.find(f => f.id === activeFileId);
     
-    // Parse variable values from frontmatter when file changes
+    // Handle window close - reset exportWindowOpen state
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            setExportWindowOpen(false);
+        };
+        
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+    }, [setExportWindowOpen]);
+    
     useEffect(() => {
         if (activeFile?.content) {
             const parsed = parseVariablesFromFrontmatter(activeFile.content);
@@ -199,7 +153,6 @@ export function ExportSidebar() {
         }
     }, [activeFile?.content, activeFileId]);
     
-    // Save variable values to frontmatter
     const handleSaveVariables = async () => {
         if (!activeFile || !activeFileId) return;
         
@@ -209,13 +162,10 @@ export function ExportSidebar() {
         setIsVariablesDialogOpen(false);
     };
     
-    // Count how many template variables have values
     const filledVariablesCount = templateVariables.filter(
         (v: TemplateVariable) => v.name && variableValues[v.name]?.trim()
     ).length;
 
-    // Find active file for display name (recursively search in tree if not in flat files list)
-    // Actually, store 'files' only contains open files. We need to find name from tree or activeFileId path.
     const getFileName = (path: string | null) => {
         if (!path) return null;
         const name = path.split('/').pop() || path;
@@ -224,11 +174,9 @@ export function ExportSidebar() {
 
     const activeFileName = getFileName(activeFileId);
 
-    // Find root nodes for Files and Templates to match sidebar behavior
     const filesRoot = fileTree.find(n => n.name === 'Files');
     const templatesRoot = fileTree.find(n => n.name === 'Templates');
 
-    // Filter trees starting from the specific roots
     const mdFilesTree = useMemo(() =>
         filesRoot ? filterTree(filesRoot.children || [], ['.md']) : [],
         [filesRoot]);
@@ -246,14 +194,12 @@ export function ExportSidebar() {
         setIsExporting(true);
 
         try {
-            // Compile PDF using client-side WASM compiler
             const pdfBuffer = await compilePdf({
                 markdown: activeFile.content,
                 title: activeFile.name.replace(/\.[^/.]+$/, ""),
                 settings: activeTemplate?.settings,
             });
 
-            // Create blob and download
             const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -271,67 +217,11 @@ export function ExportSidebar() {
         }
     };
 
-    if (!rightSidebarExpanded) {
-        return (
-            <div className="h-full flex flex-col items-center py-2 bg-muted/30 box-border overflow-hidden app-chrome">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 hover:bg-accent shrink-0"
-                    onClick={toggleRightSidebar}
-                    title="Expand export"
-                >
-                    <PanelRightOpen size={18} />
-                </Button>
-            </div>
-        );
-    }
-
     return (
-        <div className="h-full flex flex-col bg-muted/30 w-full overflow-hidden app-chrome">
+        <div className="h-screen flex flex-col bg-background">
             {/* Export Header */}
-            <div className="p-2 flex items-center justify-between shrink-0">
+            <div className="p-2 flex items-center justify-between shrink-0 border-b">
                 <span className="font-semibold text-sm px-2">Export</span>
-                <div className="flex items-center gap-1">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground"
-                        onClick={() => {
-                            const width = 400;
-                            const height = 700;
-                            const left = window.screenX + window.outerWidth - width - 50;
-                            const top = window.screenY + 50;
-                            const exportWindow = window.open(
-                                '/export',
-                                'export-panel',
-                                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-                            );
-                            if (exportWindow) {
-                                setExportWindowOpen(true);
-                                // Listen for window close
-                                const checkClosed = setInterval(() => {
-                                    if (exportWindow.closed) {
-                                        clearInterval(checkClosed);
-                                        setExportWindowOpen(false);
-                                    }
-                                }, 500);
-                            }
-                        }}
-                        title="Open in new window"
-                    >
-                        <AppWindow size={16} />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground"
-                        onClick={toggleRightSidebar}
-                        title="Collapse sidebar"
-                    >
-                        <PanelRightClose size={18} />
-                    </Button>
-                </div>
             </div>
 
             <div className="flex-1 flex flex-col p-4 min-h-0 h-full">
@@ -472,7 +362,7 @@ export function ExportSidebar() {
                 </div>
             </div>
 
-            <div className="p-4 bg-background shrink-0">
+            <div className="p-4 bg-muted/30 shrink-0 border-t">
                 <Button 
                     className="w-full shadow-sm" 
                     onClick={handleExport} 

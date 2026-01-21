@@ -21,6 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const {
         leftSidebarExpanded,
         rightSidebarExpanded,
+        exportWindowOpen,
         openTabs,
         openFile,
         openTemplate,
@@ -179,21 +180,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </div>
                     </ResizablePanel>
 
-                    {/* Right Sidebar (Export/Preview) */}
-                    <ResizableHandle id="export-handle" />
-                    <ResizablePanel
-                        ref={rightPanelRef}
-                        id="export-panel"
-                        defaultSize={25}
-                        minSize={15}
-                        maxSize={40}
-                        collapsible={true}
-                        collapsedSize={3}
-                        onCollapse={() => { if (rightSidebarExpanded) toggleRightSidebar(); }}
-                        onExpand={() => { if (!rightSidebarExpanded) toggleRightSidebar(); }}
-                    >
-                        <ExportSidebar />
-                    </ResizablePanel>
+                    {/* Right Sidebar (Export/Preview) - hidden when export window is open */}
+                    {!exportWindowOpen && (
+                        <>
+                            <ResizableHandle id="export-handle" />
+                            <ResizablePanel
+                                ref={rightPanelRef}
+                                id="export-panel"
+                                defaultSize={25}
+                                minSize={15}
+                                maxSize={40}
+                                collapsible={true}
+                                collapsedSize={3}
+                                onCollapse={() => { if (rightSidebarExpanded) toggleRightSidebar(); }}
+                                onExpand={() => { if (!rightSidebarExpanded) toggleRightSidebar(); }}
+                            >
+                                <ExportSidebar />
+                            </ResizablePanel>
+                        </>
+                    )}
                 </ResizablePanelGroup>
                 <PrintStyles />
             </div >
