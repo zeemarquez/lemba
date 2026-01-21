@@ -42,6 +42,13 @@ export interface TypstOptions {
     h4?: HeadingOptions;
     h5?: HeadingOptions;
     h6?: HeadingOptions;
+    codeBlocks?: {
+        showLanguage?: boolean;
+        showLineNumbers?: boolean;
+        backgroundColor?: string;
+        borderColor?: string;
+        borderWidth?: string;
+    };
 }
 
 // Track loaded custom fonts to avoid re-adding them
@@ -336,6 +343,394 @@ export function getEnabledHeadingLevels(settings: any): number[] {
         .map(l => l.level);
 }
 
+/**
+ * Determine if a hex color is dark (for choosing text color)
+ */
+function isColorDark(hexColor: string): boolean {
+    const hex = hexColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    // Using relative luminance formula
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance < 0.5;
+}
+
+/**
+ * Syntax highlighting color schemes for different themes
+ */
+interface SyntaxColors {
+    text: string;
+    keyword: string;
+    string: string;
+    comment: string;
+    number: string;
+    function: string;
+    type: string;
+    operator: string;
+    punctuation: string;
+}
+
+const THEME_COLORS: Record<string, SyntaxColors> = {
+    // Light themes
+    '#f6f8fa': { // GitHub Light
+        text: '#24292f',
+        keyword: '#cf222e',
+        string: '#0a3069',
+        comment: '#6e7781',
+        number: '#0550ae',
+        function: '#8250df',
+        type: '#116329',
+        operator: '#24292f',
+        punctuation: '#24292f',
+    },
+    '#ffffff': { // Light
+        text: '#383a42',
+        keyword: '#a626a4',
+        string: '#50a14f',
+        comment: '#a0a1a7',
+        number: '#986801',
+        function: '#4078f2',
+        type: '#c18401',
+        operator: '#383a42',
+        punctuation: '#383a42',
+    },
+    '#fafafa': { // One Light
+        text: '#383a42',
+        keyword: '#a626a4',
+        string: '#50a14f',
+        comment: '#a0a1a7',
+        number: '#986801',
+        function: '#4078f2',
+        type: '#c18401',
+        operator: '#383a42',
+        punctuation: '#383a42',
+    },
+    '#fdf6e3': { // Solarized Light
+        text: '#657b83',
+        keyword: '#859900',
+        string: '#2aa198',
+        comment: '#93a1a1',
+        number: '#d33682',
+        function: '#268bd2',
+        type: '#b58900',
+        operator: '#657b83',
+        punctuation: '#657b83',
+    },
+    '#f5f5f5': { // Light Gray
+        text: '#333333',
+        keyword: '#0000ff',
+        string: '#a31515',
+        comment: '#008000',
+        number: '#098658',
+        function: '#795e26',
+        type: '#267f99',
+        operator: '#333333',
+        punctuation: '#333333',
+    },
+    '#fffffe': { // Nord Light (Snow Storm)
+        text: '#2e3440',
+        keyword: '#5e81ac',
+        string: '#a3be8c',
+        comment: '#4c566a',
+        number: '#b48ead',
+        function: '#88c0d0',
+        type: '#81a1c1',
+        operator: '#2e3440',
+        punctuation: '#2e3440',
+    },
+    // Dark themes
+    '#1e1e1e': { // VS Code Dark
+        text: '#d4d4d4',
+        keyword: '#569cd6',
+        string: '#ce9178',
+        comment: '#6a9955',
+        number: '#b5cea8',
+        function: '#dcdcaa',
+        type: '#4ec9b0',
+        operator: '#d4d4d4',
+        punctuation: '#d4d4d4',
+    },
+    '#282c34': { // One Dark
+        text: '#abb2bf',
+        keyword: '#c678dd',
+        string: '#98c379',
+        comment: '#5c6370',
+        number: '#d19a66',
+        function: '#61afef',
+        type: '#e5c07b',
+        operator: '#56b6c2',
+        punctuation: '#abb2bf',
+    },
+    '#282a36': { // Dracula
+        text: '#f8f8f2',
+        keyword: '#ff79c6',
+        string: '#f1fa8c',
+        comment: '#6272a4',
+        number: '#bd93f9',
+        function: '#50fa7b',
+        type: '#8be9fd',
+        operator: '#ff79c6',
+        punctuation: '#f8f8f2',
+    },
+    '#24292e': { // GitHub Dark
+        text: '#e1e4e8',
+        keyword: '#f97583',
+        string: '#9ecbff',
+        comment: '#6a737d',
+        number: '#79b8ff',
+        function: '#b392f0',
+        type: '#85e89d',
+        operator: '#e1e4e8',
+        punctuation: '#e1e4e8',
+    },
+    '#272822': { // Monokai
+        text: '#f8f8f2',
+        keyword: '#f92672',
+        string: '#e6db74',
+        comment: '#75715e',
+        number: '#ae81ff',
+        function: '#a6e22e',
+        type: '#66d9ef',
+        operator: '#f92672',
+        punctuation: '#f8f8f2',
+    },
+    '#002b36': { // Solarized Dark
+        text: '#839496',
+        keyword: '#859900',
+        string: '#2aa198',
+        comment: '#586e75',
+        number: '#d33682',
+        function: '#268bd2',
+        type: '#b58900',
+        operator: '#839496',
+        punctuation: '#839496',
+    },
+};
+
+// Default fallback colors
+const DEFAULT_LIGHT_COLORS: SyntaxColors = {
+    text: '#24292e',
+    keyword: '#d73a49',
+    string: '#032f62',
+    comment: '#6a737d',
+    number: '#005cc5',
+    function: '#6f42c1',
+    type: '#22863a',
+    operator: '#24292e',
+    punctuation: '#24292e',
+};
+
+const DEFAULT_DARK_COLORS: SyntaxColors = {
+    text: '#d4d4d4',
+    keyword: '#c586c0',
+    string: '#ce9178',
+    comment: '#6a9955',
+    number: '#b5cea8',
+    function: '#dcdcaa',
+    type: '#4ec9b0',
+    operator: '#d4d4d4',
+    punctuation: '#d4d4d4',
+};
+
+/**
+ * Get syntax colors for a given background color
+ */
+function getSyntaxColors(backgroundColor: string): SyntaxColors {
+    // Check if we have specific colors for this background
+    if (THEME_COLORS[backgroundColor]) {
+        return THEME_COLORS[backgroundColor];
+    }
+    // Fall back to light/dark default
+    return isColorDark(backgroundColor) ? DEFAULT_DARK_COLORS : DEFAULT_LIGHT_COLORS;
+}
+
+/**
+ * Generate custom code block styling with built-in syntax highlighting
+ * that works for both light and dark themes
+ */
+function generateCodeBlockStyles(options: TypstOptions): string {
+    const codeBlocks = options.codeBlocks || {};
+    
+    // Default values
+    const showLineNumbers = codeBlocks.showLineNumbers !== false; // Default: true
+    const showLanguage = codeBlocks.showLanguage === true; // Default: false
+    const backgroundColor = codeBlocks.backgroundColor || '#f6f8fa';
+    const borderColor = codeBlocks.borderColor || '#e0e0e0';
+    const borderWidth = codeBlocks.borderWidth || '1';
+    
+    // Get theme-specific colors
+    const isDark = isColorDark(backgroundColor);
+    const colors = getSyntaxColors(backgroundColor);
+    const lineNumberColor = isDark ? '#6e7681' : '#8b949e';
+    const labelTextColor = isDark ? '#cccccc' : '#24292e';
+    
+    // Build stroke value
+    const strokeValue = borderWidth === '0' ? 'none' : `${borderWidth}pt + rgb("${borderColor}")`;
+    
+    // Generate Typst code with custom syntax highlighting function
+    return `
+// Custom syntax highlighting colors
+#let hl-text = rgb("${colors.text}")
+#let hl-keyword = rgb("${colors.keyword}")
+#let hl-string = rgb("${colors.string}")
+#let hl-comment = rgb("${colors.comment}")
+#let hl-number = rgb("${colors.number}")
+#let hl-function = rgb("${colors.function}")
+#let hl-type = rgb("${colors.type}")
+#let hl-operator = rgb("${colors.operator}")
+#let hl-punctuation = rgb("${colors.punctuation}")
+
+// Keywords for common languages
+#let keywords = ("def", "class", "import", "from", "return", "if", "else", "elif", "for", "while", "in", "not", "and", "or", "is", "None", "True", "False", "try", "except", "finally", "with", "as", "lambda", "yield", "async", "await", "pass", "break", "continue", "raise", "global", "nonlocal", "assert", "del",
+  "function", "const", "let", "var", "new", "this", "typeof", "instanceof", "null", "undefined", "true", "false", "export", "default", "extends", "static", "get", "set", "constructor", "super", "switch", "case", "throw", "catch",
+  "fn", "let", "mut", "pub", "impl", "struct", "enum", "trait", "use", "mod", "crate", "self", "Self", "match", "loop", "move", "ref", "where", "dyn", "unsafe", "extern", "type", "async",
+  "func", "package", "interface", "go", "defer", "chan", "select", "fallthrough", "range", "map", "make",
+  "public", "private", "protected", "void", "int", "float", "double", "char", "boolean", "byte", "short", "long", "final", "abstract", "synchronized", "volatile", "transient", "native", "throws", "implements",
+  "print", "println", "printf", "echo", "console")
+
+// Simple syntax highlighter function
+#let highlight-code(code, lang) = {
+  let result = ()
+  let i = 0
+  let chars = code.clusters()
+  let len = chars.len()
+  
+  while i < len {
+    let c = chars.at(i)
+    
+    // Comments (// or #)
+    if c == "/" and i + 1 < len and chars.at(i + 1) == "/" {
+      let comment = ""
+      while i < len and chars.at(i) != "\\n" {
+        comment += chars.at(i)
+        i += 1
+      }
+      result = result + (text(fill: hl-comment, comment),)
+    }
+    else if c == "#" and (lang == "python" or lang == "py" or lang == "ruby" or lang == "rb" or lang == "shell" or lang == "bash" or lang == "sh") {
+      let comment = ""
+      while i < len and chars.at(i) != "\\n" {
+        comment += chars.at(i)
+        i += 1
+      }
+      result = result + (text(fill: hl-comment, comment),)
+    }
+    // Strings
+    else if c == "\\"" or c == "'" {
+      let quote = c
+      let s = c
+      i += 1
+      while i < len {
+        let ch = chars.at(i)
+        s += ch
+        i += 1
+        if ch == quote { break }
+        if ch == "\\\\" and i < len {
+          s += chars.at(i)
+          i += 1
+        }
+      }
+      result = result + (text(fill: hl-string, s),)
+    }
+    // Numbers
+    else if c.match(regex("^[0-9]$")) != none {
+      let num = ""
+      while i < len and chars.at(i).match(regex("^[0-9.xXa-fA-F]$")) != none {
+        num += chars.at(i)
+        i += 1
+      }
+      result = result + (text(fill: hl-number, num),)
+    }
+    // Words (identifiers/keywords)
+    else if c.match(regex("^[a-zA-Z_]$")) != none {
+      let word = ""
+      while i < len and chars.at(i).match(regex("^[a-zA-Z0-9_]$")) != none {
+        word += chars.at(i)
+        i += 1
+      }
+      if word in keywords {
+        result = result + (text(fill: hl-keyword, word),)
+      } else if i < len and chars.at(i) == "(" {
+        result = result + (text(fill: hl-function, word),)
+      } else if word.len() > 0 and word.at(0).match(regex("^[A-Z]$")) != none {
+        result = result + (text(fill: hl-type, word),)
+      } else {
+        result = result + (text(fill: hl-text, word),)
+      }
+    }
+    // Operators
+    else if c in ("=", "+", "-", "*", "/", "<", ">", "!", "&", "|", "^", "%", "~") {
+      result = result + (text(fill: hl-operator, c),)
+      i += 1
+    }
+    // Punctuation
+    else if c in ("(", ")", "[", "]", "{", "}", ",", ".", ":", ";") {
+      result = result + (text(fill: hl-punctuation, c),)
+      i += 1
+    }
+    // Whitespace and other
+    else {
+      result = result + (text(fill: hl-text, c),)
+      i += 1
+    }
+  }
+  
+  result.join()
+}
+
+// Code block styling
+#show raw.where(block: true): it => {
+  let lang-label = if it.lang != none and ${showLanguage} { it.lang } else { none }
+  let lang = if it.lang != none { it.lang } else { "" }
+  let lines = it.text.split("\\n")
+  let num-lines = lines.len()
+  let max-digits = str(num-lines).len()
+  
+  block(
+    width: 100%,
+    fill: rgb("${backgroundColor}"),
+    stroke: ${strokeValue},
+    radius: 4pt,
+    clip: true,
+    {
+      if lang-label != none {
+        place(top + right, box(
+          fill: rgb("${borderColor}"),
+          inset: (x: 8pt, y: 4pt),
+          radius: (bottom-left: 4pt),
+          text(size: 0.75em, weight: "medium", fill: rgb("${labelTextColor}"), lang-label)
+        ))
+      }
+      
+      pad(10pt, {
+        set text(font: "DejaVu Sans Mono", size: 0.9em)
+        ${showLineNumbers ? `grid(
+          columns: (auto, 1fr),
+          column-gutter: 12pt,
+          row-gutter: 0.3em,
+          ..{
+            let result = ()
+            for (i, line) in lines.enumerate() {
+              let num = str(i + 1)
+              let padding = " " * (max-digits - num.len())
+              result.push(text(fill: rgb("${lineNumberColor}"), padding + num))
+              result.push(highlight-code(line, lang))
+            }
+            result
+          }
+        )` : `{
+          for (i, line) in lines.enumerate() {
+            highlight-code(line, lang)
+            if i < num-lines - 1 { linebreak() }
+          }
+        }`}
+      })
+    }
+  )
+}`;
+}
+
 export function generatePreamble(options: TypstOptions): string {
     const {
         margins,
@@ -534,6 +929,8 @@ ${headingStyles}
 // Common styles
 #show link: underline
 #show table: set table(stroke: 0.5pt + gray)
+
+${generateCodeBlockStyles(options)}
 `;
 }
 

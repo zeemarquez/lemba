@@ -89,6 +89,26 @@ export interface TemplateSettings {
         };
         emptyPagesAfter?: number;
     };
+    figures?: {
+        captionEnabled?: boolean;
+        captionFormat?: string; // e.g., "Figure #: {Caption}"
+        defaultWidth?: string;
+        defaultHeight?: string;
+        margins?: {
+            top?: string;
+            bottom?: string;
+            left?: string;
+            right?: string;
+        };
+        alignment?: 'left' | 'center' | 'right';
+    };
+    codeBlocks?: {
+        showLanguage?: boolean;
+        showLineNumbers?: boolean;
+        backgroundColor?: string;
+        borderColor?: string;
+        borderWidth?: string;
+    };
     [key: string]: unknown;
 }
 
@@ -113,8 +133,9 @@ export interface UsePdfCompilerReturn {
  * @param tables - Table settings from template
  * @param pageNumberOffset - Calculated page number offset from startPageNumber setting
  * @param variables - Variable values from document frontmatter
+ * @param figures - Figure caption settings from template
  */
-async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean }; pageNumberOffset?: number; variables?: Record<string, string> }): Promise<string> {
+async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean }; pageNumberOffset?: number; variables?: Record<string, string>; figures?: { captionEnabled?: boolean; captionFormat?: string } }): Promise<string> {
     if (!content) return '';
 
     try {
@@ -127,7 +148,8 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
                 insideContext: context.insideContext,
                 tables: context.tables,
                 pageNumberOffset: context.pageNumberOffset,
-                variables: context.variables
+                variables: context.variables,
+                figures: context.figures
             });
         }
     } catch {
@@ -135,7 +157,7 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
     }
 
     // For markdown content, we use our converter
-    return markdownToTypst(content).trim();
+    return markdownToTypst(content, { figures: context.figures }).trim();
 }
 
 
@@ -215,7 +237,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             const variables = parseVariablesFromFrontmatter(markdownWithImages);
 
             // 2. Convert Markdown to Typst
-            const typstBody = markdownToTypst(markdownWithImages, { tables: settings?.tables });
+            const typstBody = markdownToTypst(markdownWithImages, { tables: settings?.tables, figures: settings?.figures });
 
             // 3. Prepare Header/Footer/Front Page
             let headerContent = '';
@@ -242,7 +264,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
                 const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
                 // Front page is in document body, NOT inside context, so insideContext=false
-                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables });
+                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures });
             }
 
             // 4. Generate Preamble

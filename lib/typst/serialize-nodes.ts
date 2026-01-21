@@ -32,9 +32,29 @@ interface SerializeContext {
     pageNumberOffset?: number;
     /** Variable values from document frontmatter */
     variables?: Record<string, string>;
+    /** Figures settings from template */
+    figures?: {
+        captionEnabled?: boolean;
+        captionFormat?: string;
+        defaultWidth?: string;
+        defaultHeight?: string;
+        margins?: {
+            top?: string;
+            bottom?: string;
+            left?: string;
+            right?: string;
+        };
+        alignment?: 'left' | 'center' | 'right';
+    };
+    /** Internal figure counter - managed during serialization */
+    _figureCounter?: { value: number };
 }
 
 export function serializeNodesToTypst(nodes: Descendant[], context: SerializeContext = {}): string {
+    // Initialize figure counter if not present
+    if (!context._figureCounter) {
+        context._figureCounter = { value: 0 };
+    }
     return nodes.map(node => serializeNode(node, context)).join('\n');
 }
 
@@ -165,7 +185,8 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             return `#quote(block: true)[${children}]\n`;
 
         case 'code_block':
-            return `\`\`\`\n${element.children.map((c: any) => c.text).join('')}\n\`\`\`\n`;
+            const lang = (element as any).lang || '';
+            return `\`\`\`${lang}\n${element.children.map((c: any) => c.text).join('')}\n\`\`\`\n`;
 
         case 'ul':
         case 'ol':
@@ -188,28 +209,77 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             const imgScaleFactor = context.scaleImages ? 0.25 : 1;
             const args: string[] = [];
 
-            // Priority: width, then maxWidth/maxWidth
+            // Priority: width, then maxWidth/maxWidth, then default from template
             if (e.width) {
                 args.push(`width: ${scaleTypstUnit(e.width, imgScaleFactor)}`);
             } else if (e.style?.width) {
                 args.push(`width: ${scaleTypstUnit(e.style.width, imgScaleFactor)}`);
+            } else if (context.figures?.defaultWidth) {
+                args.push(`width: ${scaleTypstUnit(context.figures.defaultWidth, imgScaleFactor)}`);
             }
 
             if (e.height) {
                 args.push(`height: ${scaleTypstUnit(e.height, imgScaleFactor)}`);
             } else if (e.style?.height) {
                 args.push(`height: ${scaleTypstUnit(e.style.height, imgScaleFactor)}`);
+            } else if (context.figures?.defaultHeight) {
+                args.push(`height: ${scaleTypstUnit(context.figures.defaultHeight, imgScaleFactor)}`);
             }
 
             const imgArgs = args.length > 0 ? `, ${args.join(', ')}` : '';
             const imgCall = `image("${escapeTypstString(src)}"${imgArgs})`;
 
-            if (e.caption) {
-                return `#figure(${imgCall}, caption: [${children}])`;
+            // Check for figcaption attribute or caption property
+            const figcaptionText = e.figcaption || (e.caption ? (Array.isArray(e.caption) ? e.caption.map((c: any) => c.text || '').join('') : e.caption) : '');
+            const captionEnabled = context.figures?.captionEnabled ?? true;
+            
+            // Use align from element, or default from template
+            const imgAlign = align || context.figures?.alignment;
+            
+            // Helper to wrap content with alignment
+            const wrapImgAlign = (content: string) => {
+                if (imgAlign === 'center') return `#align(center)[${content}]`;
+                if (imgAlign === 'right') return `#align(right)[${content}]`;
+                return content;
+            };
+            
+            // Helper to wrap content with margins block
+            const wrapMargins = (content: string) => {
+                const margins = context.figures?.margins;
+                const hasMargins = margins && (margins.top || margins.bottom || margins.left || margins.right);
+                if (!hasMargins) return content;
+                
+                const marginArgs: string[] = [];
+                if (margins.top) marginArgs.push(`above: ${fixTypstUnit(margins.top)}`);
+                if (margins.bottom) marginArgs.push(`below: ${fixTypstUnit(margins.bottom)}`);
+                if (margins.left || margins.right) {
+                    const inset: string[] = [];
+                    if (margins.left) inset.push(`left: ${fixTypstUnit(margins.left)}`);
+                    if (margins.right) inset.push(`right: ${fixTypstUnit(margins.right)}`);
+                    marginArgs.push(`inset: (${inset.join(', ')})`);
+                }
+                return `#block(${marginArgs.join(', ')})[${content}]`;
+            };
+            
+            if (figcaptionText && captionEnabled) {
+                // Increment figure counter
+                if (context._figureCounter) {
+                    context._figureCounter.value++;
+                }
+                const figNum = context._figureCounter?.value || 1;
+                const captionFormat = context.figures?.captionFormat || 'Figure #: {Caption}';
+                // Replace # with figure number and {Caption} with the actual caption text
+                const formattedCaption = captionFormat
+                    .replace('#', String(figNum))
+                    .replace('{Caption}', figcaptionText);
+                
+                // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
+                const figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
+                return wrapMargins(wrapImgAlign(figureCall));
             }
 
             // If it's a block level image (default in markdown usually), we can use the # prefix
-            return wrapAlign(`#${imgCall}`, align);
+            return wrapMargins(wrapImgAlign(`#${imgCall}`));
 
         case 'table':
             return serializeTable(element, context);

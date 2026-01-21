@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore, TemplateVariable } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2 } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon } from "lucide-react";
 import { Input } from "@/components/plate-ui/input";
 import { Button } from "@/components/plate-ui/button";
 import { useState, useEffect, useMemo, Fragment } from "react";
@@ -94,6 +94,7 @@ export function TemplateEditor() {
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
+        { id: 'figures', label: 'Figures', icon: ImageIcon },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'tables', label: 'Tables', icon: TableIcon },
         { id: 'outline', label: 'Index', icon: List },
@@ -876,6 +877,200 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Figures Section */}
+                    <section id="section-figures" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <ImageIcon size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Figures</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Caption Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Enable captions</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Show captions below figures with automatic numbering.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('figures.captionEnabled', !(settings.figures?.captionEnabled ?? true))}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        (settings.figures?.captionEnabled ?? true) ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        (settings.figures?.captionEnabled ?? true) ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Caption Format */}
+                            {(settings.figures?.captionEnabled ?? true) && (
+                                <div className="pt-6 border-t border-border space-y-4">
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Caption Format</label>
+                                        <Input
+                                            type="text"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.figures?.captionFormat || 'Figure #: {Caption}'}
+                                            onChange={(e) => updateSetting('figures.captionFormat', e.target.value)}
+                                            placeholder="Figure #: {Caption}"
+                                        />
+                                        <p className="text-xs text-muted-foreground ml-1">
+                                            Use <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">#</code> for figure number and <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">{'{Caption}'}</code> for the caption text.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Default Size Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Default Size</h3>
+                                <p className="text-sm text-muted-foreground -mt-4">
+                                    Applied when images don&apos;t specify their own dimensions.
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Width</label>
+                                        <Input
+                                            type="text"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.figures?.defaultWidth || ''}
+                                            onChange={(e) => updateSetting('figures.defaultWidth', e.target.value)}
+                                            placeholder="e.g., 100%, 400px"
+                                        />
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Height</label>
+                                        <Input
+                                            type="text"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.figures?.defaultHeight || ''}
+                                            onChange={(e) => updateSetting('figures.defaultHeight', e.target.value)}
+                                            placeholder="e.g., auto, 300px"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Alignment Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Alignment</h3>
+                                <p className="text-sm text-muted-foreground -mt-4">
+                                    Default alignment for figures without explicit alignment.
+                                </p>
+
+                                <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                    <button
+                                        onClick={() => updateSetting('figures.alignment', 'left')}
+                                        className={cn(
+                                            "p-2.5 rounded-xl transition-all",
+                                            (settings.figures?.alignment || 'center') === 'left'
+                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                        title="Align left"
+                                    >
+                                        <AlignLeft size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSetting('figures.alignment', 'center')}
+                                        className={cn(
+                                            "p-2.5 rounded-xl transition-all",
+                                            (settings.figures?.alignment || 'center') === 'center'
+                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                        title="Align center"
+                                    >
+                                        <AlignCenter size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSetting('figures.alignment', 'right')}
+                                        className={cn(
+                                            "p-2.5 rounded-xl transition-all",
+                                            (settings.figures?.alignment || 'center') === 'right'
+                                                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                        title="Align right"
+                                    >
+                                        <AlignRight size={16} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Margins Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Margins</h3>
+                                <p className="text-sm text-muted-foreground -mt-4">
+                                    Space around figures in millimeters.
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Top</label>
+                                        <div className="relative">
+                                            <Input
+                                                type="number"
+                                                className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 pr-12 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                value={parseFloat(settings.figures?.margins?.top || '0') || 0}
+                                                onChange={(e) => updateSetting('figures.margins.top', `${e.target.value}mm`)}
+                                                placeholder="0"
+                                            />
+                                            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">mm</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Bottom</label>
+                                        <div className="relative">
+                                            <Input
+                                                type="number"
+                                                className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 pr-12 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                value={parseFloat(settings.figures?.margins?.bottom || '5') || 0}
+                                                onChange={(e) => updateSetting('figures.margins.bottom', `${e.target.value}mm`)}
+                                                placeholder="5"
+                                            />
+                                            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">mm</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Left</label>
+                                        <div className="relative">
+                                            <Input
+                                                type="number"
+                                                className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 pr-12 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                value={parseFloat(settings.figures?.margins?.left || '0') || 0}
+                                                onChange={(e) => updateSetting('figures.margins.left', `${e.target.value}mm`)}
+                                                placeholder="0"
+                                            />
+                                            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">mm</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Right</label>
+                                        <div className="relative">
+                                            <Input
+                                                type="number"
+                                                className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 pr-12 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                value={parseFloat(settings.figures?.margins?.right || '0') || 0}
+                                                onChange={(e) => updateSetting('figures.margins.right', `${e.target.value}mm`)}
+                                                placeholder="0"
+                                            />
+                                            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">mm</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
                     {/* Code Blocks Section */}
                     <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -886,23 +1081,275 @@ export function TemplateEditor() {
                         </div>
 
                         <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Theme Preset Dropdown */}
                             <div className="space-y-3">
                                 <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
-                                <select
-                                    className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
-                                    value={settings.codeBlockTheme || 'github'}
-                                    onChange={(e) => updateSetting('codeBlockTheme', e.target.value)}
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div 
+                                                    className="w-5 h-5 rounded border border-border"
+                                                    style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
+                                                />
+                                                <span>{(() => {
+                                                    const bg = settings.codeBlocks?.backgroundColor || '#f6f8fa';
+                                                    const presets: Record<string, string> = {
+                                                        '#f6f8fa': 'GitHub Light',
+                                                        '#fafafa': 'One Light',
+                                                        '#fdf6e3': 'Solarized Light',
+                                                        '#f5f5f5': 'Light Gray',
+                                                        '#fffffe': 'Nord Light',
+                                                        '#1e1e1e': 'VS Code Dark',
+                                                        '#282c34': 'One Dark',
+                                                        '#282a36': 'Dracula',
+                                                        '#24292e': 'GitHub Dark',
+                                                        '#272822': 'Monokai',
+                                                        '#002b36': 'Solarized Dark',
+                                                    };
+                                                    return presets[bg] || 'Custom';
+                                                })()}</span>
+                                            </div>
+                                            <ChevronDown size={16} className="text-muted-foreground" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[200px]">
+                                        {/* Light Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f6f8fa');
+                                            updateSetting('codeBlocks.borderColor', '#d0d7de');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f6f8fa' }} />
+                                                <span>GitHub Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fafafa');
+                                            updateSetting('codeBlocks.borderColor', '#e5e5e5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fafafa' }} />
+                                                <span>One Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fdf6e3');
+                                            updateSetting('codeBlocks.borderColor', '#eee8d5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fdf6e3' }} />
+                                                <span>Solarized Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f5f5f5');
+                                            updateSetting('codeBlocks.borderColor', '#e0e0e0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f5f5f5' }} />
+                                                <span>Light Gray</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fffffe');
+                                            updateSetting('codeBlocks.borderColor', '#e5e9f0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fffffe' }} />
+                                                <span>Nord Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        {/* Dark Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#1e1e1e');
+                                            updateSetting('codeBlocks.borderColor', '#3c3c3c');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#1e1e1e' }} />
+                                                <span>VS Code Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282c34');
+                                            updateSetting('codeBlocks.borderColor', '#3e4451');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282c34' }} />
+                                                <span>One Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282a36');
+                                            updateSetting('codeBlocks.borderColor', '#44475a');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282a36' }} />
+                                                <span>Dracula</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#24292e');
+                                            updateSetting('codeBlocks.borderColor', '#444d56');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#24292e' }} />
+                                                <span>GitHub Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#272822');
+                                            updateSetting('codeBlocks.borderColor', '#3e3d32');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#272822' }} />
+                                                <span>Monokai</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#002b36');
+                                            updateSetting('codeBlocks.borderColor', '#073642');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#002b36' }} />
+                                                <span>Solarized Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
+
+                            {/* Show Language Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show language</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display a language identifier tab in the top-right corner
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLanguage', !settings.codeBlocks?.showLanguage)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLanguage ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
                                 >
-                                    <option value="github">GitHub</option>
-                                    <option value="github-dark">GitHub Dark</option>
-                                    <option value="monokai">Monokai</option>
-                                    <option value="dracula">Dracula</option>
-                                    <option value="vs">Visual Studio</option>
-                                    <option value="vs2015">Visual Studio 2015</option>
-                                    <option value="atom-one-dark">Atom One Dark</option>
-                                    <option value="solarized-light">Solarized Light</option>
-                                    <option value="solarized-dark">Solarized Dark</option>
-                                </select>
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLanguage ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Show Line Numbers Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show line numbers</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display line numbers on the left side of code blocks
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLineNumbers', settings.codeBlocks?.showLineNumbers === false ? true : false)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Background and Border Colors */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Appearance</h3>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Background Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
+                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.codeBlocks?.backgroundColor || '#f6f8fa'}
+                                                    onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.codeBlocks?.backgroundColor || ''}
+                                                onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.codeBlocks?.backgroundColor && (
+                                                <button
+                                                    onClick={() => updateSetting('codeBlocks.backgroundColor', '')}
+                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Border Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Color</label>
+                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.codeBlocks?.borderColor || '#e0e0e0' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.codeBlocks?.borderColor || '#e0e0e0'}
+                                                    onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.codeBlocks?.borderColor || ''}
+                                                onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.codeBlocks?.borderColor && (
+                                                <button
+                                                    onClick={() => updateSetting('codeBlocks.borderColor', '')}
+                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Border Width */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Width</label>
+                                    <select
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
+                                        value={settings.codeBlocks?.borderWidth || '1'}
+                                        onChange={(e) => updateSetting('codeBlocks.borderWidth', e.target.value)}
+                                    >
+                                        <option value="0">None</option>
+                                        <option value="0.5">0.5pt</option>
+                                        <option value="1">1pt</option>
+                                        <option value="1.5">1.5pt</option>
+                                        <option value="2">2pt</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </section>

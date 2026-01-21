@@ -91,6 +91,13 @@ export interface Template {
             emptyPagesAfter?: number;
         };
         codeBlockTheme?: string;
+        codeBlocks?: {
+            showLanguage?: boolean;
+            showLineNumbers?: boolean;
+            backgroundColor?: string;
+            borderColor?: string;
+            borderWidth?: string;
+        };
         tables?: {
             preventPageBreak: boolean;
             headerStyle?: {
@@ -125,6 +132,19 @@ export interface Template {
                 filler: 'dotted' | 'line' | 'empty';
             };
             emptyPagesAfter?: number;
+        };
+        figures?: {
+            captionEnabled: boolean;
+            captionFormat: string; // e.g., "Figure #: {Caption}"
+            defaultWidth?: string; // e.g., "100%", "400px"
+            defaultHeight?: string; // e.g., "auto", "300px"
+            margins?: {
+                top: string;
+                bottom: string;
+                left: string;
+                right: string;
+            };
+            alignment?: 'left' | 'center' | 'right';
         };
     }
 }
@@ -252,6 +272,19 @@ const DEFAULT_TEMPLATE: Template = {
                 underline: false,
                 filler: 'dotted',
             },
+        },
+        figures: {
+            captionEnabled: true,
+            captionFormat: 'Figure #: {Caption}',
+            defaultWidth: '',
+            defaultHeight: '',
+            margins: {
+                top: '0mm',
+                bottom: '5mm',
+                left: '0mm',
+                right: '0mm',
+            },
+            alignment: 'center',
         },
     }
 };

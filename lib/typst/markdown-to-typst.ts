@@ -24,6 +24,19 @@ export interface MarkdownToTypstOptions {
             color?: string;
         };
     };
+    figures?: {
+        captionEnabled?: boolean;
+        captionFormat?: string; // e.g., "Figure #: {Caption}"
+        defaultWidth?: string;
+        defaultHeight?: string;
+        margins?: {
+            top?: string;
+            bottom?: string;
+            left?: string;
+            right?: string;
+        };
+        alignment?: 'left' | 'center' | 'right';
+    };
 }
 
 // Strip frontmatter from markdown content
@@ -32,7 +45,13 @@ function stripFrontmatter(content: string): string {
     return content.replace(frontmatterRegex, '');
 }
 
+// Track figure numbers globally within a document compilation
+let figureCounter = 0;
+
 export function markdownToTypst(markdown: string, options: MarkdownToTypstOptions = {}): string {
+    // Reset figure counter at the start of each document
+    figureCounter = 0;
+    
     const instance = new Marked();
 
     instance.use(markedKatex({
@@ -209,13 +228,16 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 const widthMatch = token.text.match(/width[:=]\s*["']?(\d+(?:px|%)?)["']?/i);
                 const heightMatch = token.text.match(/height[:=]\s*["']?(\d+(?:px|%)?)["']?/i);
 
+                // Use explicit dimensions if present, otherwise use defaults from template
                 let args = '';
-                if (widthMatch) args += `, width: ${fixTypstUnit(widthMatch[1])}`;
-                if (heightMatch) args += `, height: ${fixTypstUnit(heightMatch[1])}`;
+                const width = widthMatch ? widthMatch[1] : options.figures?.defaultWidth;
+                const height = heightMatch ? heightMatch[1] : options.figures?.defaultHeight;
+                if (width) args += `, width: ${fixTypstUnit(width)}`;
+                if (height) args += `, height: ${fixTypstUnit(height)}`;
 
-                const imgCall = `#image("${escapeTypstString(src)}"${args})`;
+                const imgCall = `image("${escapeTypstString(src)}"${args})`;
 
-                // 2. Parse Alignment
+                // 2. Parse Alignment - use explicit if present, otherwise use default from template
                 const alignMatch = token.text.match(/data-align=["'](left|center|right)["']/i);
                 let align = alignMatch ? alignMatch[1] : undefined;
 
@@ -226,10 +248,72 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                         align = 'right';
                     }
                 }
+                
+                // Apply default alignment from template if not specified in image
+                if (!align) {
+                    align = options.figures?.alignment || 'center';
+                }
 
-                if (align === 'center') return `#align(center)[${imgCall}]\n\n`;
-                if (align === 'right') return `#align(right)[${imgCall}]\n\n`;
-                return `${imgCall}\n\n`;
+                // 3. Parse figcaption attribute
+                const figcaptionMatch = token.text.match(/figcaption=["']([^"']*)["']/i);
+                const figcaption = figcaptionMatch ? figcaptionMatch[1] : undefined;
+                
+                // 4. Build margins block if specified
+                const margins = options.figures?.margins;
+                const hasMargins = margins && (margins.top || margins.bottom || margins.left || margins.right);
+                
+                // 5. If we have a caption and captions are enabled, use Typst figure
+                const captionEnabled = options.figures?.captionEnabled ?? true;
+                if (figcaption && captionEnabled) {
+                    figureCounter++;
+                    const captionFormat = options.figures?.captionFormat || 'Figure #: {Caption}';
+                    // Replace # with figure number and {Caption} with the actual caption text
+                    const formattedCaption = captionFormat
+                        .replace('#', String(figureCounter))
+                        .replace('{Caption}', figcaption);
+                    
+                    // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
+                    let figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
+                    
+                    // Apply alignment
+                    if (align === 'center') figureCall = `#align(center)[${figureCall}]`;
+                    else if (align === 'right') figureCall = `#align(right)[${figureCall}]`;
+                    
+                    // Wrap with block for margins
+                    if (hasMargins) {
+                        const marginArgs: string[] = [];
+                        if (margins.top) marginArgs.push(`above: ${fixTypstUnit(margins.top)}`);
+                        if (margins.bottom) marginArgs.push(`below: ${fixTypstUnit(margins.bottom)}`);
+                        if (margins.left || margins.right) {
+                            const inset: string[] = [];
+                            if (margins.left) inset.push(`left: ${fixTypstUnit(margins.left)}`);
+                            if (margins.right) inset.push(`right: ${fixTypstUnit(margins.right)}`);
+                            marginArgs.push(`inset: (${inset.join(', ')})`);
+                        }
+                        return `#block(${marginArgs.join(', ')})[${figureCall}]\n\n`;
+                    }
+                    return `${figureCall}\n\n`;
+                }
+
+                // Image without caption
+                let result = `#${imgCall}`;
+                if (align === 'center') result = `#align(center)[${result}]`;
+                else if (align === 'right') result = `#align(right)[${result}]`;
+                
+                // Wrap with block for margins
+                if (hasMargins) {
+                    const marginArgs: string[] = [];
+                    if (margins.top) marginArgs.push(`above: ${fixTypstUnit(margins.top)}`);
+                    if (margins.bottom) marginArgs.push(`below: ${fixTypstUnit(margins.bottom)}`);
+                    if (margins.left || margins.right) {
+                        const inset: string[] = [];
+                        if (margins.left) inset.push(`left: ${fixTypstUnit(margins.left)}`);
+                        if (margins.right) inset.push(`right: ${fixTypstUnit(margins.right)}`);
+                        marginArgs.push(`inset: (${inset.join(', ')})`);
+                    }
+                    return `#block(${marginArgs.join(', ')})[${result}]\n\n`;
+                }
+                return `${result}\n\n`;
             }
             return '';
         case 'hr':
