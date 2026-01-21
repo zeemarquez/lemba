@@ -86,6 +86,24 @@ export interface Template {
         codeBlockTheme?: string;
         tables?: {
             preventPageBreak: boolean;
+            headerStyle?: {
+                bold?: boolean;
+                italic?: boolean;
+                underline?: boolean;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            cellStyle?: {
+                bold?: boolean;
+                italic?: boolean;
+                underline?: boolean;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            border?: {
+                width?: string;
+                color?: string;
+            };
         };
         outline?: {
             enabled: boolean;
@@ -212,7 +230,7 @@ const DEFAULT_TEMPLATE: Template = {
         header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
-        tables: { preventPageBreak: false },
+        tables: { preventPageBreak: false, headerStyle: { bold: true, backgroundColor: '' } },
         outline: { 
             enabled: false,
             title: {

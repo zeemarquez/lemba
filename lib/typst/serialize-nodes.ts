@@ -9,6 +9,24 @@ interface SerializeContext {
     /** Table settings from template */
     tables?: {
         preventPageBreak?: boolean;
+        headerStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        cellStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        border?: {
+            width?: string;
+            color?: string;
+        };
     };
     /** Global page number offset from template settings */
     pageNumberOffset?: number;
@@ -370,10 +388,35 @@ function serializeTable(element: TElement, context: SerializeContext): string {
 
     let tableContent = `table(\n  columns: ${columns},\n`;
     
-    // Add stroke: none if borders should be hidden
+    // Add stroke settings
     if (hideBorders) {
         tableContent += `  stroke: none,\n`;
+    } else {
+        // Apply custom border settings from template
+        const borderWidth = context.tables?.border?.width;
+        const borderColor = context.tables?.border?.color;
+        
+        if (borderWidth || borderColor) {
+            const strokeParts: string[] = [];
+            if (borderWidth) strokeParts.push(`${borderWidth}pt`);
+            if (borderColor) strokeParts.push(`rgb("${borderColor}")`);
+            tableContent += `  stroke: ${strokeParts.join(' + ')},\n`;
+        }
     }
+
+    // Get header style settings
+    const headerBold = context.tables?.headerStyle?.bold !== false; // Default to true
+    const headerItalic = context.tables?.headerStyle?.italic === true;
+    const headerUnderline = context.tables?.headerStyle?.underline === true;
+    const headerBgColor = context.tables?.headerStyle?.backgroundColor;
+    const headerTextColor = context.tables?.headerStyle?.textColor;
+
+    // Get cell style settings
+    const cellBold = context.tables?.cellStyle?.bold === true;
+    const cellItalic = context.tables?.cellStyle?.italic === true;
+    const cellUnderline = context.tables?.cellStyle?.underline === true;
+    const cellBgColor = context.tables?.cellStyle?.backgroundColor;
+    const cellTextColor = context.tables?.cellStyle?.textColor;
 
     rows.forEach(row => {
         (row.children as TElement[]).forEach(cell => {
@@ -381,13 +424,43 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             const isHeader = cell.type === 'th';
             const verticalAlign = (cell as any).verticalAlign as string | undefined;
             
-            const finalContent = isHeader ? `*${cellContent}*` : cellContent;
+            // Apply text styles based on whether it's a header or regular cell
+            let finalContent = cellContent;
+            if (isHeader) {
+                if (headerBold) finalContent = `*${finalContent}*`;
+                if (headerItalic) finalContent = `_${finalContent}_`;
+                if (headerUnderline) finalContent = `#underline[${finalContent}]`;
+            } else {
+                if (cellBold) finalContent = `*${finalContent}*`;
+                if (cellItalic) finalContent = `_${finalContent}_`;
+                if (cellUnderline) finalContent = `#underline[${finalContent}]`;
+            }
             
-            // Use table.cell for individual cell alignment
+            // Apply text color based on cell type
+            const textColor = isHeader ? headerTextColor : cellTextColor;
+            if (textColor) {
+                finalContent = `#text(fill: rgb("${textColor}"))[${finalContent}]`;
+            }
+            
+            // Build table.cell arguments
+            const cellArgs: string[] = [];
+            
+            // Add vertical alignment if specified
             if (verticalAlign === 'middle') {
-                tableContent += `  table.cell(align: horizon)[${finalContent}],\n`;
+                cellArgs.push('align: horizon');
             } else if (verticalAlign === 'bottom') {
-                tableContent += `  table.cell(align: bottom)[${finalContent}],\n`;
+                cellArgs.push('align: bottom');
+            }
+            
+            // Add background color based on cell type
+            const bgColor = isHeader ? headerBgColor : cellBgColor;
+            if (bgColor) {
+                cellArgs.push(`fill: rgb("${bgColor}")`);
+            }
+            
+            // Use table.cell if we have any arguments, otherwise use plain cell
+            if (cellArgs.length > 0) {
+                tableContent += `  table.cell(${cellArgs.join(', ')})[${finalContent}],\n`;
             } else {
                 tableContent += `  [${finalContent}],\n`;
             }

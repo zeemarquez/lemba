@@ -875,6 +875,289 @@ export function TemplateEditor() {
                                     )} />
                                 </button>
                             </div>
+
+                            {/* Header Style Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Header Style</h3>
+
+                                {/* Style Selector */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.bold', settings.tables?.headerStyle?.bold === false ? true : false)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.headerStyle?.bold !== false
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Bold size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.italic', !settings.tables?.headerStyle?.italic)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.headerStyle?.italic
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Italic size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.underline', !settings.tables?.headerStyle?.underline)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.headerStyle?.underline
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Underline size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Header Colors - Background and Text */}
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Header Background Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.headerStyle?.backgroundColor || '#f4f4f4' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.headerStyle?.backgroundColor || '#f4f4f4'}
+                                                    onChange={(e) => updateSetting('tables.headerStyle.backgroundColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.headerStyle?.backgroundColor || ''}
+                                                onChange={(e) => updateSetting('tables.headerStyle.backgroundColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.headerStyle?.backgroundColor && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.headerStyle.backgroundColor', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Header Text Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.headerStyle?.textColor || '#000000' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.headerStyle?.textColor || '#000000'}
+                                                    onChange={(e) => updateSetting('tables.headerStyle.textColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.headerStyle?.textColor || ''}
+                                                onChange={(e) => updateSetting('tables.headerStyle.textColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.headerStyle?.textColor && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.headerStyle.textColor', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Cells Style Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Cells Style</h3>
+
+                                {/* Style Selector */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.bold', !settings.tables?.cellStyle?.bold)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.cellStyle?.bold
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Bold size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.italic', !settings.tables?.cellStyle?.italic)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.cellStyle?.italic
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Italic size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.underline', !settings.tables?.cellStyle?.underline)}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                settings.tables?.cellStyle?.underline
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            <Underline size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Cells Colors - Background and Text */}
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Cells Background Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.cellStyle?.backgroundColor || '#ffffff' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.cellStyle?.backgroundColor || '#ffffff'}
+                                                    onChange={(e) => updateSetting('tables.cellStyle.backgroundColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.cellStyle?.backgroundColor || ''}
+                                                onChange={(e) => updateSetting('tables.cellStyle.backgroundColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.cellStyle?.backgroundColor && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.cellStyle.backgroundColor', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Cells Text Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.cellStyle?.textColor || '#000000' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.cellStyle?.textColor || '#000000'}
+                                                    onChange={(e) => updateSetting('tables.cellStyle.textColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.cellStyle?.textColor || ''}
+                                                onChange={(e) => updateSetting('tables.cellStyle.textColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.cellStyle?.textColor && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.cellStyle.textColor', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Border Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Border</h3>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Border Width */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Width (pt)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="10"
+                                            step="0.5"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.tables?.border?.width || ''}
+                                            onChange={(e) => updateSetting('tables.border.width', e.target.value)}
+                                            placeholder="1"
+                                        />
+                                    </div>
+
+                                    {/* Border Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.border?.color || '#000000' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.border?.color || '#000000'}
+                                                    onChange={(e) => updateSetting('tables.border.color', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.border?.color || ''}
+                                                onChange={(e) => updateSetting('tables.border.color', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.border?.color && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.border.color', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </section>
 

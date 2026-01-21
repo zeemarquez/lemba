@@ -53,7 +53,27 @@ export interface TemplateSettings {
     header?: { enabled?: boolean; content?: string; startPage?: number; margins?: { bottom: string; left: string; right: string } };
     footer?: { enabled?: boolean; content?: string; startPage?: number; margins?: { top: string; left: string; right: string } };
     frontPage?: { enabled?: boolean; content?: string; emptyPagesAfter?: number };
-    tables?: { preventPageBreak?: boolean };
+    tables?: { 
+        preventPageBreak?: boolean;
+        headerStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        cellStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        border?: {
+            width?: string;
+            color?: string;
+        };
+    };
     outline?: { 
         enabled?: boolean;
         title?: {

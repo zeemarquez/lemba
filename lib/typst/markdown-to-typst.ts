@@ -5,6 +5,24 @@ import { texToTypst } from 'tex-to-typst';
 export interface MarkdownToTypstOptions {
     tables?: {
         preventPageBreak?: boolean;
+        headerStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        cellStyle?: {
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        border?: {
+            width?: string;
+            color?: string;
+        };
     };
 }
 
@@ -91,14 +109,74 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             return `#quote(block: true)[${parseTokens(token.tokens, options)}]\n\n`;
         case 'table':
             const cols = token.header.length;
+            // Get header style settings
+            const headerBold = options.tables?.headerStyle?.bold !== false; // Default to true
+            const headerItalic = options.tables?.headerStyle?.italic === true;
+            const headerUnderline = options.tables?.headerStyle?.underline === true;
+            const headerBgColor = options.tables?.headerStyle?.backgroundColor;
+            const headerTextColor = options.tables?.headerStyle?.textColor;
+
+            // Get cell style settings
+            const cellBold = options.tables?.cellStyle?.bold === true;
+            const cellItalic = options.tables?.cellStyle?.italic === true;
+            const cellUnderline = options.tables?.cellStyle?.underline === true;
+            const cellBgColor = options.tables?.cellStyle?.backgroundColor;
+            const cellTextColor = options.tables?.cellStyle?.textColor;
+
+            // Get border settings
+            const borderWidth = options.tables?.border?.width;
+            const borderColor = options.tables?.border?.color;
+            
             // Use 1fr for each column to make the table expand to full width
             let tableInner = `table(\n  columns: (${'1fr, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
+            
+            // Apply custom border settings
+            if (borderWidth || borderColor) {
+                const strokeParts: string[] = [];
+                if (borderWidth) strokeParts.push(`${borderWidth}pt`);
+                if (borderColor) strokeParts.push(`rgb("${borderColor}")`);
+                tableInner += `  stroke: ${strokeParts.join(' + ')},\n`;
+            }
             token.header.forEach((cell: any) => {
-                tableInner += `  [*${parseInline(cell.tokens)}*],\n`;
+                const cellContent = parseInline(cell.tokens);
+                let formattedContent = cellContent;
+                
+                // Apply text styles for header cells
+                if (headerBold) formattedContent = `*${formattedContent}*`;
+                if (headerItalic) formattedContent = `_${formattedContent}_`;
+                if (headerUnderline) formattedContent = `#underline[${formattedContent}]`;
+                
+                // Apply text color for header cells
+                if (headerTextColor) {
+                    formattedContent = `#text(fill: rgb("${headerTextColor}"))[${formattedContent}]`;
+                }
+                
+                if (headerBgColor) {
+                    tableInner += `  table.cell(fill: rgb("${headerBgColor}"))[${formattedContent}],\n`;
+                } else {
+                    tableInner += `  [${formattedContent}],\n`;
+                }
             });
             token.rows.forEach((row: any) => {
                 row.forEach((cell: any) => {
-                    tableInner += `  [${parseInline(cell.tokens)}],\n`;
+                    const cellContent = parseInline(cell.tokens);
+                    let formattedContent = cellContent;
+                    
+                    // Apply text styles for regular cells
+                    if (cellBold) formattedContent = `*${formattedContent}*`;
+                    if (cellItalic) formattedContent = `_${formattedContent}_`;
+                    if (cellUnderline) formattedContent = `#underline[${formattedContent}]`;
+                    
+                    // Apply text color for regular cells
+                    if (cellTextColor) {
+                        formattedContent = `#text(fill: rgb("${cellTextColor}"))[${formattedContent}]`;
+                    }
+                    
+                    if (cellBgColor) {
+                        tableInner += `  table.cell(fill: rgb("${cellBgColor}"))[${formattedContent}],\n`;
+                    } else {
+                        tableInner += `  [${formattedContent}],\n`;
+                    }
                 });
             });
             tableInner += ')';
