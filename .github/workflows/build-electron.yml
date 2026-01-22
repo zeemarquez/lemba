@@ -63,6 +63,10 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout repository (for tag info)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
@@ -73,13 +77,40 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts/ || echo "No artifacts found"
 
-      - name: Create GitHub Release
+      - name: Extract tag name
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME=${GITHUB_REF#refs/tags/}
+          else
+            # For manual dispatch, get version from metadata
+            if [ -f build-metadata.json ]; then
+              TAG_NAME="v$(node -p "require('./build-metadata.json').version")"
+            else
+              TAG_NAME=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+            fi
+          fi
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Tag name: $TAG_NAME"
+
+      - name: Create GitHub Release in Public Repo
         uses: softprops/action-gh-release@v2
         with:
+          repo: zeemarquez/modern-markdown-landing-page
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
           files: artifacts/*
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
           fail_on_unmatched_files: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ## Modern Markdown Editor ${{ steps.tag.outputs.tag }}
+            
+            This release contains the macOS build artifacts for Modern Markdown Editor.
+            
+            **Note:** Windows builds are available separately and should be uploaded manually to this release.
+            
+            ### Downloads
+            - macOS DMG and ZIP files are attached below
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}

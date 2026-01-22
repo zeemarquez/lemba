@@ -53,3 +53,4 @@ build-metadata.json
 
 # Batch files (except build.bat which should be tracked)
 *.bat
+*.ps1
