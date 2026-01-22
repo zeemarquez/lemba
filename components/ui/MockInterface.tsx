@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, ExternalLink } from 'lucide-react';
-import Button from './Button';
+import { Button } from './button';
 
 interface MockInterfaceProps {
   mode?: 'editor' | 'templates' | 'split';

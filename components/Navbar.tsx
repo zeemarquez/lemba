@@ -1,6 +1,6 @@
 import React from 'react';
 import { PenTool, Github } from 'lucide-react';
-import Button from './ui/Button';
+import { Button } from './ui/button';
 
 const Navbar: React.FC = () => {
   return (
