@@ -197,6 +197,7 @@ export default function ExportPage() {
     };
 
     const activeFileName = getFileName(activeFileId);
+    const activeTemplateFileName = getFileName(activeTemplateId);
 
     const filesRoot = fileTree.find(n => n.name === 'Files');
     const templatesRoot = fileTree.find(n => n.name === 'Templates');
@@ -307,10 +308,10 @@ export default function ExportPage() {
                                 <Button
                                     variant="outline"
                                     className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
-                                    title={activeTemplate?.name || 'Select Template'}
+                                    title={activeTemplateFileName || 'Select Template'}
                                 >
                                     <LayoutTemplate size={14} className="mr-2 opacity-50 shrink-0" />
-                                    <span className="truncate">{activeTemplate?.name || 'Select'}</span>
+                                    <span className="truncate">{activeTemplateFileName || 'Select'}</span>
                                 </Button>
                             </DialogTrigger>
                             <DialogContent className="p-0 gap-0 max-w-sm">

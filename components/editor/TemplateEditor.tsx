@@ -43,12 +43,15 @@ export function TemplateEditor() {
     const [settings, setSettings] = useState(template?.settings);
     const [activeHeadingLevel, setActiveHeadingLevel] = useState<'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>('h1');
 
-    // Only update local settings when we switch templates
+    // Update local settings when template changes or becomes available
     useEffect(() => {
         if (template?.settings) {
             setSettings(template.settings);
+        } else if (activeTemplateId && !template) {
+            // Template ID is set but template not found - clear settings
+            setSettings(undefined);
         }
-    }, [activeTemplateId]);
+    }, [activeTemplateId, template, templates]);
 
     const updateSetting = (path: string, value: any) => {
         setSettings(prev => {
@@ -134,6 +137,20 @@ export function TemplateEditor() {
         return () => observer.disconnect();
     }, [sections]);
 
+    // Show empty state only if we have templates loaded but no active template, or if activeTemplateId is set but template not found
+    // Don't show empty state if templates array is empty (still loading) and activeTemplateId is set (might be restoring)
+    const isLoading = templates.length === 0 && activeTemplateId !== null;
+    
+    if (isLoading) {
+        // Still loading templates, don't show empty state yet
+        return (
+            <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 bg-muted/10">
+                <LayoutTemplate className="h-16 w-16 mb-4 opacity-10 animate-pulse" />
+                <p className="text-sm font-medium opacity-50">Loading template...</p>
+            </div>
+        );
+    }
+    
     if (!template || !settings) {
         return (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 bg-muted/10">

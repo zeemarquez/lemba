@@ -79,10 +79,16 @@ export function Sidebar() {
 
     useEffect(() => {
         setMounted(true);
-        fetchFileTree();
-        fetchTemplates();
-        fetchFonts();
-        restoreSession();
+        const init = async () => {
+            await Promise.all([
+                fetchFileTree(),
+                fetchTemplates(),
+                fetchFonts(),
+            ]);
+            // Restore session after templates are loaded to ensure template tabs work correctly
+            await restoreSession();
+        };
+        init();
     }, [fetchFileTree, fetchTemplates, fetchFonts, restoreSession]);
 
     const handleCreateFile = () => {

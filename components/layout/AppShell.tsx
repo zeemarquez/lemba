@@ -97,6 +97,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                     ? (currentView === 'file' && activeFileId === tab.id)
                                     : (currentView === 'template' && activeTemplateId === tab.id);
 
+                                // Extract filename from path (without extension) for display
+                                const getDisplayName = (path: string) => {
+                                    const fileName = path.split('/').pop() || path;
+                                    return fileName.replace(/\.(md|json|mdt)$/, '');
+                                };
+
                                 return (
                                     <div
                                         key={`${tab.type}-${tab.id}`}
@@ -140,7 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                             Let's apply to tabs too for consistency.
                                         */}
                                         <span className="truncate flex-1 font-medium">
-                                            {data.name.replace(/\.(md|json|mdt)$/, '')}
+                                            {getDisplayName(tab.id)}
                                         </span>
                                         <button
                                             className={cn(

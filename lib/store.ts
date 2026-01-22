@@ -327,10 +327,10 @@ export const useStore = create<AppState>()(
                         const filesRoot = tree.find(n => n.name === 'Files');
                         const hasFiles = filesRoot?.children && filesRoot.children.length > 0;
                         
-                        // If no files exist, load the default showcase file from /default/
+                        // If no files exist, load the default showcase file from /preloaded/
                         if (!hasFiles) {
                             try {
-                                const response = await fetch('/default/Lorem Ipsum.md');
+                                const response = await fetch('/preloaded/Lorem Ipsum.md');
                                 if (response.ok) {
                                     const content = await response.text();
                                     const path = 'Files/Lorem Ipsum.md';
@@ -358,52 +358,60 @@ export const useStore = create<AppState>()(
                     try {
                         let templates = await browserStorage.listTemplates();
 
-                        // Check if Default template exists
-                        const defaultExists = templates.some(t => t.name === 'Default');
+                        // Check if "Default Templates" folder exists by checking if any template is in that folder
+                        const defaultTemplatesFolder = 'Templates/Default Templates';
+                        const hasDefaultTemplates = templates.some(t => t.id.startsWith(defaultTemplatesFolder + '/'));
 
-                        if (!defaultExists) {
-                            const path = 'Templates/Default.mdt';
-                            try {
-                                // Try to fetch the default template from /default/ folder
-                                const response = await fetch('/default/Default.mdt');
-                                if (response.ok) {
-                                    const templateData = await response.json();
-                                    // Update the id to match the storage path
-                                    templateData.id = path;
-                                    await browserStorage.createTemplate(path, templateData);
-                                } else {
-                                    // Fallback to hardcoded DEFAULT_TEMPLATE if fetch fails
-                                    await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
-                                }
-
-                                // Re-fetch to get the file with correct metadata
-                                templates = await browserStorage.listTemplates();
-
-                                // Trigger file tree refresh so it shows in sidebar
-                                get().fetchFileTree();
-                            } catch (err) {
-                                console.error('Failed to create default template:', err);
-                                // Fallback to hardcoded DEFAULT_TEMPLATE
+                        if (!hasDefaultTemplates) {
+                            // Load all templates from /preloaded/Default Templates/ folder
+                            const templateFiles = ['Academic.mdt', 'Basic.mdt', 'Dark.mdt', 'Modern.mdt'];
+                            
+                            for (const templateFile of templateFiles) {
                                 try {
-                                    await browserStorage.createTemplate(path, { ...DEFAULT_TEMPLATE, id: path });
-                                    templates = await browserStorage.listTemplates();
-                                    get().fetchFileTree();
-                                } catch (fallbackErr) {
-                                    console.error('Failed to create fallback template:', fallbackErr);
+                                    const response = await fetch(`/preloaded/Default Templates/${templateFile}`);
+                                    if (response.ok) {
+                                        const templateData = await response.json();
+                                        // Update the id to match the storage path with folder structure
+                                        const path = `${defaultTemplatesFolder}/${templateFile}`;
+                                        templateData.id = path;
+                                        await browserStorage.createTemplate(path, templateData);
+                                    }
+                                } catch (err) {
+                                    console.error(`Failed to load template ${templateFile}:`, err);
                                 }
                             }
+
+                            // Re-fetch to get the files with correct metadata
+                            templates = await browserStorage.listTemplates();
+
+                            // Trigger file tree refresh so it shows in sidebar
+                            get().fetchFileTree();
                         }
 
                         set({ templates });
 
-                        // Set active template if needed
+                        // Set active template if needed - prioritize "Basic" template on first load
                         const state = get();
-                        if ((!state.activeTemplateId || state.activeTemplateId === 'default') && templates.length > 0) {
-                            const defaultT = templates.find(t => t.name === 'Default') || templates[0];
+                        const hasValidActiveTemplate = state.activeTemplateId && 
+                            templates.some(t => t.id === state.activeTemplateId);
+                        
+                        if (!hasValidActiveTemplate && templates.length > 0) {
+                            // First try to find "Basic" template by filename (since Basic.mdt has name "Default")
+                            const basicTemplate = templates.find(t => t.id.includes('Basic.mdt'));
+                            
+                            const selectedTemplate = basicTemplate || templates[0];
                             set({
-                                activeTemplateId: defaultT.id,
-                                activeTemplateCss: defaultT.css
+                                activeTemplateId: selectedTemplate.id,
+                                activeTemplateCss: selectedTemplate.css
                             });
+                        } else if (hasValidActiveTemplate) {
+                            // Ensure activeTemplateCss is set when restoring a valid activeTemplateId
+                            const activeTemplate = templates.find(t => t.id === state.activeTemplateId);
+                            if (activeTemplate && state.activeTemplateCss !== activeTemplate.css) {
+                                set({
+                                    activeTemplateCss: activeTemplate.css
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Failed to fetch templates:', error);
@@ -509,6 +517,27 @@ export const useStore = create<AppState>()(
 
                 renameItem: async (oldPath: string, newPath: string) => {
                     try {
+                        // If renaming a template file, update the template JSON's name and id
+                        if (oldPath.startsWith('Templates/') && (oldPath.endsWith('.mdt') || oldPath.endsWith('.json'))) {
+                            try {
+                                const content = await browserStorage.readFile(oldPath);
+                                const template = JSON.parse(content);
+                                
+                                // Extract filename without extension for the name
+                                const newFileName = newPath.split('/').pop() || newPath;
+                                const nameWithoutExt = newFileName.replace(/\.(mdt|json)$/, '');
+                                
+                                // Update template name and id
+                                template.name = nameWithoutExt;
+                                template.id = newPath;
+                                
+                                // Write updated template content before renaming
+                                await browserStorage.writeFile(oldPath, JSON.stringify(template, null, 2));
+                            } catch (err) {
+                                console.error('Failed to update template JSON during rename:', err);
+                            }
+                        }
+                        
                         await browserStorage.rename(oldPath, newPath);
                         await get().fetchFileTree();
                         if (newPath.startsWith('Templates/') || oldPath.startsWith('Templates/')) {
