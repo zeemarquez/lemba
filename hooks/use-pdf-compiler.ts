@@ -43,6 +43,13 @@ export interface TemplateSettings {
     textColor?: string;
     backgroundColor?: string;
     pageLayout?: 'vertical' | 'horizontal';
+    pageSize?: {
+        preset?: string; // e.g., 'a4', 'letter', 'a3', etc.
+        custom?: {
+            width: string; // e.g., '210mm'
+            height: string; // e.g., '297mm'
+        };
+    };
     margins?: { top: string; bottom: string; left: string; right: string };
     startPageNumber?: number;
     h1?: HeadingSettings;

@@ -1,6 +1,6 @@
 {
     "name":  "modern-markdown-editor",
-    "version":  "0.1.5",
+    "version":  "0.1.6",
     "private":  true,
     "description":  "A modern markdown editor with PDF export capabilities",
     "author":  "zeemarquez",

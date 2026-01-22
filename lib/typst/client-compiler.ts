@@ -34,6 +34,13 @@ export interface TypstOptions {
     footerStartPage?: number;
     frontPage?: string;
     pageLayout?: 'portrait' | 'horizontal' | 'vertical';
+    pageSize?: {
+        preset?: string; // e.g., 'a4', 'letter', 'a3', etc.
+        custom?: {
+            width: string; // e.g., '210mm'
+            height: string; // e.g., '297mm'
+        };
+    };
     backgroundColor?: string;
     textColor?: string;
     h1?: HeadingOptions;
@@ -748,6 +755,21 @@ export function generatePreamble(options: TypstOptions): string {
 
     const isFlipped = pageLayout === 'horizontal';
 
+    // Handle page size - support both preset and custom sizes
+    let pageSizeConfig = '';
+    if (options.pageSize?.custom) {
+        // Custom size: use width and height
+        const customWidth = fixTypstUnit(options.pageSize.custom.width || '210mm');
+        const customHeight = fixTypstUnit(options.pageSize.custom.height || '297mm');
+        pageSizeConfig = `width: ${customWidth}, height: ${customHeight}`;
+    } else if (options.pageSize?.preset) {
+        // Preset size: use paper parameter
+        pageSizeConfig = `paper: "${options.pageSize.preset}"`;
+    } else {
+        // Default to A4
+        pageSizeConfig = `paper: "a4"`;
+    }
+
     const typstMargins = {
         top: fixTypstUnit(margins?.top || '2cm'),
         bottom: fixTypstUnit(margins?.bottom || '2cm'),
@@ -899,7 +921,7 @@ export function generatePreamble(options: TypstOptions): string {
 
     return `
 #set page(
-  paper: "a4",
+  ${pageSizeConfig},
   flipped: ${isFlipped},
   margin: (
     top: ${typstMargins.top}, 

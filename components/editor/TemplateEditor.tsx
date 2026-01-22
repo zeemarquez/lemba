@@ -27,6 +27,22 @@ const FONT_FAMILIES = [
     { label: 'New Computer Modern (Academic)', value: "'New Computer Modern', serif", category: 'Serif' },
 ];
 
+// Common page sizes supported by Typst
+const PAGE_SIZES = [
+    { label: 'A4', value: 'a4', dimensions: '210 × 297 mm' },
+    { label: 'A3', value: 'a3', dimensions: '297 × 420 mm' },
+    { label: 'A2', value: 'a2', dimensions: '420 × 594 mm' },
+    { label: 'A1', value: 'a1', dimensions: '594 × 841 mm' },
+    { label: 'A0', value: 'a0', dimensions: '841 × 1189 mm' },
+    { label: 'A5', value: 'a5', dimensions: '148 × 210 mm' },
+    { label: 'A6', value: 'a6', dimensions: '105 × 148 mm' },
+    { label: 'Letter', value: 'us-letter', dimensions: '8.5 × 11 in' },
+    { label: 'Legal', value: 'us-legal', dimensions: '8.5 × 14 in' },
+    { label: 'Tabloid', value: 'us-tabloid', dimensions: '11 × 17 in' },
+    { label: 'B4', value: 'b4', dimensions: '250 × 353 mm' },
+    { label: 'B5', value: 'b5', dimensions: '176 × 250 mm' },
+];
+
 export function TemplateEditor() {
     const { activeTemplateId, templates, updateTemplate, setActiveTemplateCss, closeTab, customFonts } = useStore();
     const template = templates.find(t => t.id === activeTemplateId);
@@ -93,20 +109,20 @@ export function TemplateEditor() {
 
     // Section definitions for the index
     const sections = useMemo(() => [
-        { id: 'variables', label: 'Variables', icon: Variable },
+        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
-        { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
         { id: 'figures', label: 'Figures', icon: ImageIcon },
-        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'tables', label: 'Tables', icon: TableIcon },
-        { id: 'outline', label: 'Index', icon: List },
+        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'front-page', label: 'Front Page', icon: FileText },
+        { id: 'outline', label: 'Index', icon: List },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
+        { id: 'variables', label: 'Variables', icon: Variable },
     ], []);
 
-    const [activeSection, setActiveSection] = useState('variables');
+    const [activeSection, setActiveSection] = useState('page-settings');
 
     const scrollToSection = (sectionId: string) => {
         const element = document.getElementById(`section-${sectionId}`);
@@ -404,62 +420,209 @@ export function TemplateEditor() {
             <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-8 w-full space-y-12 pb-24">
 
-                    {/* Variables Section */}
-                    <section id="section-variables" className="space-y-8 scroll-mt-16">
+                    {/* Page Settings Section */}
+                    <section id="section-page-settings" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <Variable size={22} className="text-foreground" />
+                                <LayoutTemplate size={22} className="text-foreground" />
                             </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Variables</h2>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Page settings</h2>
                         </div>
 
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
-                            <p className="text-sm text-muted-foreground">
-                                Define document variables that can be inserted into headers and footers. Variable values are set per-document when exporting.
-                            </p>
-                            
-                            <div className="space-y-3">
-                                {(settings.variables || []).map((variable: TemplateVariable, index: number) => (
-                                    <div key={variable.id} className="flex items-center gap-3">
-                                        <Input
-                                            type="text"
-                                            placeholder="Variable name"
-                                            className="flex-1 bg-muted/50 border border-border rounded-xl px-4 py-3 text-sm"
-                                            value={variable.name}
-                                            onChange={(e) => {
-                                                const newVariables = [...(settings.variables || [])];
-                                                newVariables[index] = { ...variable, name: e.target.value };
-                                                updateSetting('variables', newVariables);
-                                            }}
-                                        />
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-10 w-10 text-muted-foreground hover:text-destructive"
-                                            onClick={() => {
-                                                const newVariables = (settings.variables || []).filter((_: TemplateVariable, i: number) => i !== index);
-                                                updateSetting('variables', newVariables);
-                                            }}
-                                        >
-                                            <Trash2 size={16} />
-                                        </Button>
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
+                            {/* Layout Selection and Page Size */}
+                            <div className="grid grid-cols-2 gap-8">
+                                {/* Page Orientation */}
+                                <div className="space-y-5">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Orientation</label>
+                                    <div className="flex gap-6">
+                                        {[
+                                            { id: 'vertical', label: 'Portrait', icon: Maximize },
+                                            { id: 'horizontal', label: 'Landscape', icon: Maximize }
+                                        ].map((layout) => (
+                                            <button
+                                                key={layout.id}
+                                                onClick={() => updateSetting('pageLayout', layout.id)}
+                                                className={cn(
+                                                    "w-40 flex flex-col items-center gap-3 p-5 rounded-[1.5rem] border-2 transition-all duration-300",
+                                                    settings.pageLayout === layout.id
+                                                        ? "border-primary bg-primary text-primary-foreground shadow-lg scale-[1.02]"
+                                                        : "border-border bg-muted/50 text-muted-foreground hover:border-border hover:bg-muted"
+                                                )}
+                                            >
+                                                <div className={cn(
+                                                    "w-8 h-10 border-2 rounded-sm flex items-center justify-center transition-colors",
+                                                    settings.pageLayout === layout.id ? "border-primary-foreground/40" : "border-border",
+                                                    layout.id === 'horizontal' && "rotate-90"
+                                                )}>
+                                                    <div className={cn("w-0.5 h-0.5 rounded-full", settings.pageLayout === layout.id ? "bg-primary-foreground/20" : "bg-border")} />
+                                                </div>
+                                                <span className="text-[9px] font-black uppercase tracking-[0.2em]">{layout.label}</span>
+                                            </button>
+                                        ))}
                                     </div>
-                                ))}
-                                
-                                <Button
-                                    variant="outline"
-                                    className="w-full rounded-xl border-dashed"
-                                    onClick={() => {
-                                        const newVariable: TemplateVariable = {
-                                            id: `var-${Date.now()}`,
-                                            name: ''
-                                        };
-                                        updateSetting('variables', [...(settings.variables || []), newVariable]);
-                                    }}
-                                >
-                                    <Plus size={16} className="mr-2" />
-                                    Add Variable
-                                </Button>
+                                </div>
+
+                                {/* Page Size */}
+                                <div className="space-y-5">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Size</label>
+                                    <div className="space-y-4">
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button className="w-full flex items-center justify-between bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-bold text-foreground hover:bg-muted transition-all outline-none focus:ring-4 focus:ring-primary/5 focus:border-border">
+                                                <span>
+                                                    {settings.pageSize?.preset 
+                                                        ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
+                                                        : settings.pageSize?.custom 
+                                                        ? `Custom (${settings.pageSize.custom.width} × ${settings.pageSize.custom.height})`
+                                                        : 'A4'}
+                                                </span>
+                                                <ChevronDown className="w-4 h-4 opacity-50" />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto">
+                                            {PAGE_SIZES.map((size) => (
+                                                <DropdownMenuItem
+                                                    key={size.value}
+                                                    className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground"
+                                                    onSelect={() => updateSetting('pageSize', { preset: size.value })}
+                                                >
+                                                    <div className="flex flex-col">
+                                                        <span className="font-semibold">{size.label}</span>
+                                                        <span className="text-xs text-muted-foreground">{size.dimensions}</span>
+                                                    </div>
+                                                </DropdownMenuItem>
+                                            ))}
+                                            <DropdownMenuItem
+                                                className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground border-t border-border mt-1"
+                                                onSelect={() => updateSetting('pageSize', { 
+                                                    custom: { 
+                                                        width: settings.pageSize?.custom?.width || '210mm', 
+                                                        height: settings.pageSize?.custom?.height || '297mm' 
+                                                    } 
+                                                })}
+                                            >
+                                                <span className="font-semibold">Custom</span>
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                    
+                                    {/* Custom Size Inputs */}
+                                    {settings.pageSize?.custom && (
+                                        <div className="grid grid-cols-2 gap-4 p-4 bg-muted/30 border border-border rounded-2xl">
+                                            <div className="space-y-2">
+                                                <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Width</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                    value={settings.pageSize.custom.width}
+                                                    onChange={(e) => {
+                                                        const width = e.target.value;
+                                                        updateSetting('pageSize', {
+                                                            custom: {
+                                                                width,
+                                                                height: settings.pageSize?.custom?.height || '297mm'
+                                                            }
+                                                        });
+                                                    }}
+                                                    placeholder="210mm"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Height</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                    value={settings.pageSize.custom.height}
+                                                    onChange={(e) => {
+                                                        const height = e.target.value;
+                                                        updateSetting('pageSize', {
+                                                            custom: {
+                                                                width: settings.pageSize?.custom?.width || '210mm',
+                                                                height
+                                                            }
+                                                        });
+                                                    }}
+                                                    placeholder="297mm"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Margins */}
+                            <div className="space-y-5">
+                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
+                                <div className="grid grid-cols-4 gap-6">
+                                    {[
+                                        { label: 'Top', path: 'margins.top' },
+                                        { label: 'Bottom', path: 'margins.bottom' },
+                                        { label: 'Left', path: 'margins.left' },
+                                        { label: 'Right', path: 'margins.right' }
+                                    ].map((m) => (
+                                        <div key={m.path} className="space-y-3">
+                                            <span className="text-[9px] font-bold text-muted-foreground uppercase ml-2">{m.label}</span>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-muted/50 border border-border rounded-2xl px-4 py-4 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                                value={(settings.margins as any)[m.label.toLowerCase()].replace('mm', '')}
+                                                onChange={(e) => {
+                                                    const val = e.target.value.replace(/[^0-9]/g, '');
+                                                    updateSetting(m.path, val ? `${val}mm` : '0mm');
+                                                }}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Background & Watermark */}
+                            <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border">
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
+                                    <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                        <div className="h-12 w-12 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" style={{ backgroundColor: settings.backgroundColor }}>
+                                            <input
+                                                type="color"
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                value={settings.backgroundColor}
+                                                onChange={(e) => updateSetting('backgroundColor', e.target.value)}
+                                            />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className="flex-1 bg-transparent border-none text-sm font-bold text-foreground outline-none uppercase tracking-wider"
+                                            value={settings.backgroundColor}
+                                            onChange={(e) => updateSetting('backgroundColor', e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Watermark Text</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-[1.125rem] text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                        value={settings.watermark || ''}
+                                        onChange={(e) => updateSetting('watermark', e.target.value)}
+                                        placeholder="None"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Start Page Number */}
+                            <div className="pt-4 border-t border-border">
+                                <div className="space-y-3 max-w-xs">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Start Page Number</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-4 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
+                                        value={settings.startPageNumber || 1}
+                                        onChange={(e) => updateSetting('startPageNumber', Math.max(1, parseInt(e.target.value) || 1))}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -778,122 +941,6 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
-                    {/* Page Settings Section */}
-                    <section id="section-page-settings" className="space-y-8 scroll-mt-16">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <LayoutTemplate size={22} className="text-foreground" />
-                            </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Page settings</h2>
-                        </div>
-
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
-                            {/* Layout Selection */}
-                            <div className="space-y-5">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Orientation</label>
-                                <div className="flex gap-6">
-                                    {[
-                                        { id: 'vertical', label: 'Portrait', icon: Maximize },
-                                        { id: 'horizontal', label: 'Landscape', icon: Maximize }
-                                    ].map((layout) => (
-                                        <button
-                                            key={layout.id}
-                                            onClick={() => updateSetting('pageLayout', layout.id)}
-                                            className={cn(
-                                                "w-40 flex flex-col items-center gap-3 p-5 rounded-[1.5rem] border-2 transition-all duration-300",
-                                                settings.pageLayout === layout.id
-                                                    ? "border-primary bg-primary text-primary-foreground shadow-lg scale-[1.02]"
-                                                    : "border-border bg-muted/50 text-muted-foreground hover:border-border hover:bg-muted"
-                                            )}
-                                        >
-                                            <div className={cn(
-                                                "w-8 h-10 border-2 rounded-sm flex items-center justify-center transition-colors",
-                                                settings.pageLayout === layout.id ? "border-primary-foreground/40" : "border-border",
-                                                layout.id === 'horizontal' && "rotate-90"
-                                            )}>
-                                                <div className={cn("w-0.5 h-0.5 rounded-full", settings.pageLayout === layout.id ? "bg-primary-foreground/20" : "bg-border")} />
-                                            </div>
-                                            <span className="text-[9px] font-black uppercase tracking-[0.2em]">{layout.label}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Margins */}
-                            <div className="space-y-5">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Margins (mm)</label>
-                                <div className="grid grid-cols-4 gap-6">
-                                    {[
-                                        { label: 'Top', path: 'margins.top' },
-                                        { label: 'Bottom', path: 'margins.bottom' },
-                                        { label: 'Left', path: 'margins.left' },
-                                        { label: 'Right', path: 'margins.right' }
-                                    ].map((m) => (
-                                        <div key={m.path} className="space-y-3">
-                                            <span className="text-[9px] font-bold text-muted-foreground uppercase ml-2">{m.label}</span>
-                                            <input
-                                                type="text"
-                                                className="w-full bg-muted/50 border border-border rounded-2xl px-4 py-4 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
-                                                value={(settings.margins as any)[m.label.toLowerCase()].replace('mm', '')}
-                                                onChange={(e) => {
-                                                    const val = e.target.value.replace(/[^0-9]/g, '');
-                                                    updateSetting(m.path, val ? `${val}mm` : '0mm');
-                                                }}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Background & Watermark */}
-                            <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border">
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                    <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                        <div className="h-12 w-12 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" style={{ backgroundColor: settings.backgroundColor }}>
-                                            <input
-                                                type="color"
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                value={settings.backgroundColor}
-                                                onChange={(e) => updateSetting('backgroundColor', e.target.value)}
-                                            />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            className="flex-1 bg-transparent border-none text-sm font-bold text-foreground outline-none uppercase tracking-wider"
-                                            value={settings.backgroundColor}
-                                            onChange={(e) => updateSetting('backgroundColor', e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Watermark Text</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-[1.125rem] text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
-                                        value={settings.watermark || ''}
-                                        onChange={(e) => updateSetting('watermark', e.target.value)}
-                                        placeholder="None"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Start Page Number */}
-                            <div className="pt-4 border-t border-border">
-                                <div className="space-y-3 max-w-xs">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Start Page Number</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-4 text-sm font-bold text-foreground focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none text-center"
-                                        value={settings.startPageNumber || 1}
-                                        onChange={(e) => updateSetting('startPageNumber', Math.max(1, parseInt(e.target.value) || 1))}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
                     {/* Figures Section */}
                     <section id="section-figures" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -1083,289 +1130,6 @@ export function TemplateEditor() {
                                             <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">mm</span>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Code Blocks Section */}
-                    <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <CodeIcon size={22} className="text-foreground" />
-                            </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Code Blocks</h2>
-                        </div>
-
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
-                            {/* Theme Preset Dropdown */}
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div 
-                                                    className="w-5 h-5 rounded border border-border"
-                                                    style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
-                                                />
-                                                <span>{(() => {
-                                                    const bg = settings.codeBlocks?.backgroundColor || '#f6f8fa';
-                                                    const presets: Record<string, string> = {
-                                                        '#f6f8fa': 'GitHub Light',
-                                                        '#fafafa': 'One Light',
-                                                        '#fdf6e3': 'Solarized Light',
-                                                        '#f5f5f5': 'Light Gray',
-                                                        '#fffffe': 'Nord Light',
-                                                        '#1e1e1e': 'VS Code Dark',
-                                                        '#282c34': 'One Dark',
-                                                        '#282a36': 'Dracula',
-                                                        '#24292e': 'GitHub Dark',
-                                                        '#272822': 'Monokai',
-                                                        '#002b36': 'Solarized Dark',
-                                                    };
-                                                    return presets[bg] || 'Custom';
-                                                })()}</span>
-                                            </div>
-                                            <ChevronDown size={16} className="text-muted-foreground" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[200px]">
-                                        {/* Light Themes */}
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#f6f8fa');
-                                            updateSetting('codeBlocks.borderColor', '#d0d7de');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f6f8fa' }} />
-                                                <span>GitHub Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fafafa');
-                                            updateSetting('codeBlocks.borderColor', '#e5e5e5');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fafafa' }} />
-                                                <span>One Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fdf6e3');
-                                            updateSetting('codeBlocks.borderColor', '#eee8d5');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fdf6e3' }} />
-                                                <span>Solarized Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#f5f5f5');
-                                            updateSetting('codeBlocks.borderColor', '#e0e0e0');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f5f5f5' }} />
-                                                <span>Light Gray</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fffffe');
-                                            updateSetting('codeBlocks.borderColor', '#e5e9f0');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fffffe' }} />
-                                                <span>Nord Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        {/* Dark Themes */}
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#1e1e1e');
-                                            updateSetting('codeBlocks.borderColor', '#3c3c3c');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#1e1e1e' }} />
-                                                <span>VS Code Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#282c34');
-                                            updateSetting('codeBlocks.borderColor', '#3e4451');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282c34' }} />
-                                                <span>One Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#282a36');
-                                            updateSetting('codeBlocks.borderColor', '#44475a');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282a36' }} />
-                                                <span>Dracula</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#24292e');
-                                            updateSetting('codeBlocks.borderColor', '#444d56');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#24292e' }} />
-                                                <span>GitHub Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#272822');
-                                            updateSetting('codeBlocks.borderColor', '#3e3d32');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#272822' }} />
-                                                <span>Monokai</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#002b36');
-                                            updateSetting('codeBlocks.borderColor', '#073642');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#002b36' }} />
-                                                <span>Solarized Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            </div>
-
-                            {/* Show Language Toggle */}
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <label className="text-base font-semibold text-foreground">Show language</label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Display a language identifier tab in the top-right corner
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => updateSetting('codeBlocks.showLanguage', !settings.codeBlocks?.showLanguage)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
-                                        settings.codeBlocks?.showLanguage ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.codeBlocks?.showLanguage ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-
-                            {/* Show Line Numbers Toggle */}
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <label className="text-base font-semibold text-foreground">Show line numbers</label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Display line numbers on the left side of code blocks
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => updateSetting('codeBlocks.showLineNumbers', settings.codeBlocks?.showLineNumbers === false ? true : false)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
-                                        settings.codeBlocks?.showLineNumbers !== false ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.codeBlocks?.showLineNumbers !== false ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-
-                            {/* Background and Border Colors */}
-                            <div className="pt-6 border-t border-border space-y-6">
-                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Appearance</h3>
-
-                                <div className="grid grid-cols-2 gap-6">
-                                    {/* Background Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
-                                                style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.codeBlocks?.backgroundColor || '#f6f8fa'}
-                                                    onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.codeBlocks?.backgroundColor || ''}
-                                                onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.codeBlocks?.backgroundColor && (
-                                                <button
-                                                    onClick={() => updateSetting('codeBlocks.backgroundColor', '')}
-                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Border Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Color</label>
-                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
-                                                style={{ backgroundColor: settings.codeBlocks?.borderColor || '#e0e0e0' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.codeBlocks?.borderColor || '#e0e0e0'}
-                                                    onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.codeBlocks?.borderColor || ''}
-                                                onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.codeBlocks?.borderColor && (
-                                                <button
-                                                    onClick={() => updateSetting('codeBlocks.borderColor', '')}
-                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Border Width */}
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Width</label>
-                                    <select
-                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
-                                        value={settings.codeBlocks?.borderWidth || '1'}
-                                        onChange={(e) => updateSetting('codeBlocks.borderWidth', e.target.value)}
-                                    >
-                                        <option value="0">None</option>
-                                        <option value="0.5">0.5pt</option>
-                                        <option value="1">1pt</option>
-                                        <option value="1.5">1.5pt</option>
-                                        <option value="2">2pt</option>
-                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -1864,6 +1628,346 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Code Blocks Section */}
+                    <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <CodeIcon size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Code Blocks</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Theme Preset Dropdown */}
+                            <div className="space-y-3">
+                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div 
+                                                    className="w-5 h-5 rounded border border-border"
+                                                    style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
+                                                />
+                                                <span>{(() => {
+                                                    const bg = settings.codeBlocks?.backgroundColor || '#f6f8fa';
+                                                    const presets: Record<string, string> = {
+                                                        '#f6f8fa': 'GitHub Light',
+                                                        '#fafafa': 'One Light',
+                                                        '#fdf6e3': 'Solarized Light',
+                                                        '#f5f5f5': 'Light Gray',
+                                                        '#fffffe': 'Nord Light',
+                                                        '#1e1e1e': 'VS Code Dark',
+                                                        '#282c34': 'One Dark',
+                                                        '#282a36': 'Dracula',
+                                                        '#24292e': 'GitHub Dark',
+                                                        '#272822': 'Monokai',
+                                                        '#002b36': 'Solarized Dark',
+                                                    };
+                                                    return presets[bg] || 'Custom';
+                                                })()}</span>
+                                            </div>
+                                            <ChevronDown size={16} className="text-muted-foreground" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[200px]">
+                                        {/* Light Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f6f8fa');
+                                            updateSetting('codeBlocks.borderColor', '#d0d7de');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f6f8fa' }} />
+                                                <span>GitHub Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fafafa');
+                                            updateSetting('codeBlocks.borderColor', '#e5e5e5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fafafa' }} />
+                                                <span>One Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fdf6e3');
+                                            updateSetting('codeBlocks.borderColor', '#eee8d5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fdf6e3' }} />
+                                                <span>Solarized Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f5f5f5');
+                                            updateSetting('codeBlocks.borderColor', '#e0e0e0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f5f5f5' }} />
+                                                <span>Light Gray</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fffffe');
+                                            updateSetting('codeBlocks.borderColor', '#e5e9f0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fffffe' }} />
+                                                <span>Nord Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        {/* Dark Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#1e1e1e');
+                                            updateSetting('codeBlocks.borderColor', '#3c3c3c');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#1e1e1e' }} />
+                                                <span>VS Code Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282c34');
+                                            updateSetting('codeBlocks.borderColor', '#3e4451');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282c34' }} />
+                                                <span>One Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282a36');
+                                            updateSetting('codeBlocks.borderColor', '#44475a');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282a36' }} />
+                                                <span>Dracula</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#24292e');
+                                            updateSetting('codeBlocks.borderColor', '#444d56');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#24292e' }} />
+                                                <span>GitHub Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#272822');
+                                            updateSetting('codeBlocks.borderColor', '#3e3d32');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#272822' }} />
+                                                <span>Monokai</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#002b36');
+                                            updateSetting('codeBlocks.borderColor', '#073642');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#002b36' }} />
+                                                <span>Solarized Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
+
+                            {/* Show Language Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show language</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display a language identifier tab in the top-right corner
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLanguage', !settings.codeBlocks?.showLanguage)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLanguage ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLanguage ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Show Line Numbers Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show line numbers</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display line numbers on the left side of code blocks
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLineNumbers', settings.codeBlocks?.showLineNumbers === false ? true : false)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Background and Border Colors */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Appearance</h3>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Background Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
+                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.codeBlocks?.backgroundColor || '#f6f8fa'}
+                                                    onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.codeBlocks?.backgroundColor || ''}
+                                                onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.codeBlocks?.backgroundColor && (
+                                                <button
+                                                    onClick={() => updateSetting('codeBlocks.backgroundColor', '')}
+                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Border Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Color</label>
+                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.codeBlocks?.borderColor || '#e0e0e0' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.codeBlocks?.borderColor || '#e0e0e0'}
+                                                    onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.codeBlocks?.borderColor || ''}
+                                                onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.codeBlocks?.borderColor && (
+                                                <button
+                                                    onClick={() => updateSetting('codeBlocks.borderColor', '')}
+                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Border Width */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Width</label>
+                                    <select
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
+                                        value={settings.codeBlocks?.borderWidth || '1'}
+                                        onChange={(e) => updateSetting('codeBlocks.borderWidth', e.target.value)}
+                                    >
+                                        <option value="0">None</option>
+                                        <option value="0.5">0.5pt</option>
+                                        <option value="1">1pt</option>
+                                        <option value="1.5">1.5pt</option>
+                                        <option value="2">2pt</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Front Page Section */}
+                    <section id="section-front-page" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <FileText size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Front Page</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Enable Toggle */}
+                            <div className="flex items-center gap-6">
+                                <label className="text-base font-semibold text-foreground">Enable front page</label>
+                                <button
+                                    onClick={() => updateSetting('frontPage.enabled', !settings.frontPage?.enabled)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative",
+                                        settings.frontPage?.enabled ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.frontPage?.enabled ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {settings.frontPage?.enabled && (
+                                <>
+                                    <p className="text-sm text-muted-foreground">
+                                        The front page will be inserted as the first page of your document, before the main content.
+                                    </p>
+
+                                    {/* Plate Editor for Front Page Content */}
+                                    <HeaderFooterPlateEditor
+                                        content={settings.frontPage?.content || ''}
+                                        onChange={(value) => updateSetting('frontPage.content', value)}
+                                        placeholder="Design your front page..."
+                                        variant="large"
+                                    />
+
+                                    {/* Empty Pages After */}
+                                    <div className="flex items-center gap-4 pt-4 border-t border-border">
+                                        <label className="text-sm font-medium text-foreground">Empty pages after</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={settings.frontPage?.emptyPagesAfter || 0}
+                                            onChange={(e) => updateSetting('frontPage.emptyPagesAfter', Math.max(0, parseInt(e.target.value) || 0))}
+                                            className="w-20 px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </section>
+
                     {/* Index/Outline Section */}
                     <section id="section-outline" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -1998,63 +2102,6 @@ export function TemplateEditor() {
                                             min="0"
                                             value={settings.outline?.emptyPagesAfter || 0}
                                             onChange={(e) => updateSetting('outline.emptyPagesAfter', Math.max(0, parseInt(e.target.value) || 0))}
-                                            className="w-20 px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                                        />
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </section>
-
-                    {/* Front Page Section */}
-                    <section id="section-front-page" className="space-y-8 scroll-mt-16">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <FileText size={22} className="text-foreground" />
-                            </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Front Page</h2>
-                        </div>
-
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
-                            {/* Enable Toggle */}
-                            <div className="flex items-center gap-6">
-                                <label className="text-base font-semibold text-foreground">Enable front page</label>
-                                <button
-                                    onClick={() => updateSetting('frontPage.enabled', !settings.frontPage?.enabled)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative",
-                                        settings.frontPage?.enabled ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.frontPage?.enabled ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-
-                            {settings.frontPage?.enabled && (
-                                <>
-                                    <p className="text-sm text-muted-foreground">
-                                        The front page will be inserted as the first page of your document, before the main content.
-                                    </p>
-
-                                    {/* Plate Editor for Front Page Content */}
-                                    <HeaderFooterPlateEditor
-                                        content={settings.frontPage?.content || ''}
-                                        onChange={(value) => updateSetting('frontPage.content', value)}
-                                        placeholder="Design your front page..."
-                                        variant="large"
-                                    />
-
-                                    {/* Empty Pages After */}
-                                    <div className="flex items-center gap-4 pt-4 border-t border-border">
-                                        <label className="text-sm font-medium text-foreground">Empty pages after</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            value={settings.frontPage?.emptyPagesAfter || 0}
-                                            onChange={(e) => updateSetting('frontPage.emptyPagesAfter', Math.max(0, parseInt(e.target.value) || 0))}
                                             className="w-20 px-3 py-2 text-sm border border-input rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                                         />
                                     </div>
@@ -2220,6 +2267,66 @@ export function TemplateEditor() {
                                     </div>
                                 </>
                             )}
+                        </div>
+                    </section>
+
+                    {/* Variables Section */}
+                    <section id="section-variables" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <Variable size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Variables</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            <p className="text-sm text-muted-foreground">
+                                Define document variables that can be inserted into headers and footers. Variable values are set per-document when exporting.
+                            </p>
+                            
+                            <div className="space-y-3">
+                                {(settings.variables || []).map((variable: TemplateVariable, index: number) => (
+                                    <div key={variable.id} className="flex items-center gap-3">
+                                        <Input
+                                            type="text"
+                                            placeholder="Variable name"
+                                            className="flex-1 bg-muted/50 border border-border rounded-xl px-4 py-3 text-sm"
+                                            value={variable.name}
+                                            onChange={(e) => {
+                                                const newVariables = [...(settings.variables || [])];
+                                                newVariables[index] = { ...variable, name: e.target.value };
+                                                updateSetting('variables', newVariables);
+                                            }}
+                                        />
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                                            onClick={() => {
+                                                const newVariables = (settings.variables || []).filter((_: TemplateVariable, i: number) => i !== index);
+                                                updateSetting('variables', newVariables);
+                                            }}
+                                        >
+                                            <Trash2 size={16} />
+                                        </Button>
+                                    </div>
+                                ))}
+                                
+                                <Button
+                                    variant="outline"
+                                    className="w-full rounded-xl border-dashed"
+                                    onClick={() => {
+                                        const newVariable: TemplateVariable = {
+                                            id: `var-${Date.now()}`,
+                                            name: ''
+                                        };
+                                        updateSetting('variables', [...(settings.variables || []), newVariable]);
+                                    }}
+                                >
+                                    <Plus size={16} className="mr-2" />
+                                    Add Variable
+                                </Button>
+                            </div>
                         </div>
                     </section>
                 </div>

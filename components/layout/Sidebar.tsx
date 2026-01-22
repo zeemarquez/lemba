@@ -149,6 +149,7 @@ export function Sidebar() {
                         textColor: '#000000',
                         backgroundColor: '#ffffff',
                         pageLayout: 'vertical',
+                        pageSize: { preset: 'a4' },
                         margins: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' },
                         h1: { fontSize: '40px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '700', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
                         h2: { fontSize: '32px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '600', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },

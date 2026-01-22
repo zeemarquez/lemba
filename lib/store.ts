@@ -50,6 +50,13 @@ export interface Template {
         textColor: string;
         backgroundColor: string;
         pageLayout: 'vertical' | 'horizontal';
+        pageSize?: {
+            preset?: string; // e.g., 'a4', 'letter', 'a3', etc.
+            custom?: {
+                width: string; // e.g., '210mm'
+                height: string; // e.g., '297mm'
+            };
+        };
         margins: {
             top: string;
             bottom: string;
@@ -253,6 +260,7 @@ const DEFAULT_TEMPLATE: Template = {
         textColor: '#000000',
         backgroundColor: '#ffffff',
         pageLayout: 'vertical',
+        pageSize: { preset: 'a4' },
         margins: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' },
         startPageNumber: 1,
         h1: { fontSize: '40px', color: '#000000', textAlign: 'left', borderBottom: false, textTransform: 'none', fontWeight: '700', fontStyle: 'normal', textDecoration: 'none', numbering: { enabled: false, style: 'decimal', separator: '.', prefix: '', suffix: '.' } },
