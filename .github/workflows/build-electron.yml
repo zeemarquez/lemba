@@ -40,7 +40,7 @@ jobs:
         run: npm run build
 
       - name: Build Electron app (macOS)
-        run: npx electron-builder --mac
+        run: npx electron-builder --mac --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -93,24 +93,54 @@ jobs:
           echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Tag name: $TAG_NAME"
 
-      - name: Create GitHub Release in Public Repo
-        uses: softprops/action-gh-release@v2
+      - name: Verify PUBLIC_REPO_TOKEN exists
+        run: |
+          if [ -z "$PUBLIC_REPO_TOKEN" ]; then
+            echo "::error::PUBLIC_REPO_TOKEN secret is not set!"
+            echo "Please add a Personal Access Token with repo access to the public repository."
+            echo "Go to: Settings > Secrets and variables > Actions > New repository secret"
+            echo "Name: PUBLIC_REPO_TOKEN"
+            echo "Value: Your GitHub Personal Access Token with 'repo' scope"
+            exit 1
+          else
+            TOKEN_LENGTH=${#PUBLIC_REPO_TOKEN}
+            echo "✓ PUBLIC_REPO_TOKEN is set (length: $TOKEN_LENGTH characters)"
+            echo "✓ Target repository: zeemarquez/modern-markdown-landing-page"
+            echo "✓ Tag to create: ${{ steps.tag.outputs.tag }}"
+            echo "✓ Current repository context: ${{ github.repository }}"
+          fi
+        env:
+          PUBLIC_REPO_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+
+      - name: Setup GitHub CLI
+        uses: cli/cli-action@v1
         with:
-          repo: zeemarquez/modern-markdown-landing-page
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Release ${{ steps.tag.outputs.tag }}
-          files: artifacts/*
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          body: |
-            ## Modern Markdown Editor ${{ steps.tag.outputs.tag }}
-            
-            This release contains the macOS build artifacts for Modern Markdown Editor.
-            
-            **Note:** Windows builds are available separately and should be uploaded manually to this release.
-            
-            ### Downloads
-            - macOS DMG and ZIP files are attached below
-          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          version: latest
+
+      - name: Create GitHub Release in Public Repo
+        run: |
+          # Determine if this is a prerelease
+          if [[ "${{ github.ref }}" == *"alpha"* ]] || [[ "${{ github.ref }}" == *"beta"* ]] || [[ "${{ github.ref }}" == *"rc"* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          else
+            PRERELEASE_FLAG=""
+          fi
+          
+          # Create release in public repository
+          gh release create ${{ steps.tag.outputs.tag }} \
+            --repo zeemarquez/modern-markdown-landing-page \
+            --title "Release ${{ steps.tag.outputs.tag }}" \
+            --notes "## Modern Markdown Editor ${{ steps.tag.outputs.tag }}
+          
+          This release contains the macOS build artifacts for Modern Markdown Editor.
+          
+          **Note:** Windows builds are available separately and should be uploaded manually to this release.
+          
+          ### Downloads
+          - macOS DMG and ZIP files are attached below" \
+            $PRERELEASE_FLAG \
+            artifacts/* \
+            --generate-notes=false
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        continue-on-error: false

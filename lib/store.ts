@@ -292,6 +292,162 @@ const DEFAULT_TEMPLATE: Template = {
 export const useStore = create<AppState>()(
     persist(
         (set, get) => {
+            // Set up cross-window synchronization
+            if (typeof window !== 'undefined') {
+                // Listen for storage events (localStorage changes from other windows)
+                const handleStorageChange = async (e: StorageEvent) => {
+                    if (e.key === 'markdown-editor-storage' && e.newValue) {
+                        try {
+                            const newState = JSON.parse(e.newValue);
+                            const currentState = get();
+                            
+                            // Update persisted state fields
+                            const updates: Partial<AppState> = {};
+                            
+                            if (newState.state.activeFileId !== currentState.activeFileId) {
+                                updates.activeFileId = newState.state.activeFileId;
+                                // If file changed and we don't have it loaded, load it
+                                if (newState.state.activeFileId && !currentState.files.find(f => f.id === newState.state.activeFileId)) {
+                                    try {
+                                        // First check if there's a synced version in localStorage
+                                        let content: string;
+                                        const fileSyncKey = localStorage.getItem('markdown-editor-file-sync');
+                                        if (fileSyncKey) {
+                                            const syncData = JSON.parse(fileSyncKey);
+                                            if (syncData.fileId === newState.state.activeFileId && syncData.content) {
+                                                content = syncData.content;
+                                            } else {
+                                                content = await browserStorage.readFile(newState.state.activeFileId);
+                                            }
+                                        } else {
+                                            content = await browserStorage.readFile(newState.state.activeFileId);
+                                        }
+                                        
+                                        const newFile: AppStateFile = {
+                                            id: newState.state.activeFileId,
+                                            name: newState.state.activeFileId.split('/').pop() || newState.state.activeFileId,
+                                            content,
+                                            language: 'markdown'
+                                        };
+                                        updates.files = [...currentState.files, newFile];
+                                    } catch (error) {
+                                        console.error('Failed to load file on sync:', error);
+                                    }
+                                }
+                            }
+                            
+                            if (newState.state.activeTemplateId !== currentState.activeTemplateId) {
+                                updates.activeTemplateId = newState.state.activeTemplateId;
+                                // Update activeTemplateCss if template changed
+                                if (newState.state.activeTemplateId) {
+                                    const template = currentState.templates.find(t => t.id === newState.state.activeTemplateId);
+                                    if (template) {
+                                        updates.activeTemplateCss = template.css;
+                                    }
+                                }
+                            }
+                            
+                            // Sync other persisted fields
+                            if (newState.state.openTabs !== undefined) {
+                                updates.openTabs = newState.state.openTabs;
+                            }
+                            if (newState.state.currentView !== undefined) {
+                                updates.currentView = newState.state.currentView;
+                            }
+                            
+                            // Apply updates if any
+                            if (Object.keys(updates).length > 0) {
+                                set(updates);
+                            }
+                        } catch (error) {
+                            console.error('Failed to sync state from storage event:', error);
+                        }
+                    } else if (e.key === 'markdown-editor-file-sync' && e.newValue) {
+                        // Handle file content sync
+                        try {
+                            const syncData = JSON.parse(e.newValue);
+                            const currentState = get();
+                            
+                            if (syncData.fileId && syncData.content !== undefined) {
+                                const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                                if (existingFile && existingFile.content !== syncData.content) {
+                                    set((state) => ({
+                                        files: state.files.map((f) => 
+                                            f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                        )
+                                    }));
+                                } else if (!existingFile) {
+                                    // File not loaded, add it if it's the active file or if we should load it
+                                    const shouldLoad = syncData.fileId === currentState.activeFileId;
+                                    if (shouldLoad) {
+                                        const newFile: AppStateFile = {
+                                            id: syncData.fileId,
+                                            name: syncData.fileId.split('/').pop() || syncData.fileId,
+                                            content: syncData.content,
+                                            language: 'markdown'
+                                        };
+                                        set((state) => ({ files: [...state.files, newFile] }));
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Failed to sync file content:', error);
+                        }
+                    }
+                };
+                
+                window.addEventListener('storage', handleStorageChange);
+                
+                // Also check for file content updates periodically as a fallback
+                // (in case storage events don't fire in some scenarios)
+                let lastFileSyncTimestamp = 0;
+                const handleFileContentSync = async () => {
+                    try {
+                        const fileContentSyncKey = localStorage.getItem('markdown-editor-file-sync');
+                        if (!fileContentSyncKey) return;
+                        
+                        const syncData = JSON.parse(fileContentSyncKey);
+                        // Only process if timestamp is newer than last processed
+                        if (syncData.timestamp && syncData.timestamp <= lastFileSyncTimestamp) return;
+                        lastFileSyncTimestamp = syncData.timestamp || Date.now();
+                        
+                        const currentState = get();
+                        
+                        // Check if we need to update file content
+                        if (syncData.fileId && syncData.content !== undefined) {
+                            const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                            if (existingFile && existingFile.content !== syncData.content) {
+                                set((state) => ({
+                                    files: state.files.map((f) => 
+                                        f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                    )
+                                }));
+                            } else if (!existingFile && syncData.fileId === currentState.activeFileId) {
+                                // File not loaded but is active, load it
+                                const newFile: AppStateFile = {
+                                    id: syncData.fileId,
+                                    name: syncData.fileId.split('/').pop() || syncData.fileId,
+                                    content: syncData.content,
+                                    language: 'markdown'
+                                };
+                                set((state) => ({ files: [...state.files, newFile] }));
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to sync file content:', error);
+                    }
+                };
+                
+                // Check for file content updates periodically (fallback mechanism)
+                const fileContentSyncInterval = setInterval(handleFileContentSync, 1000);
+                
+                // Cleanup on window unload
+                window.addEventListener('beforeunload', () => {
+                    window.removeEventListener('storage', handleStorageChange);
+                    clearInterval(fileContentSyncInterval);
+                });
+            }
+            
             return {
                 // Initial State
                 fileTree: [],
@@ -592,9 +748,34 @@ export const useStore = create<AppState>()(
                                 language: 'markdown'
                             };
                             set(state => ({ files: [...state.files, newFile] }));
+                            // Sync file content to other windows
+                            if (typeof window !== 'undefined') {
+                                try {
+                                    localStorage.setItem('markdown-editor-file-sync', JSON.stringify({
+                                        fileId: path,
+                                        content: content,
+                                        timestamp: Date.now()
+                                    }));
+                                } catch (error) {
+                                    console.error('Failed to sync file content:', error);
+                                }
+                            }
                         } catch (error) {
                             console.error('Failed to fetch file content:', error);
                             return;
+                        }
+                    } else {
+                        // Even if file exists, sync current content to other windows
+                        if (typeof window !== 'undefined') {
+                            try {
+                                localStorage.setItem('markdown-editor-file-sync', JSON.stringify({
+                                    fileId: path,
+                                    content: existingFile.content,
+                                    timestamp: Date.now()
+                                }));
+                            } catch (error) {
+                                console.error('Failed to sync file content:', error);
+                            }
                         }
                     }
 
@@ -612,14 +793,44 @@ export const useStore = create<AppState>()(
                 saveFile: async (path: string, content: string) => {
                     try {
                         await browserStorage.writeFile(path, content);
+                        // Update local file content and sync to other windows
+                        set((state) => ({
+                            files: state.files.map((f) => (f.id === path ? { ...f, content } : f))
+                        }));
+                        // Sync file content to other windows
+                        if (typeof window !== 'undefined') {
+                            try {
+                                localStorage.setItem('markdown-editor-file-sync', JSON.stringify({
+                                    fileId: path,
+                                    content: content,
+                                    timestamp: Date.now()
+                                }));
+                            } catch (error) {
+                                console.error('Failed to sync file content:', error);
+                            }
+                        }
                     } catch (error) {
                         console.error('Failed to save file:', error);
                     }
                 },
 
-                updateFileContent: (id, content) => set((state) => ({
-                    files: state.files.map((f) => (f.id === id ? { ...f, content } : f))
-                })),
+                updateFileContent: (id, content) => {
+                    set((state) => ({
+                        files: state.files.map((f) => (f.id === id ? { ...f, content } : f))
+                    }));
+                    // Sync file content to other windows
+                    if (typeof window !== 'undefined') {
+                        try {
+                            localStorage.setItem('markdown-editor-file-sync', JSON.stringify({
+                                fileId: id,
+                                content: content,
+                                timestamp: Date.now()
+                            }));
+                        } catch (error) {
+                            console.error('Failed to sync file content:', error);
+                        }
+                    }
+                },
 
                 closeTab: (id) => set((state) => {
                     const tabIndex = state.openTabs.findIndex(t => t.id === id);
