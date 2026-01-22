@@ -1403,6 +1403,151 @@ export function TemplateEditor() {
                                 </button>
                             </div>
 
+                            {/* Equal Width Columns Toggle */}
+                            <div className="flex items-center justify-between pt-6 border-t border-border">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Equal width columns</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, all table columns will have equal width. When disabled, columns will auto-size to fit content.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('tables.equalWidthColumns', !settings.tables?.equalWidthColumns)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.tables?.equalWidthColumns ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.tables?.equalWidthColumns ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Alignment Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Alignment</h3>
+                                <p className="text-sm text-muted-foreground -mt-4">
+                                    Horizontal alignment for tables.
+                                </p>
+
+                                <div className="flex items-center gap-6">
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                        <button
+                                            onClick={() => updateSetting('tables.alignment', 'left')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.alignment || 'center') === 'left'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align left"
+                                        >
+                                            <AlignLeft size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.alignment', 'center')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.alignment || 'center') === 'center'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align center"
+                                        >
+                                            <AlignCenter size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.alignment', 'right')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.alignment || 'center') === 'right'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align right"
+                                        >
+                                            <AlignRight size={16} />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Max Width (%)</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="100"
+                                            step="1"
+                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-2.5 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.tables?.maxWidth || 100}
+                                            onChange={(e) => {
+                                                const value = parseInt(e.target.value);
+                                                if (!isNaN(value) && value >= 1 && value <= 100) {
+                                                    updateSetting('tables.maxWidth', value);
+                                                }
+                                            }}
+                                            placeholder="100"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Border Section */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Border</h3>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    {/* Border Width */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Width (pt)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="10"
+                                            step="0.5"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.tables?.border?.width || ''}
+                                            onChange={(e) => updateSetting('tables.border.width', e.target.value)}
+                                            placeholder="1"
+                                        />
+                                    </div>
+
+                                    {/* Border Color */}
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
+                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
+                                            <div 
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                                style={{ backgroundColor: settings.tables?.border?.color || '#000000' }}
+                                            >
+                                                <input
+                                                    type="color"
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    value={settings.tables?.border?.color || '#000000'}
+                                                    onChange={(e) => updateSetting('tables.border.color', e.target.value)}
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
+                                                value={settings.tables?.border?.color || ''}
+                                                onChange={(e) => updateSetting('tables.border.color', e.target.value)}
+                                                placeholder="None"
+                                            />
+                                            {settings.tables?.border?.color && (
+                                                <button
+                                                    onClick={() => updateSetting('tables.border.color', '')}
+                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             {/* Header Style Section */}
                             <div className="pt-6 border-t border-border space-y-6">
                                 <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Header Style</h3>
@@ -1513,6 +1658,49 @@ export function TemplateEditor() {
                                                 </button>
                                             )}
                                         </div>
+                                    </div>
+                                </div>
+
+                                {/* Header Text Alignment */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Alignment</label>
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.textAlign', 'left')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.headerStyle?.textAlign || 'left') === 'left'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align left"
+                                        >
+                                            <AlignLeft size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.textAlign', 'center')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.headerStyle?.textAlign || 'left') === 'center'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align center"
+                                        >
+                                            <AlignCenter size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.headerStyle.textAlign', 'right')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.headerStyle?.textAlign || 'left') === 'right'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align right"
+                                        >
+                                            <AlignRight size={16} />
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1629,59 +1817,47 @@ export function TemplateEditor() {
                                         </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Border Section */}
-                            <div className="pt-6 border-t border-border space-y-6">
-                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Border</h3>
-
-                                <div className="grid grid-cols-2 gap-6">
-                                    {/* Border Width */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Width (pt)</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            max="10"
-                                            step="0.5"
-                                            className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
-                                            value={settings.tables?.border?.width || ''}
-                                            onChange={(e) => updateSetting('tables.border.width', e.target.value)}
-                                            placeholder="1"
-                                        />
-                                    </div>
-
-                                    {/* Border Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
-                                                style={{ backgroundColor: settings.tables?.border?.color || '#000000' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.border?.color || '#000000'}
-                                                    onChange={(e) => updateSetting('tables.border.color', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.border?.color || ''}
-                                                onChange={(e) => updateSetting('tables.border.color', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.border?.color && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.border.color', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
+                                {/* Cell Text Alignment */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Alignment</label>
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.textAlign', 'left')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.cellStyle?.textAlign || 'left') === 'left'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
                                             )}
-                                        </div>
+                                            title="Align left"
+                                        >
+                                            <AlignLeft size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.textAlign', 'center')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.cellStyle?.textAlign || 'left') === 'center'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align center"
+                                        >
+                                            <AlignCenter size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting('tables.cellStyle.textAlign', 'right')}
+                                            className={cn(
+                                                "p-2.5 rounded-xl transition-all",
+                                                (settings.tables?.cellStyle?.textAlign || 'left') === 'right'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Align right"
+                                        >
+                                            <AlignRight size={16} />
+                                        </button>
                                     </div>
                                 </div>
                             </div>

@@ -5,12 +5,16 @@ import { texToTypst } from 'tex-to-typst';
 export interface MarkdownToTypstOptions {
     tables?: {
         preventPageBreak?: boolean;
+        equalWidthColumns?: boolean;
+        alignment?: 'left' | 'center' | 'right';
+        maxWidth?: number;
         headerStyle?: {
             bold?: boolean;
             italic?: boolean;
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         cellStyle?: {
             bold?: boolean;
@@ -18,6 +22,7 @@ export interface MarkdownToTypstOptions {
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         border?: {
             width?: string;
@@ -143,6 +148,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             const headerUnderline = options.tables?.headerStyle?.underline === true;
             const headerBgColor = options.tables?.headerStyle?.backgroundColor;
             const headerTextColor = options.tables?.headerStyle?.textColor;
+            const headerTextAlign = options.tables?.headerStyle?.textAlign || 'left';
 
             // Get cell style settings
             const cellBold = options.tables?.cellStyle?.bold === true;
@@ -150,13 +156,21 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             const cellUnderline = options.tables?.cellStyle?.underline === true;
             const cellBgColor = options.tables?.cellStyle?.backgroundColor;
             const cellTextColor = options.tables?.cellStyle?.textColor;
+            const cellTextAlign = options.tables?.cellStyle?.textAlign || 'left';
 
             // Get border settings
             const borderWidth = options.tables?.border?.width;
             const borderColor = options.tables?.border?.color;
             
-            // Use 1fr for each column to make the table expand to full width
-            let tableInner = `table(\n  columns: (${'1fr, '.repeat(cols).slice(0, -2)}),\n  inset: 10pt,\n  align: horizon,\n`;
+            // Determine column sizing based on equalWidthColumns setting
+            // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
+            // When equalWidthColumns is true, use '1fr' for equal width columns
+            const equalWidth = options.tables?.equalWidthColumns === true;
+            const columnSpec = equalWidth 
+                ? `(${'1fr, '.repeat(cols).slice(0, -2)})`
+                : `(${'auto, '.repeat(cols).slice(0, -2)})`;
+            
+            let tableInner = `table(\n  columns: ${columnSpec},\n  inset: 10pt,\n  align: horizon,\n`;
             
             // Apply custom border settings
             if (borderWidth || borderColor) {
@@ -165,9 +179,20 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 if (borderColor) strokeParts.push(`rgb("${borderColor}")`);
                 tableInner += `  stroke: ${strokeParts.join(' + ')},\n`;
             }
+            // Estimate total lines in the table by counting lines in each cell
+            let totalLines = 0;
+            const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
+            
             token.header.forEach((cell: any) => {
                 const cellContent = parseInline(cell.tokens);
                 let formattedContent = cellContent;
+                
+                // Count lines in this cell: explicit newlines + estimated wrapping
+                const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
+                const textWithoutNewlines = cellContent.replace(/\n/g, ' ');
+                const estimatedWrappedLines = Math.max(1, Math.ceil(textWithoutNewlines.length / estimatedCharsPerLine));
+                const cellLines = Math.max(explicitLines, estimatedWrappedLines);
+                totalLines += cellLines;
                 
                 // Apply text styles for header cells
                 if (headerBold) formattedContent = `*${formattedContent}*`;
@@ -179,16 +204,24 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                     formattedContent = `#text(fill: rgb("${headerTextColor}"))[${formattedContent}]`;
                 }
                 
+                // Use textAlign from header style settings
+                const cellArgs: string[] = [`align: ${headerTextAlign}`];
                 if (headerBgColor) {
-                    tableInner += `  table.cell(fill: rgb("${headerBgColor}"))[${formattedContent}],\n`;
-                } else {
-                    tableInner += `  [${formattedContent}],\n`;
+                    cellArgs.push(`fill: rgb("${headerBgColor}")`);
                 }
+                tableInner += `  table.cell(${cellArgs.join(', ')})[${formattedContent}],\n`;
             });
             token.rows.forEach((row: any) => {
                 row.forEach((cell: any) => {
                     const cellContent = parseInline(cell.tokens);
                     let formattedContent = cellContent;
+                    
+                    // Count lines in this cell: explicit newlines + estimated wrapping
+                    const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
+                    const textWithoutNewlines = cellContent.replace(/\n/g, ' ');
+                    const estimatedWrappedLines = Math.max(1, Math.ceil(textWithoutNewlines.length / estimatedCharsPerLine));
+                    const cellLines = Math.max(explicitLines, estimatedWrappedLines);
+                    totalLines += cellLines;
                     
                     // Apply text styles for regular cells
                     if (cellBold) formattedContent = `*${formattedContent}*`;
@@ -200,20 +233,68 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                         formattedContent = `#text(fill: rgb("${cellTextColor}"))[${formattedContent}]`;
                     }
                     
+                    // Use textAlign from cell style settings
+                    const cellArgs: string[] = [`align: ${cellTextAlign}`];
                     if (cellBgColor) {
-                        tableInner += `  table.cell(fill: rgb("${cellBgColor}"))[${formattedContent}],\n`;
-                    } else {
-                        tableInner += `  [${formattedContent}],\n`;
+                        cellArgs.push(`fill: rgb("${cellBgColor}")`);
                     }
+                    tableInner += `  table.cell(${cellArgs.join(', ')})[${formattedContent}],\n`;
                 });
             });
             tableInner += ')';
             
-            // Wrap in block(breakable: false) if table continuity (prevent page break) is enabled
-            if (options.tables?.preventPageBreak) {
-                return `#block(breakable: false, ${tableInner})\n\n`;
+            // The table needs the # prefix to be a valid Typst expression
+            const tableWithPrefix = `#${tableInner}`;
+            
+            // Apply maxWidth if specified (as percentage)
+            const maxWidth = options.tables?.maxWidth ?? 100;
+            
+            // Check if table is too large for a single page - if so, ignore preventPageBreak
+            // Estimate: tables with more than 50 total lines are likely too tall for a single page
+            // (assuming ~20-30 lines fit on a typical page with margins)
+            const shouldPreventPageBreak = options.tables?.preventPageBreak && totalLines <= 50;
+            
+            // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
+            const alignment = options.tables?.alignment || 'center';
+            let finalTable: string;
+            
+            // Wrap in block() if preventPageBreak is enabled and table is not too large
+            if (shouldPreventPageBreak) {
+                // Combine breakable and width if maxWidth is less than 100%
+                const blockArgs: string[] = ['breakable: false'];
+                if (maxWidth < 100) {
+                    blockArgs.push(`width: ${maxWidth}%`);
+                }
+                const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
+                
+                // Apply alignment to the block
+                if (alignment === 'left') {
+                    finalTable = `#align(left)[${tableBlock}]`;
+                } else if (alignment === 'right') {
+                    finalTable = `#align(right)[${tableBlock}]`;
+                } else {
+                    // center is default
+                    finalTable = `#align(center)[${tableBlock}]`;
+                }
+            } else {
+                // Apply maxWidth if less than 100%
+                let tableWithWidth = tableWithPrefix;
+                if (maxWidth < 100) {
+                    tableWithWidth = `#block(width: ${maxWidth}%)[${tableWithPrefix}]`;
+                }
+                
+                // Apply alignment directly to the table (or table with width block)
+                if (alignment === 'left') {
+                    finalTable = `#align(left)[${tableWithWidth}]`;
+                } else if (alignment === 'right') {
+                    finalTable = `#align(right)[${tableWithWidth}]`;
+                } else {
+                    // center is default
+                    finalTable = `#align(center)[${tableWithWidth}]`;
+                }
             }
-            return `#${tableInner}\n\n`;
+            
+            return `${finalTable}\n\n`;
         case 'html':
             if (token.text.match(/<!--\s*pagebreak\s*-->/i)) {
                 return '#pagebreak()\n\n';

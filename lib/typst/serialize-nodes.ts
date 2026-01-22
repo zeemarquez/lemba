@@ -9,12 +9,16 @@ interface SerializeContext {
     /** Table settings from template */
     tables?: {
         preventPageBreak?: boolean;
+        equalWidthColumns?: boolean;
+        alignment?: 'left' | 'center' | 'right';
+        maxWidth?: number;
         headerStyle?: {
             bold?: boolean;
             italic?: boolean;
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         cellStyle?: {
             bold?: boolean;
@@ -22,6 +26,7 @@ interface SerializeContext {
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         border?: {
             width?: string;
@@ -431,8 +436,13 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         if (row.children && row.children.length > maxCols) maxCols = row.children.length;
     });
 
-    // Use 1fr for each column to make the table expand to full width
-    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+    // Determine column sizing based on equalWidthColumns setting
+    // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
+    // When equalWidthColumns is true, use '1fr' for equal width columns
+    const equalWidth = context.tables?.equalWidthColumns === true;
+    const columns = equalWidth 
+        ? `(${'1fr, '.repeat(maxCols).slice(0, -2)})`
+        : `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
 
     // Check if borders should be hidden by examining cell borders
     // Plate stores borders on each cell, not on the table element
@@ -486,6 +496,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     const headerUnderline = context.tables?.headerStyle?.underline === true;
     const headerBgColor = context.tables?.headerStyle?.backgroundColor;
     const headerTextColor = context.tables?.headerStyle?.textColor;
+    const headerTextAlign = context.tables?.headerStyle?.textAlign || 'left';
 
     // Get cell style settings
     const cellBold = context.tables?.cellStyle?.bold === true;
@@ -493,12 +504,26 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     const cellUnderline = context.tables?.cellStyle?.underline === true;
     const cellBgColor = context.tables?.cellStyle?.backgroundColor;
     const cellTextColor = context.tables?.cellStyle?.textColor;
+    const cellTextAlign = context.tables?.cellStyle?.textAlign || 'left';
 
+    // Estimate total lines in the table by counting lines in each cell
+    let totalLines = 0;
+    const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
+    
     rows.forEach(row => {
         (row.children as TElement[]).forEach(cell => {
             const cellContent = serializeNodesToTypst(cell.children, context).trim();
             const isHeader = cell.type === 'th';
             const verticalAlign = (cell as any).verticalAlign as string | undefined;
+            
+            // Count lines in this cell: explicit newlines + estimated wrapping
+            const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
+            // Estimate additional lines from text wrapping (remove newlines for this calculation)
+            const textWithoutNewlines = cellContent.replace(/\n/g, ' ');
+            const estimatedWrappedLines = Math.max(1, Math.ceil(textWithoutNewlines.length / estimatedCharsPerLine));
+            // Use the maximum of explicit lines or estimated wrapped lines
+            const cellLines = Math.max(explicitLines, estimatedWrappedLines);
+            totalLines += cellLines;
             
             // Apply text styles based on whether it's a header or regular cell
             let finalContent = cellContent;
@@ -521,11 +546,16 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             // Build table.cell arguments
             const cellArgs: string[] = [];
             
-            // Add vertical alignment if specified
+            // Set explicit alignment - use textAlign from style settings, or vertical alignment if specified
+            // Priority: vertical alignment if specified, otherwise use textAlign from header/cell style
             if (verticalAlign === 'middle') {
                 cellArgs.push('align: horizon');
             } else if (verticalAlign === 'bottom') {
                 cellArgs.push('align: bottom');
+            } else {
+                // Use textAlign from header or cell style settings
+                const textAlign = isHeader ? headerTextAlign : cellTextAlign;
+                cellArgs.push(`align: ${textAlign}`);
             }
             
             // Add background color based on cell type
@@ -534,21 +564,63 @@ function serializeTable(element: TElement, context: SerializeContext): string {
                 cellArgs.push(`fill: rgb("${bgColor}")`);
             }
             
-            // Use table.cell if we have any arguments, otherwise use plain cell
-            if (cellArgs.length > 0) {
-                tableContent += `  table.cell(${cellArgs.join(', ')})[${finalContent}],\n`;
-            } else {
-                tableContent += `  [${finalContent}],\n`;
-            }
+            // Always use table.cell to ensure explicit alignment is set
+            tableContent += `  table.cell(${cellArgs.join(', ')})[${finalContent}],\n`;
         });
     });
 
     tableContent += `)`;
     
-    // Wrap in block(breakable: false) if table continuity (prevent page break) is enabled
-    if (context.tables?.preventPageBreak) {
-        return `#block(breakable: false, ${tableContent})\n`;
+    // The table needs the # prefix to be a valid Typst expression
+    const tableWithPrefix = `#${tableContent}`;
+    
+    // Apply maxWidth if specified (as percentage)
+    const maxWidth = context.tables?.maxWidth ?? 100;
+    
+    // Check if table is too large for a single page - if so, ignore preventPageBreak
+    // Estimate: tables with more than 50 total lines are likely too tall for a single page
+    // (assuming ~20-30 lines fit on a typical page with margins)
+    const shouldPreventPageBreak = context.tables?.preventPageBreak && totalLines <= 50;
+    
+    // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
+    const alignment = context.tables?.alignment || 'center';
+    let finalTable: string;
+    
+    // Wrap in block() if preventPageBreak is enabled and table is not too large
+    if (shouldPreventPageBreak) {
+        // Combine breakable and width if maxWidth is less than 100%
+        const blockArgs: string[] = ['breakable: false'];
+        if (maxWidth < 100) {
+            blockArgs.push(`width: ${maxWidth}%`);
+        }
+        const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
+        
+        // Apply alignment to the block
+        if (alignment === 'left') {
+            finalTable = `#align(left)[${tableBlock}]`;
+        } else if (alignment === 'right') {
+            finalTable = `#align(right)[${tableBlock}]`;
+        } else {
+            // center is default
+            finalTable = `#align(center)[${tableBlock}]`;
+        }
+    } else {
+        // Apply maxWidth if less than 100%
+        let tableWithWidth = tableWithPrefix;
+        if (maxWidth < 100) {
+            tableWithWidth = `#block(width: ${maxWidth}%)[${tableWithPrefix}]`;
+        }
+        
+        // Apply alignment directly to the table (or table with width block)
+        if (alignment === 'left') {
+            finalTable = `#align(left)[${tableWithWidth}]`;
+        } else if (alignment === 'right') {
+            finalTable = `#align(right)[${tableWithWidth}]`;
+        } else {
+            // center is default
+            finalTable = `#align(center)[${tableWithWidth}]`;
+        }
     }
     
-    return `#${tableContent}\n`;
+    return `${finalTable}\n`;
 }

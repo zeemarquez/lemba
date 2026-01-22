@@ -100,12 +100,16 @@ export interface Template {
         };
         tables?: {
             preventPageBreak: boolean;
+            equalWidthColumns?: boolean;
+            alignment?: 'left' | 'center' | 'right';
+            maxWidth?: number; // Maximum table width as percentage (default: 100)
             headerStyle?: {
                 bold?: boolean;
                 italic?: boolean;
                 underline?: boolean;
                 backgroundColor?: string;
                 textColor?: string;
+                textAlign?: 'left' | 'center' | 'right';
             };
             cellStyle?: {
                 bold?: boolean;
@@ -113,6 +117,7 @@ export interface Template {
                 underline?: boolean;
                 backgroundColor?: string;
                 textColor?: string;
+                textAlign?: 'left' | 'center' | 'right';
             };
             border?: {
                 width?: string;
@@ -259,7 +264,7 @@ const DEFAULT_TEMPLATE: Template = {
         header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
-        tables: { preventPageBreak: false, headerStyle: { bold: true, backgroundColor: '' } },
+        tables: { preventPageBreak: false, equalWidthColumns: false, alignment: 'center', maxWidth: 100, headerStyle: { bold: true, backgroundColor: '' } },
         outline: { 
             enabled: false,
             title: {

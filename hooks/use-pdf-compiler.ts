@@ -56,12 +56,16 @@ export interface TemplateSettings {
     frontPage?: { enabled?: boolean; content?: string; emptyPagesAfter?: number };
     tables?: { 
         preventPageBreak?: boolean;
+        equalWidthColumns?: boolean;
+        alignment?: 'left' | 'center' | 'right';
+        maxWidth?: number;
         headerStyle?: {
             bold?: boolean;
             italic?: boolean;
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         cellStyle?: {
             bold?: boolean;
@@ -69,6 +73,7 @@ export interface TemplateSettings {
             underline?: boolean;
             backgroundColor?: string;
             textColor?: string;
+            textAlign?: 'left' | 'center' | 'right';
         };
         border?: {
             width?: string;
@@ -135,7 +140,7 @@ export interface UsePdfCompilerReturn {
  * @param variables - Variable values from document frontmatter
  * @param figures - Figure caption settings from template
  */
-async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean }; pageNumberOffset?: number; variables?: Record<string, string>; figures?: { captionEnabled?: boolean; captionFormat?: string } }): Promise<string> {
+async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' }; pageNumberOffset?: number; variables?: Record<string, string>; figures?: { captionEnabled?: boolean; captionFormat?: string } }): Promise<string> {
     if (!content) return '';
 
     try {
