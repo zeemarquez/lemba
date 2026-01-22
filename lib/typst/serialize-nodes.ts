@@ -439,7 +439,9 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     // Determine column sizing based on equalWidthColumns setting
     // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
     // When equalWidthColumns is true, use '1fr' for equal width columns
-    const equalWidth = context.tables?.equalWidthColumns === true;
+    // For header/footer tables (insideContext=true), always use '1fr' to fill width
+    const isHeaderFooter = context.insideContext === true;
+    const equalWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
     const columns = equalWidth 
         ? `(${'1fr, '.repeat(maxCols).slice(0, -2)})`
         : `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
@@ -574,13 +576,20 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     // The table needs the # prefix to be a valid Typst expression
     const tableWithPrefix = `#${tableContent}`;
     
-    // Apply maxWidth if specified (as percentage)
-    const maxWidth = context.tables?.maxWidth ?? 100;
+    // For header/footer tables (insideContext=true), always use 100% width and ignore preventPageBreak
+    // Also skip alignment wrapping for header/footer tables to ensure they fill width
+    const maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
     
     // Check if table is too large for a single page - if so, ignore preventPageBreak
+    // Also ignore preventPageBreak for header/footer tables
     // Estimate: tables with more than 50 total lines are likely too tall for a single page
     // (assuming ~20-30 lines fit on a typical page with margins)
-    const shouldPreventPageBreak = context.tables?.preventPageBreak && totalLines <= 50;
+    const shouldPreventPageBreak = !isHeaderFooter && context.tables?.preventPageBreak && totalLines <= 50;
+    
+    // For header/footer tables, return the table directly without alignment wrapping to ensure full width
+    if (isHeaderFooter) {
+        return `${tableWithPrefix}\n`;
+    }
     
     // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
     const alignment = context.tables?.alignment || 'center';
