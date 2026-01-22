@@ -48,4 +48,8 @@ next-env.d.ts
 *.blockmap
 *.snap
 
+# Build metadata (local build tracking)
+build-metadata.json
+
+# Batch files (except build.bat which should be tracked)
 *.bat
