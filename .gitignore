@@ -47,3 +47,5 @@ next-env.d.ts
 # Electron Builder
 *.blockmap
 *.snap
+
+*.bat
