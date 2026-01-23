@@ -74,7 +74,7 @@ export function Sidebar() {
         placeholder: "",
         defaultValue: "",
         confirmLabel: "",
-        onConfirm: async (val: string) => {}
+        onConfirm: async (val: string) => { }
     });
 
     useEffect(() => {
@@ -127,7 +127,7 @@ export function Sidebar() {
         });
         setDialogOpen(true);
     };
-    
+
     const handleCreateTemplate = () => {
         setDialogConfig({
             title: "Create New Template",
@@ -138,7 +138,7 @@ export function Sidebar() {
             onConfirm: async (name) => {
                 const fileName = name.endsWith('.mdt') ? name : `${name}.mdt`;
                 const path = `Templates/${fileName}`;
-                
+
                 const newTemplate = {
                     id: path, // Will be used as ID
                     name: name.replace('.mdt', ''),
@@ -161,7 +161,7 @@ export function Sidebar() {
                         footer: { enabled: false, content: '', margins: { top: '5mm', left: '0mm', right: '0mm' } },
                     }
                 };
-                
+
                 // @ts-ignore
                 await createTemplate(path, newTemplate);
             },
@@ -169,7 +169,7 @@ export function Sidebar() {
             onUpload: async (fileName, content) => {
                 const finalName = fileName.endsWith('.mdt') ? fileName : `${fileName}.mdt`;
                 const path = `Templates/${finalName}`;
-                
+
                 try {
                     const uploadedTemplate = JSON.parse(content);
                     // Update the id and name to match the new path
@@ -210,7 +210,7 @@ export function Sidebar() {
             confirmLabel: "Rename",
             onConfirm: async (newName) => {
                 if (newName === node.name) return;
-                
+
                 // Preserve extension if user didn't type it and original had it?
                 // Or just let user type whatever.
                 // Best to enforce extension for files if missing.
@@ -223,7 +223,7 @@ export function Sidebar() {
                 // Construct new path
                 const parentPath = node.id.substring(0, node.id.lastIndexOf('/'));
                 const newPath = `${parentPath}/${finalName}`;
-                
+
                 await renameItem(node.id, newPath);
             }
         });
@@ -352,8 +352,8 @@ export function Sidebar() {
                 {sidebarView === 'explorer' && showOutline && currentView === 'file' && activeFileId && (
                     <ResizablePanelGroup direction="vertical" className="flex-1 min-h-0">
                         {/* Files Panel */}
-                        <ResizablePanel 
-                            defaultSize={60} 
+                        <ResizablePanel
+                            defaultSize={60}
                             minSize={20}
                             collapsible={true}
                             collapsedSize={8}
@@ -361,7 +361,7 @@ export function Sidebar() {
                             onExpand={() => setIsFilesCollapsed(false)}
                         >
                             <div className="h-full flex flex-col">
-                                <div 
+                                <div
                                     className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-accent/30 shrink-0"
                                     onClick={() => setIsFilesCollapsed(!isFilesCollapsed)}
                                 >
@@ -384,7 +384,7 @@ export function Sidebar() {
                                         </div>
                                     )}
                                 </div>
-                                
+
                                 {!isFilesCollapsed && (
                                     <ScrollArea className="flex-1">
                                         <div className="px-3 pb-2">
@@ -393,9 +393,9 @@ export function Sidebar() {
                                                     <RefreshCw size={12} className="animate-spin" /> Loading...
                                                 </div>
                                             ) : (
-                                                <FileTree 
-                                                    nodes={filesRoot?.children || []} 
-                                                    activeId={activeFileId} 
+                                                <FileTree
+                                                    nodes={filesRoot?.children || []}
+                                                    activeId={activeFileId}
                                                     onSelect={(node) => openFile(node.id)}
                                                     onRename={handleRename}
                                                     onDelete={handleDelete}
@@ -403,7 +403,7 @@ export function Sidebar() {
                                                     onExport={handleExportFile}
                                                 />
                                             )}
-                                            
+
                                             {(!filesRoot || !filesRoot.children?.length) && !isLoadingFileTree && (
                                                 <div className="px-2 py-4 text-xs text-muted-foreground text-center">
                                                     No files found. Create one to get started.
@@ -414,19 +414,19 @@ export function Sidebar() {
                                 )}
                             </div>
                         </ResizablePanel>
-                        
+
                         <ResizableHandle />
-                        
+
                         {/* Outline Panel */}
-                        <ResizablePanel 
-                            defaultSize={40} 
+                        <ResizablePanel
+                            defaultSize={40}
                             minSize={15}
                             collapsible={true}
                             collapsedSize={8}
                             onCollapse={() => setIsOutlineCollapsed(true)}
                             onExpand={() => setIsOutlineCollapsed(false)}
                         >
-                            <DocumentOutline 
+                            <DocumentOutline
                                 className="h-full"
                                 isCollapsed={isOutlineCollapsed}
                                 onToggleCollapse={() => setIsOutlineCollapsed(!isOutlineCollapsed)}
@@ -449,15 +449,15 @@ export function Sidebar() {
                                     </Button>
                                 </div>
                             </div>
-                            
+
                             {isLoadingFileTree ? (
                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
                                     <RefreshCw size={12} className="animate-spin" /> Loading...
                                 </div>
                             ) : (
-                                <FileTree 
-                                    nodes={filesRoot?.children || []} 
-                                    activeId={activeFileId} 
+                                <FileTree
+                                    nodes={filesRoot?.children || []}
+                                    activeId={activeFileId}
                                     onSelect={(node) => openFile(node.id)}
                                     onRename={handleRename}
                                     onDelete={handleDelete}
@@ -465,7 +465,7 @@ export function Sidebar() {
                                     onExport={handleExportFile}
                                 />
                             )}
-                            
+
                             {(!filesRoot || !filesRoot.children?.length) && !isLoadingFileTree && (
                                 <div className="px-2 py-4 text-xs text-muted-foreground text-center">
                                     No files found. Create one to get started.
@@ -489,15 +489,15 @@ export function Sidebar() {
                                     </Button>
                                 </div>
                             </div>
-                            
+
                             {isLoadingFileTree ? (
-                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
+                                <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
                                     <RefreshCw size={12} className="animate-spin" /> Loading...
-                                 </div>
+                                </div>
                             ) : (
-                                <FileTree 
-                                    nodes={templatesRoot?.children || []} 
-                                    activeId={activeTemplateId} 
+                                <FileTree
+                                    nodes={templatesRoot?.children || []}
+                                    activeId={activeTemplateId}
                                     onSelect={(node) => openTemplate(node.id)}
                                     onRename={handleRename}
                                     onDelete={handleDelete}
@@ -529,7 +529,7 @@ export function Sidebar() {
                 </div>
             </div>
 
-            <InputDialog 
+            <InputDialog
                 isOpen={dialogOpen}
                 onOpenChange={setDialogOpen}
                 {...dialogConfig}

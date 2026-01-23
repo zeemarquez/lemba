@@ -1,7 +1,7 @@
-import { FileNode, Template } from './store';
+import { FileNode, Template, ImageEntry, FontEntry } from './types';
 
 const DB_NAME = 'markdown-editor-db';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 const STORE_FILES = 'files';
 const STORE_TEMPLATES = 'templates';
 const STORE_IMAGES = 'images';
@@ -14,23 +14,7 @@ interface FileEntry {
     updatedAt: number;
 }
 
-interface ImageEntry {
-    id: string;           // Unique ID for the image
-    blob: Blob;           // The actual image data
-    name: string;         // Original filename
-    type: string;         // MIME type (e.g., 'image/png')
-    size: number;         // File size in bytes
-    createdAt: number;    // Timestamp when stored
-}
 
-export interface FontEntry {
-    id: string;           // Unique ID (family name usually)
-    family: string;       // Font family name
-    blob: Blob;           // The actual font file data
-    fileName: string;     // Original filename
-    format: string;       // e.g., 'truetype', 'opentype', 'woff', 'woff2'
-    createdAt: number;    // Timestamp when stored
-}
 
 class BrowserStorage {
     private db: IDBDatabase | null = null;
@@ -54,7 +38,7 @@ class BrowserStorage {
 
             request.onsuccess = () => {
                 this.db = request.result;
-                
+
                 this.db.onversionchange = () => {
                     this.db?.close();
                     this.db = null;
@@ -67,14 +51,14 @@ class BrowserStorage {
             request.onupgradeneeded = (event) => {
                 const db = (event.target as IDBOpenDBRequest).result;
                 const tx = (event.target as IDBOpenDBRequest).transaction;
-                
+
                 let filesStore: IDBObjectStore;
                 if (!db.objectStoreNames.contains(STORE_FILES)) {
                     filesStore = db.createObjectStore(STORE_FILES, { keyPath: 'path' });
                 } else {
                     filesStore = tx!.objectStore(STORE_FILES);
                 }
-                
+
                 // Create images store for persistent image storage
                 if (!db.objectStoreNames.contains(STORE_IMAGES)) {
                     db.createObjectStore(STORE_IMAGES, { keyPath: 'id' });
@@ -84,7 +68,7 @@ class BrowserStorage {
                 if (!db.objectStoreNames.contains(STORE_FONTS)) {
                     db.createObjectStore(STORE_FONTS, { keyPath: 'id' });
                 }
-                
+
                 if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
                     // No need to create it if it doesn't exist, we are deprecating it
                     // But if we are in v1->v2 upgrade, it might exist
@@ -122,15 +106,15 @@ class BrowserStorage {
     }
 
     private async transaction<T>(
-        storeName: string, 
-        mode: IDBTransactionMode, 
+        storeName: string,
+        mode: IDBTransactionMode,
         callback: (store: IDBObjectStore) => IDBRequest<T> | void
     ): Promise<T> {
         const db = await this.initDB();
         return new Promise((resolve, reject) => {
             const tx = db.transaction(storeName, mode);
             const store = tx.objectStore(storeName);
-            
+
             let request: IDBRequest<T> | void;
             try {
                 request = callback(store);
@@ -146,7 +130,7 @@ class BrowserStorage {
                     resolve(undefined as T);
                 }
             };
-            
+
             tx.onerror = () => reject(tx.error);
         });
     }
@@ -191,11 +175,11 @@ class BrowserStorage {
                 if (parent && parent.children) {
                     parent.children.push(node);
                 } else {
-                    root.push(node); 
+                    root.push(node);
                 }
             }
         });
-        
+
         const sortNodes = (nodes: FileNode[]) => {
             nodes.sort((a, b) => {
                 if (a.type === b.type) return a.name.localeCompare(b.name);
@@ -266,7 +250,7 @@ class BrowserStorage {
 
         const parentPath = parts.slice(0, -1).join('/');
         const db = await this.initDB();
-        
+
         // This should probably be optimized to not open transaction recursively
         // but for now it's okay for depth < 10
         try {
@@ -289,19 +273,19 @@ class BrowserStorage {
 
     async delete(path: string, type: 'file' | 'folder'): Promise<void> {
         await this.transaction(STORE_FILES, 'readwrite', store => {
-             if (type === 'folder') {
-                 // We need to query first to find children
-                 // This is tricky inside a callback if we need results to delete
-                 // Better to do it in two steps or use cursor
-                 // For now, let's just delete the exact key and hope caller handles children?
-                 // No, recursive delete is expected.
-                 // We can use a cursor to find all matching prefixes
-             }
-             // For simplicity in this turn, I will implement simple delete
-             // and let the user re-delete children or refine later.
-             store.delete(path);
+            if (type === 'folder') {
+                // We need to query first to find children
+                // This is tricky inside a callback if we need results to delete
+                // Better to do it in two steps or use cursor
+                // For now, let's just delete the exact key and hope caller handles children?
+                // No, recursive delete is expected.
+                // We can use a cursor to find all matching prefixes
+            }
+            // For simplicity in this turn, I will implement simple delete
+            // and let the user re-delete children or refine later.
+            store.delete(path);
         });
-        
+
         // Proper folder delete implementation
         if (type === 'folder') {
             const db = await this.initDB();
@@ -323,9 +307,9 @@ class BrowserStorage {
         const db = await this.initDB();
         const tx = db.transaction(STORE_FILES, 'readwrite');
         const store = tx.objectStore(STORE_FILES);
-        
+
         const request = store.getAll();
-        
+
         return new Promise((resolve, reject) => {
             request.onsuccess = () => {
                 const files = request.result as FileEntry[];
@@ -349,16 +333,16 @@ class BrowserStorage {
     async listTemplates(): Promise<Template[]> {
         const files = await this.transaction<FileEntry[]>(STORE_FILES, 'readonly', store => store.getAll());
         const templates: Template[] = [];
-        
+
         for (const file of files) {
             if (file.path.startsWith('Templates/') && (file.path.endsWith('.mdt') || file.path.endsWith('.json'))) {
-                 try {
-                     const template = JSON.parse(file.content);
-                     template.id = file.path;
-                     templates.push(template);
-                 } catch (e) {
-                     console.error('Failed to parse template', file.path);
-                 }
+                try {
+                    const template = JSON.parse(file.content);
+                    template.id = file.path;
+                    templates.push(template);
+                } catch (e) {
+                    console.error('Failed to parse template', file.path);
+                }
             }
         }
         return templates;
@@ -369,7 +353,7 @@ class BrowserStorage {
     }
 
     async createTemplate(path: string, template: Template): Promise<void> {
-         await this.createFile(path, JSON.stringify(template, null, 2));
+        await this.createFile(path, JSON.stringify(template, null, 2));
     }
 
     async deleteTemplate(path: string): Promise<void> {

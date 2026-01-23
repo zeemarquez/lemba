@@ -181,8 +181,18 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
  * Convert Blob to Uint8Array
  */
 async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
-    const arrayBuffer = await blob.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
+    try {
+        if (!blob) throw new Error('Blob is null or undefined');
+        console.log(`[usePdfCompiler] Converting blob of size ${blob.size} type ${blob.type}`);
+        const arrayBuffer = await blob.arrayBuffer();
+        if (arrayBuffer.byteLength === 0) {
+            console.warn('[usePdfCompiler] Warning: Blob converted to empty ArrayBuffer');
+        }
+        return new Uint8Array(arrayBuffer);
+    } catch (error) {
+        console.error('[usePdfCompiler] Failed to convert blob to Uint8Array:', error);
+        throw error;
+    }
 }
 
 /**
@@ -202,11 +212,27 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     useEffect(() => {
         const initWithFonts = async () => {
             try {
+                // If we have fonts but they are empty blobs, something is wrong
+                const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
+
+                if (customFonts.length > 0 && validFonts.length === 0) {
+                    console.warn('[usePdfCompiler] Custom fonts present but all have empty blobs. Waiting for valid data.');
+                    return;
+                }
+
                 // Convert store fonts to FontData format
-                const fontDataPromises = customFonts.map(async (font): Promise<FontData> => ({
-                    family: font.family,
-                    data: await blobToUint8Array(font.blob)
-                }));
+                const fontDataPromises = validFonts.map(async (font): Promise<FontData> => {
+                    try {
+                        const data = await blobToUint8Array(font.blob);
+                        return {
+                            family: font.family,
+                            data
+                        };
+                    } catch (e) {
+                        console.error(`[usePdfCompiler] Error processing font ${font.family}:`, e);
+                        throw e;
+                    }
+                });
                 const fontData = await Promise.all(fontDataPromises);
 
                 // Create a signature to detect changes

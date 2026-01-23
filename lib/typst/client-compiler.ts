@@ -138,7 +138,7 @@ function parseFontFamilyName(data: Uint8Array): string | null {
         }
 
         if (nameTableOffset === 0) {
-            console.warn('[Typst] No name table found in font');
+            console.warn(`[Typst] No name table found in font. Signature: 0x${signature.toString(16)}`);
             return null;
         }
 
@@ -1096,9 +1096,20 @@ export async function setCustomFonts(fonts: FontData[]): Promise<void> {
         }
     }
 
-    // If compiler is already initialized, we need to reinitialize to add new fonts
-    if (isInitialized) {
+    // If compiler is already initialized or currently initializing, we need to reinitialize to add new fonts
+    if (isInitialized || initPromise) {
         console.log('[Typst] [Client] Custom fonts changed, reinitializing compiler...');
+
+        // If an initialization is currently in progress, wait for it to finish first
+        if (initPromise) {
+            console.log('[Typst] [Client] Waiting for current initialization to complete...');
+            try {
+                await initPromise;
+            } catch (ignore) {
+                // Ignore errors from the previous init, we're about to retry anyway
+            }
+        }
+
         isInitialized = false;
         initPromise = null;
         typstCompiler = null;
