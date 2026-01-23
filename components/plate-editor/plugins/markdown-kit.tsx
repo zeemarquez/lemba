@@ -1,4 +1,4 @@
-import { MarkdownPlugin, remarkMention } from '@platejs/markdown';
+import { MarkdownPlugin, convertChildrenDeserialize, remarkMention } from '@platejs/markdown';
 import { KEYS, NodeApi, getPluginType } from 'platejs';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -159,12 +159,95 @@ const imageRules = {
   // html deserialize is handled in pageBreakRules to handle both page breaks and images
 };
 
+const alertRules = {
+  blockquote: {
+    deserialize: (mdastNode: any, deco: any, options: any) => {
+      const firstChild = mdastNode.children?.[0];
+      if (firstChild?.type === 'paragraph') {
+        const firstText = firstChild.children?.[0];
+        if (firstText?.type === 'text') {
+          const match = firstText.value.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i);
+          if (match) {
+            const type = match[1].toUpperCase();
+            // Remove the prefix from the text node
+            firstText.value = firstText.value.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+
+            // Map alert type to callout properties
+            let icon = '💡';
+            let backgroundColor = 'hsl(var(--muted))';
+
+            switch (type) {
+              case 'NOTE':
+                icon = 'ℹ️';
+                backgroundColor = 'hsla(210, 100%, 50%, 0.1)';
+                break;
+              case 'TIP':
+                icon = '💡';
+                backgroundColor = 'hsla(120, 100%, 25%, 0.1)';
+                break;
+              case 'IMPORTANT':
+                icon = '💎';
+                backgroundColor = 'hsla(280, 100%, 50%, 0.1)';
+                break;
+              case 'WARNING':
+                icon = '⚠️';
+                backgroundColor = 'hsla(45, 100%, 50%, 0.1)';
+                break;
+              case 'CAUTION':
+                icon = '🚨';
+                backgroundColor = 'hsla(0, 100%, 50%, 0.1)';
+                break;
+            }
+
+            return {
+              backgroundColor,
+              children: convertChildrenDeserialize(mdastNode.children, deco, options),
+              icon,
+              type: 'callout',
+            };
+          }
+        }
+      }
+
+      return {
+        children: convertChildrenDeserialize(mdastNode.children, deco, options),
+        type: getPluginType(options.editor, KEYS.blockquote),
+      };
+    },
+  },
+  callout: {
+    serialize: (node: any, { children }: any) => {
+      let type = 'NOTE';
+      if (node.icon === '💡') type = 'TIP';
+      else if (node.icon === '💎') type = 'IMPORTANT';
+      else if (node.icon === '⚠️') type = 'WARNING';
+      else if (node.icon === '🚨') type = 'CAUTION';
+      else if (node.icon === 'ℹ️') type = 'NOTE';
+
+      const firstChild = children[0];
+      if (firstChild && firstChild.type === 'paragraph') {
+        firstChild.children.unshift({ type: 'text', value: `[!${type}]\n` });
+      } else {
+        children.unshift({
+          children: [{ type: 'text', value: `[!${type}]\n` }],
+          type: 'paragraph',
+        });
+      }
+
+      return {
+        children,
+        type: 'blockquote',
+      };
+    },
+  },
+};
+
 export const MarkdownKit = [
   MarkdownPlugin.configure({
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention],
-      rules: { ...mathRules, ...imageRules, ...pageBreakRules } as any,
+      rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...alertRules } as any,
     },
   }),
 ];

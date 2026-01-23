@@ -158,6 +158,9 @@ export interface Template {
             };
             alignment?: 'left' | 'center' | 'right';
         };
+        alerts?: {
+            showHeader: boolean;
+        };
     }
 }
 
@@ -273,7 +276,7 @@ const DEFAULT_TEMPLATE: Template = {
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
         tables: { preventPageBreak: false, equalWidthColumns: false, alignment: 'center', maxWidth: 100, headerStyle: { bold: true, backgroundColor: '' } },
-        outline: { 
+        outline: {
             enabled: false,
             title: {
                 content: '',
@@ -299,6 +302,9 @@ const DEFAULT_TEMPLATE: Template = {
             },
             alignment: 'center',
         },
+        alerts: {
+            showHeader: true,
+        },
     }
 };
 
@@ -313,10 +319,10 @@ export const useStore = create<AppState>()(
                         try {
                             const newState = JSON.parse(e.newValue);
                             const currentState = get();
-                            
+
                             // Update persisted state fields
                             const updates: Partial<AppState> = {};
-                            
+
                             if (newState.state.activeFileId !== currentState.activeFileId) {
                                 updates.activeFileId = newState.state.activeFileId;
                                 // If file changed and we don't have it loaded, load it
@@ -335,7 +341,7 @@ export const useStore = create<AppState>()(
                                         } else {
                                             content = await browserStorage.readFile(newState.state.activeFileId);
                                         }
-                                        
+
                                         const newFile: AppStateFile = {
                                             id: newState.state.activeFileId,
                                             name: newState.state.activeFileId.split('/').pop() || newState.state.activeFileId,
@@ -348,7 +354,7 @@ export const useStore = create<AppState>()(
                                     }
                                 }
                             }
-                            
+
                             if (newState.state.activeTemplateId !== currentState.activeTemplateId) {
                                 updates.activeTemplateId = newState.state.activeTemplateId;
                                 // Update activeTemplateCss if template changed
@@ -359,7 +365,7 @@ export const useStore = create<AppState>()(
                                     }
                                 }
                             }
-                            
+
                             // Sync other persisted fields
                             if (newState.state.openTabs !== undefined) {
                                 updates.openTabs = newState.state.openTabs;
@@ -367,7 +373,7 @@ export const useStore = create<AppState>()(
                             if (newState.state.currentView !== undefined) {
                                 updates.currentView = newState.state.currentView;
                             }
-                            
+
                             // Apply updates if any
                             if (Object.keys(updates).length > 0) {
                                 set(updates);
@@ -380,12 +386,12 @@ export const useStore = create<AppState>()(
                         try {
                             const syncData = JSON.parse(e.newValue);
                             const currentState = get();
-                            
+
                             if (syncData.fileId && syncData.content !== undefined) {
                                 const existingFile = currentState.files.find(f => f.id === syncData.fileId);
                                 if (existingFile && existingFile.content !== syncData.content) {
                                     set((state) => ({
-                                        files: state.files.map((f) => 
+                                        files: state.files.map((f) =>
                                             f.id === syncData.fileId ? { ...f, content: syncData.content } : f
                                         )
                                     }));
@@ -408,9 +414,9 @@ export const useStore = create<AppState>()(
                         }
                     }
                 };
-                
+
                 window.addEventListener('storage', handleStorageChange);
-                
+
                 // Also check for file content updates periodically as a fallback
                 // (in case storage events don't fire in some scenarios)
                 let lastFileSyncTimestamp = 0;
@@ -418,20 +424,20 @@ export const useStore = create<AppState>()(
                     try {
                         const fileContentSyncKey = localStorage.getItem('markdown-editor-file-sync');
                         if (!fileContentSyncKey) return;
-                        
+
                         const syncData = JSON.parse(fileContentSyncKey);
                         // Only process if timestamp is newer than last processed
                         if (syncData.timestamp && syncData.timestamp <= lastFileSyncTimestamp) return;
                         lastFileSyncTimestamp = syncData.timestamp || Date.now();
-                        
+
                         const currentState = get();
-                        
+
                         // Check if we need to update file content
                         if (syncData.fileId && syncData.content !== undefined) {
                             const existingFile = currentState.files.find(f => f.id === syncData.fileId);
                             if (existingFile && existingFile.content !== syncData.content) {
                                 set((state) => ({
-                                    files: state.files.map((f) => 
+                                    files: state.files.map((f) =>
                                         f.id === syncData.fileId ? { ...f, content: syncData.content } : f
                                     )
                                 }));
@@ -450,17 +456,17 @@ export const useStore = create<AppState>()(
                         console.error('Failed to sync file content:', error);
                     }
                 };
-                
+
                 // Check for file content updates periodically (fallback mechanism)
                 const fileContentSyncInterval = setInterval(handleFileContentSync, 1000);
-                
+
                 // Cleanup on window unload
                 window.addEventListener('beforeunload', () => {
                     window.removeEventListener('storage', handleStorageChange);
                     clearInterval(fileContentSyncInterval);
                 });
             }
-            
+
             return {
                 // Initial State
                 fileTree: [],
@@ -491,11 +497,11 @@ export const useStore = create<AppState>()(
                     set({ isLoadingFileTree: true });
                     try {
                         let { tree } = await browserStorage.list();
-                        
+
                         // Check if Files folder has any files
                         const filesRoot = tree.find(n => n.name === 'Files');
                         const hasFiles = filesRoot?.children && filesRoot.children.length > 0;
-                        
+
                         // If no files exist, load the default showcase file from /preloaded/
                         if (!hasFiles) {
                             try {
@@ -514,7 +520,7 @@ export const useStore = create<AppState>()(
                                 console.error('Failed to load default showcase file:', err);
                             }
                         }
-                        
+
                         set({ fileTree: tree });
                     } catch (error) {
                         console.error('Failed to fetch file tree:', error);
@@ -534,7 +540,7 @@ export const useStore = create<AppState>()(
                         if (!hasDefaultTemplates) {
                             // Load all templates from /preloaded/Default Templates/ folder
                             const templateFiles = ['Academic.mdt', 'Basic.mdt', 'Dark.mdt', 'Modern.mdt'];
-                            
+
                             for (const templateFile of templateFiles) {
                                 try {
                                     const response = await fetch(`/preloaded/Default Templates/${templateFile}`);
@@ -561,13 +567,13 @@ export const useStore = create<AppState>()(
 
                         // Set active template if needed - prioritize "Basic" template on first load
                         const state = get();
-                        const hasValidActiveTemplate = state.activeTemplateId && 
+                        const hasValidActiveTemplate = state.activeTemplateId &&
                             templates.some(t => t.id === state.activeTemplateId);
-                        
+
                         if (!hasValidActiveTemplate && templates.length > 0) {
                             // First try to find "Basic" template by filename (since Basic.mdt has name "Default")
                             const basicTemplate = templates.find(t => t.id.includes('Basic.mdt'));
-                            
+
                             const selectedTemplate = basicTemplate || templates[0];
                             set({
                                 activeTemplateId: selectedTemplate.id,
@@ -691,22 +697,22 @@ export const useStore = create<AppState>()(
                             try {
                                 const content = await browserStorage.readFile(oldPath);
                                 const template = JSON.parse(content);
-                                
+
                                 // Extract filename without extension for the name
                                 const newFileName = newPath.split('/').pop() || newPath;
                                 const nameWithoutExt = newFileName.replace(/\.(mdt|json)$/, '');
-                                
+
                                 // Update template name and id
                                 template.name = nameWithoutExt;
                                 template.id = newPath;
-                                
+
                                 // Write updated template content before renaming
                                 await browserStorage.writeFile(oldPath, JSON.stringify(template, null, 2));
                             } catch (err) {
                                 console.error('Failed to update template JSON during rename:', err);
                             }
                         }
-                        
+
                         await browserStorage.rename(oldPath, newPath);
                         await get().fetchFileTree();
                         if (newPath.startsWith('Templates/') || oldPath.startsWith('Templates/')) {

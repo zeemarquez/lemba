@@ -56,6 +56,9 @@ export interface TypstOptions {
         borderColor?: string;
         borderWidth?: string;
     };
+    alerts?: {
+        showHeader: boolean;
+    };
 }
 
 // Track loaded custom fonts to avoid re-adding them
@@ -72,25 +75,25 @@ const registeredCustomFontFamilies = new Map<string, string>();
 function parseFontFamilyName(data: Uint8Array): string | null {
     try {
         const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-        
+
         // Check for TrueType/OpenType signature
         const signature = view.getUint32(0, false);
         const isTTF = signature === 0x00010000 || signature === 0x74727565; // 'true'
         const isOTF = signature === 0x4F54544F; // 'OTTO'
         const isWOFF = signature === 0x774F4646; // 'wOFF'
         const isWOFF2 = signature === 0x774F4632; // 'wOF2'
-        
+
         if (!isTTF && !isOTF && !isWOFF && !isWOFF2) {
             console.warn('[Typst] Unknown font format, signature:', signature.toString(16));
             return null;
         }
-        
+
         // For WOFF/WOFF2, the structure is different - tables are compressed
         // We need to find the 'name' table differently
         let numTables: number;
         let tableOffset: number;
         let tableEntrySize: number;
-        
+
         if (isWOFF) {
             // WOFF header: signature(4), flavor(4), length(4), numTables(2), reserved(2), ...
             numTables = view.getUint16(12, false);
@@ -106,12 +109,12 @@ function parseFontFamilyName(data: Uint8Array): string | null {
             tableOffset = 12;
             tableEntrySize = 16;
         }
-        
+
         // Find 'name' table
         let nameTableOffset = 0;
         let nameTableCompLength = 0;
         let nameTableOrigLength = 0;
-        
+
         for (let i = 0; i < numTables; i++) {
             const entryOffset = tableOffset + i * tableEntrySize;
             const tag = String.fromCharCode(
@@ -133,25 +136,25 @@ function parseFontFamilyName(data: Uint8Array): string | null {
                 break;
             }
         }
-        
+
         if (nameTableOffset === 0) {
             console.warn('[Typst] No name table found in font');
             return null;
         }
-        
+
         // For WOFF, check if table is compressed (compLength !== origLength)
         if (isWOFF && nameTableCompLength !== nameTableOrigLength) {
             console.warn('[Typst] WOFF name table is compressed, cannot parse');
             return null;
         }
-        
+
         // Parse name table
         const nameCount = view.getUint16(nameTableOffset + 2, false);
         const stringOffset = view.getUint16(nameTableOffset + 4, false);
-        
+
         // Look for font family name (nameID 1) - prefer Windows platform
         let fallbackName: string | null = null;
-        
+
         for (let i = 0; i < nameCount; i++) {
             const recordOffset = nameTableOffset + 6 + i * 12;
             const platformID = view.getUint16(recordOffset, false);
@@ -159,11 +162,11 @@ function parseFontFamilyName(data: Uint8Array): string | null {
             const nameID = view.getUint16(recordOffset + 6, false);
             const length = view.getUint16(recordOffset + 8, false);
             const offset = view.getUint16(recordOffset + 10, false);
-            
+
             // nameID 1 = Font Family
             if (nameID === 1) {
                 const strOffset = nameTableOffset + stringOffset + offset;
-                
+
                 // Platform 3 (Windows), Encoding 1 (Unicode BMP) - UTF-16BE
                 if (platformID === 3 && encodingID === 1) {
                     let name = '';
@@ -186,7 +189,7 @@ function parseFontFamilyName(data: Uint8Array): string | null {
                 }
             }
         }
-        
+
         return fallbackName;
     } catch (e) {
         console.error('[Typst] Error parsing font:', e);
@@ -222,7 +225,7 @@ export function fixTypstUnit(value: string | number | undefined): string {
  */
 function generateHeadingNumbering(settings: any): string {
     const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
-    
+
     // Check which levels have numbering enabled
     const levelConfigs = levels.map((tag, i) => ({
         level: i + 1,
@@ -233,13 +236,13 @@ function generateHeadingNumbering(settings: any): string {
         prefix: settings[tag]?.numbering?.prefix || '',
         suffix: settings[tag]?.numbering?.suffix || '.'
     }));
-    
+
     // Find enabled levels
     const enabledLevels = levelConfigs.filter(l => l.enabled);
     if (enabledLevels.length === 0) {
         return '#set heading(numbering: none)';
     }
-    
+
     // Map CSS numbering style to Typst format
     const styleToTypst = (style: string): string => {
         switch (style) {
@@ -252,18 +255,18 @@ function generateHeadingNumbering(settings: any): string {
             default: return '"1"';
         }
     };
-    
+
     // Strategy: Use custom counters (h1c, h2c, etc.) that we manage ourselves
     // This allows us to only count and display enabled levels
     let result = '// Disable default heading numbering - we use custom counters\n';
     result += '#set heading(numbering: none)\n\n';
-    
+
     // Create custom counters for each enabled level
     enabledLevels.forEach(config => {
         result += `#let h${config.level}c = counter("h${config.level}-counter")\n`;
     });
     result += '\n';
-    
+
     // For each heading level, create show rules
     levelConfigs.forEach((levelConfig) => {
         if (!levelConfig.enabled) {
@@ -271,7 +274,7 @@ function generateHeadingNumbering(settings: any): string {
             const childCountersToReset = enabledLevels
                 .filter(l => l.level > levelConfig.level)
                 .map(l => `h${l.level}c.update(0)`);
-            
+
             if (childCountersToReset.length > 0) {
                 result += `#show heading.where(level: ${levelConfig.level}): it => {\n`;
                 result += `  ${childCountersToReset.join('\n  ')}\n`;
@@ -282,22 +285,22 @@ function generateHeadingNumbering(settings: any): string {
         } else {
             // Enabled level: increment counter, reset child counters, display numbering
             const { prefix, suffix } = levelConfig;
-            
+
             // Find child enabled levels to reset
             const childCountersToReset = enabledLevels
                 .filter(l => l.level > levelConfig.level)
                 .map(l => `h${l.level}c.update(0)`);
-            
+
             // Find all enabled ancestor levels (including self) for building the number
             const ancestorLevels = enabledLevels
                 .filter(l => l.level <= levelConfig.level);
-            
+
             result += `#show heading.where(level: ${levelConfig.level}): it => {\n`;
             result += `  h${levelConfig.level}c.step()\n`;
             if (childCountersToReset.length > 0) {
                 result += `  ${childCountersToReset.join('\n  ')}\n`;
             }
-            
+
             // Build the numbering display parts
             let numberingParts: string[] = [];
             ancestorLevels.forEach((ancestor, idx) => {
@@ -306,15 +309,15 @@ function generateHeadingNumbering(settings: any): string {
                     numberingParts.push(`[${ancestor.separator}]`);
                 }
             });
-            
+
             result += `  context block(above: 1.4em, below: 0.5em)[\n`;
             result += `    #text(weight: "bold")[`;
-            
+
             // Add prefix if present
             if (prefix) {
                 result += `${prefix}`;
             }
-            
+
             // Add counter displays
             numberingParts.forEach(part => {
                 if (part.startsWith('[')) {
@@ -325,7 +328,7 @@ function generateHeadingNumbering(settings: any): string {
                     result += `#${part}`;
                 }
             });
-            
+
             // Add suffix
             result += `${suffix} `;
             result += `]\n`;
@@ -334,7 +337,7 @@ function generateHeadingNumbering(settings: any): string {
             result += `}\n`;
         }
     });
-    
+
     return result;
 }
 
@@ -558,23 +561,23 @@ function getSyntaxColors(backgroundColor: string): SyntaxColors {
  */
 function generateCodeBlockStyles(options: TypstOptions): string {
     const codeBlocks = options.codeBlocks || {};
-    
+
     // Default values
     const showLineNumbers = codeBlocks.showLineNumbers !== false; // Default: true
     const showLanguage = codeBlocks.showLanguage === true; // Default: false
     const backgroundColor = codeBlocks.backgroundColor || '#f6f8fa';
     const borderColor = codeBlocks.borderColor || '#e0e0e0';
     const borderWidth = codeBlocks.borderWidth || '1';
-    
+
     // Get theme-specific colors
     const isDark = isColorDark(backgroundColor);
     const colors = getSyntaxColors(backgroundColor);
     const lineNumberColor = isDark ? '#6e7681' : '#8b949e';
     const labelTextColor = isDark ? '#cccccc' : '#24292e';
-    
+
     // Build stroke value
     const strokeValue = borderWidth === '0' ? 'none' : `${borderWidth}pt + rgb("${borderColor}")`;
-    
+
     // Generate Typst code with custom syntax highlighting function
     return `
 // Custom syntax highlighting colors
@@ -805,10 +808,10 @@ export function generatePreamble(options: TypstOptions): string {
     // Plus any custom fonts that have been registered
     let cleanedFont = fontFamily.split(',')[0].replace(/['"]/g, '').trim();
     const cleanedFontLower = cleanedFont.toLowerCase();
-    
+
     console.log(`[Typst] [generatePreamble] Input fontFamily: "${fontFamily}", cleaned: "${cleanedFont}"`);
     console.log(`[Typst] [generatePreamble] Registered custom fonts:`, Array.from(registeredCustomFontFamilies.entries()));
-    
+
     // Check if this is a registered custom font first (case-insensitive check)
     // registeredCustomFontFamilies maps user-provided name -> internal font name
     let customFontInternalName: string | undefined;
@@ -818,7 +821,7 @@ export function generatePreamble(options: TypstOptions): string {
             break;
         }
     }
-    
+
     if (customFontInternalName) {
         // Use the internal font name that Typst will recognize
         cleanedFont = customFontInternalName;
@@ -869,7 +872,7 @@ export function generatePreamble(options: TypstOptions): string {
         left: fixTypstUnit(headerMargins?.left || '0mm'),
         right: fixTypstUnit(headerMargins?.right || '0mm'),
     };
-    
+
     const typstFooterMargins = {
         top: fixTypstUnit(footerMargins?.top || '5mm'),
         left: fixTypstUnit(footerMargins?.left || '0mm'),
@@ -878,10 +881,10 @@ export function generatePreamble(options: TypstOptions): string {
 
     // Build header content with left/right padding for horizontal inset
     // Use context to conditionally show header based on page number
-    const paddedHeaderContent = header.trim() 
+    const paddedHeaderContent = header.trim()
         ? `#pad(left: ${typstHeaderMargins.left}, right: ${typstHeaderMargins.right})[${header}]`
         : '';
-    
+
     // Build footer content with left/right padding for horizontal inset
     const paddedFooterContent = footer.trim()
         ? `#pad(left: ${typstFooterMargins.left}, right: ${typstFooterMargins.right})[${footer}]`
@@ -975,16 +978,16 @@ export async function initializeCompiler(): Promise<void> {
     initPromise = (async () => {
         try {
             console.log('[Typst] [Client] Initializing WASM compiler...');
-            
+
             const typstModule = await import('@myriaddreamin/typst.ts');
             const { createTypstCompiler, initOptions, loadFonts } = typstModule;
-            
+
             // Get the preloadFontAssets function from initOptions namespace
             const preloadFontAssets = initOptions.preloadFontAssets;
-            
+
             // Create the compiler
             typstCompiler = createTypstCompiler();
-            
+
             // Prepare beforeBuild hooks
             const beforeBuildHooks: any[] = [
                 // Load built-in text fonts (includes DejaVu Sans Mono, Libertinus Serif, New Computer Modern)
@@ -992,21 +995,21 @@ export async function initializeCompiler(): Promise<void> {
                     assets: ['text'],
                 })
             ];
-            
+
             // Add custom fonts if any are pending
             if (pendingCustomFonts.length > 0) {
                 console.log(`[Typst] [Client] Loading ${pendingCustomFonts.length} custom fonts...`);
                 console.log(`[Typst] [Client] Font mapping:`, Array.from(registeredCustomFontFamilies.entries()));
-                
+
                 // Convert FontData to Uint8Array for loadFonts
                 const customFontData = pendingCustomFonts.map(f => f.data);
-                
+
                 // Add custom fonts loader
                 beforeBuildHooks.push(
                     loadFonts(customFontData, { assets: false })
                 );
             }
-            
+
             // Initialize with WASM from CDN and fonts
             await typstCompiler.init({
                 getModule: () => {
@@ -1016,11 +1019,11 @@ export async function initializeCompiler(): Promise<void> {
                 },
                 beforeBuild: beforeBuildHooks
             });
-            
+
             isInitialized = true;
             console.log('[Typst] [Client] WASM compiler initialized successfully');
             console.log('[Typst] [Client] Built-in fonts: Libertinus Serif, DejaVu Sans Mono, New Computer Modern');
-            
+
             if (registeredCustomFontFamilies.size > 0) {
                 const fontList = Array.from(registeredCustomFontFamilies.entries())
                     .map(([user, internal]) => user === internal ? user : `${user} -> ${internal}`)
@@ -1062,7 +1065,7 @@ export async function setCustomFonts(fonts: FontData[]): Promise<void> {
     // Check if fonts have changed
     const currentFontIds = Array.from(loadedCustomFonts).sort().join(',');
     const newFontIds = fonts.map(f => `${f.family}-${f.data.length}`).sort().join(',');
-    
+
     if (currentFontIds === newFontIds && isInitialized) {
         console.log('[Typst] [Client] Custom fonts unchanged, skipping reinit');
         return;
@@ -1072,16 +1075,16 @@ export async function setCustomFonts(fonts: FontData[]): Promise<void> {
 
     // Update pending fonts
     pendingCustomFonts = fonts;
-    
+
     // Pre-populate font family mapping by parsing font files NOW
     // This ensures generatePreamble can use the correct names even before init completes
     registeredCustomFontFamilies.clear();
     loadedCustomFonts.clear();
-    
+
     for (const font of fonts) {
         const fontId = `${font.family}-${font.data.length}`;
         loadedCustomFonts.add(fontId);
-        
+
         // Parse the internal font family name from the font file
         const internalName = parseFontFamilyName(font.data);
         if (internalName) {
@@ -1119,22 +1122,22 @@ function processDataUrlsToShadow(source: string, compiler: any): string {
     let newSource = source;
     let imageIndex = 0;
     const replacements: [string, string][] = [];
-    
+
     // Reset regex
     dataUrlRegex.lastIndex = 0;
-    
+
     while ((match = dataUrlRegex.exec(source)) !== null) {
         const dataUrl = match[1];
-        
+
         // Determine extension from mime type
         let ext = '.png';
         if (dataUrl.includes('image/jpeg') || dataUrl.includes('image/jpg')) ext = '.jpg';
         else if (dataUrl.includes('image/gif')) ext = '.gif';
         else if (dataUrl.includes('image/webp')) ext = '.webp';
         else if (dataUrl.includes('image/svg')) ext = '.svg';
-        
+
         const virtualPath = `/image_${imageIndex++}${ext}`;
-        
+
         try {
             // Parse data URL
             const commaIndex = dataUrl.indexOf(',');
@@ -1145,7 +1148,7 @@ function processDataUrlsToShadow(source: string, compiler: any): string {
                 for (let i = 0; i < binaryString.length; i++) {
                     bytes[i] = binaryString.charCodeAt(i);
                 }
-                
+
                 // Add to compiler's shadow filesystem
                 compiler.mapShadow(virtualPath, bytes);
                 replacements.push([dataUrl, virtualPath]);
@@ -1155,13 +1158,13 @@ function processDataUrlsToShadow(source: string, compiler: any): string {
             console.error('[Typst] [Client] Failed to process data URL:', e);
         }
     }
-    
+
     // Replace data URLs with virtual paths
     for (const [dataUrl, virtualPath] of replacements) {
         newSource = newSource.split(`"${dataUrl}"`).join(`"${virtualPath}"`);
         newSource = newSource.split(`'${dataUrl}'`).join(`'${virtualPath}'`);
     }
-    
+
     return newSource;
 }
 
@@ -1180,24 +1183,24 @@ export async function compileTypstToPdf({ source }: CompileArgs): Promise<Uint8A
     try {
         // Reset shadow files for fresh compilation
         typstCompiler.resetShadow();
-        
+
         // Process data URLs in the source and add images to shadow filesystem
         const processedSource = processDataUrlsToShadow(source, typstCompiler);
-        
+
         // Add main file using addSource (for text files)
         typstCompiler.addSource('/main.typ', processedSource);
-        
+
         // Compile directly to PDF format
         // CompileFormatEnum.pdf = 1
         const result = await typstCompiler.compile({
             mainFilePath: '/main.typ',
             format: 1 // CompileFormatEnum.pdf
         });
-        
+
         if (!result.result) {
             const diagnostics = result.diagnostics || [];
             let errorMsg = diagnostics.map((d: any) => d.message || JSON.stringify(d)).join('\n') || 'Compilation failed';
-            
+
             // Add helpful info about available fonts if there's a font error
             if (errorMsg.toLowerCase().includes('font')) {
                 const availableFonts = ['Libertinus Serif', 'DejaVu Sans Mono', 'New Computer Modern'];
@@ -1210,7 +1213,7 @@ export async function compileTypstToPdf({ source }: CompileArgs): Promise<Uint8A
                     errorMsg += `\nNo custom fonts loaded.`;
                 }
             }
-            
+
             throw new Error(errorMsg);
         }
 

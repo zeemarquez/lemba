@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore, TemplateVariable } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle } from "lucide-react";
 import { Input } from "@/components/plate-ui/input";
 import { Button } from "@/components/plate-ui/button";
 import { useState, useEffect, useMemo, Fragment } from "react";
@@ -19,10 +19,10 @@ import {
 const FONT_FAMILIES = [
     // Serif - Libertinus Serif (the main text font)
     { label: 'Libertinus Serif (Classic)', value: "'Libertinus Serif', serif", category: 'Serif' },
-    
+
     // Monospace - DejaVu Sans Mono
     { label: 'DejaVu Sans Mono (Code)', value: "'DejaVu Sans Mono', monospace", category: 'Monospace' },
-    
+
     // Math/Academic - New Computer Modern
     { label: 'New Computer Modern (Academic)', value: "'New Computer Modern', serif", category: 'Serif' },
 ];
@@ -113,6 +113,7 @@ export function TemplateEditor() {
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'figures', label: 'Figures', icon: ImageIcon },
+        { id: 'alerts', label: 'Alert Blocks', icon: AlertCircle },
         { id: 'tables', label: 'Tables', icon: TableIcon },
         { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'front-page', label: 'Front Page', icon: FileText },
@@ -156,7 +157,7 @@ export function TemplateEditor() {
     // Show empty state only if we have templates loaded but no active template, or if activeTemplateId is set but template not found
     // Don't show empty state if templates array is empty (still loading) and activeTemplateId is set (might be restoring)
     const isLoading = templates.length === 0 && activeTemplateId !== null;
-    
+
     if (isLoading) {
         // Still loading templates, don't show empty state yet
         return (
@@ -166,7 +167,7 @@ export function TemplateEditor() {
             </div>
         );
     }
-    
+
     if (!template || !settings) {
         return (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 bg-muted/10">
@@ -208,11 +209,11 @@ export function TemplateEditor() {
 
         const generateNumberingCss = () => {
             const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
-            
+
             // Find the first enabled level - this becomes the "root" for numbering
             const firstEnabledIndex = levels.findIndex(level => (s as any)[level]?.numbering?.enabled);
             if (firstEnabledIndex === -1) return ''; // No numbering enabled
-            
+
             // Reset all counters at the root, starting from the first enabled level
             const countersToReset = levels.slice(firstEnabledIndex).map(l => `${l}-counter`).join(' ');
             let css = `.prose { counter-reset: ${countersToReset}; }\n`;
@@ -467,87 +468,87 @@ export function TemplateEditor() {
                                 <div className="space-y-5">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Size</label>
                                     <div className="space-y-4">
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button className="w-full flex items-center justify-between bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-bold text-foreground hover:bg-muted transition-all outline-none focus:ring-4 focus:ring-primary/5 focus:border-border">
-                                                <span>
-                                                    {settings.pageSize?.preset 
-                                                        ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
-                                                        : settings.pageSize?.custom 
-                                                        ? `Custom (${settings.pageSize.custom.width} × ${settings.pageSize.custom.height})`
-                                                        : 'A4'}
-                                                </span>
-                                                <ChevronDown className="w-4 h-4 opacity-50" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto">
-                                            {PAGE_SIZES.map((size) => (
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button className="w-full flex items-center justify-between bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-bold text-foreground hover:bg-muted transition-all outline-none focus:ring-4 focus:ring-primary/5 focus:border-border">
+                                                    <span>
+                                                        {settings.pageSize?.preset
+                                                            ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
+                                                            : settings.pageSize?.custom
+                                                                ? `Custom (${settings.pageSize.custom.width} × ${settings.pageSize.custom.height})`
+                                                                : 'A4'}
+                                                    </span>
+                                                    <ChevronDown className="w-4 h-4 opacity-50" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto">
+                                                {PAGE_SIZES.map((size) => (
+                                                    <DropdownMenuItem
+                                                        key={size.value}
+                                                        className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground"
+                                                        onSelect={() => updateSetting('pageSize', { preset: size.value })}
+                                                    >
+                                                        <div className="flex flex-col">
+                                                            <span className="font-semibold">{size.label}</span>
+                                                            <span className="text-xs text-muted-foreground">{size.dimensions}</span>
+                                                        </div>
+                                                    </DropdownMenuItem>
+                                                ))}
                                                 <DropdownMenuItem
-                                                    key={size.value}
-                                                    className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground"
-                                                    onSelect={() => updateSetting('pageSize', { preset: size.value })}
+                                                    className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground border-t border-border mt-1"
+                                                    onSelect={() => updateSetting('pageSize', {
+                                                        custom: {
+                                                            width: settings.pageSize?.custom?.width || '210mm',
+                                                            height: settings.pageSize?.custom?.height || '297mm'
+                                                        }
+                                                    })}
                                                 >
-                                                    <div className="flex flex-col">
-                                                        <span className="font-semibold">{size.label}</span>
-                                                        <span className="text-xs text-muted-foreground">{size.dimensions}</span>
-                                                    </div>
+                                                    <span className="font-semibold">Custom</span>
                                                 </DropdownMenuItem>
-                                            ))}
-                                            <DropdownMenuItem
-                                                className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground border-t border-border mt-1"
-                                                onSelect={() => updateSetting('pageSize', { 
-                                                    custom: { 
-                                                        width: settings.pageSize?.custom?.width || '210mm', 
-                                                        height: settings.pageSize?.custom?.height || '297mm' 
-                                                    } 
-                                                })}
-                                            >
-                                                <span className="font-semibold">Custom</span>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                    
-                                    {/* Custom Size Inputs */}
-                                    {settings.pageSize?.custom && (
-                                        <div className="grid grid-cols-2 gap-4 p-4 bg-muted/30 border border-border rounded-2xl">
-                                            <div className="space-y-2">
-                                                <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Width</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
-                                                    value={settings.pageSize.custom.width}
-                                                    onChange={(e) => {
-                                                        const width = e.target.value;
-                                                        updateSetting('pageSize', {
-                                                            custom: {
-                                                                width,
-                                                                height: settings.pageSize?.custom?.height || '297mm'
-                                                            }
-                                                        });
-                                                    }}
-                                                    placeholder="210mm"
-                                                />
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+
+                                        {/* Custom Size Inputs */}
+                                        {settings.pageSize?.custom && (
+                                            <div className="grid grid-cols-2 gap-4 p-4 bg-muted/30 border border-border rounded-2xl">
+                                                <div className="space-y-2">
+                                                    <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Width</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                        value={settings.pageSize.custom.width}
+                                                        onChange={(e) => {
+                                                            const width = e.target.value;
+                                                            updateSetting('pageSize', {
+                                                                custom: {
+                                                                    width,
+                                                                    height: settings.pageSize?.custom?.height || '297mm'
+                                                                }
+                                                            });
+                                                        }}
+                                                        placeholder="210mm"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Height</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                        value={settings.pageSize.custom.height}
+                                                        onChange={(e) => {
+                                                            const height = e.target.value;
+                                                            updateSetting('pageSize', {
+                                                                custom: {
+                                                                    width: settings.pageSize?.custom?.width || '210mm',
+                                                                    height
+                                                                }
+                                                            });
+                                                        }}
+                                                        placeholder="297mm"
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Height</label>
-                                                <input
-                                                    type="text"
-                                                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
-                                                    value={settings.pageSize.custom.height}
-                                                    onChange={(e) => {
-                                                        const height = e.target.value;
-                                                        updateSetting('pageSize', {
-                                                            custom: {
-                                                                width: settings.pageSize?.custom?.width || '210mm',
-                                                                height
-                                                            }
-                                                        });
-                                                    }}
-                                                    placeholder="297mm"
-                                                />
-                                            </div>
-                                        </div>
-                                    )}
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -1135,6 +1136,40 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
+                    {/* Alerts Section */}
+                    <section id="section-alerts" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <AlertCircle size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Alert blocks</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Show Header Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show alert label</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, alerts show a bold header (e.g. NOTE, TIP) and an icon. When disabled, only a larger icon is shown on the left.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('alerts.showHeader', !settings.alerts?.showHeader)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.alerts?.showHeader !== false ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.alerts?.showHeader !== false ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
                     {/* Tables Section */}
                     <section id="section-tables" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -1281,8 +1316,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
                                         <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.tables?.border?.color || '#000000' }}
                                             >
                                                 <input
@@ -1362,8 +1397,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
                                         <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.tables?.headerStyle?.backgroundColor || '#f4f4f4' }}
                                             >
                                                 <input
@@ -1395,8 +1430,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
                                         <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.tables?.headerStyle?.textColor || '#000000' }}
                                             >
                                                 <input
@@ -1519,8 +1554,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
                                         <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.tables?.cellStyle?.backgroundColor || '#ffffff' }}
                                             >
                                                 <input
@@ -1552,8 +1587,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
                                         <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.tables?.cellStyle?.textColor || '#000000' }}
                                             >
                                                 <input
@@ -1645,7 +1680,7 @@ export function TemplateEditor() {
                                     <DropdownMenuTrigger asChild>
                                         <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
                                             <div className="flex items-center gap-3">
-                                                <div 
+                                                <div
                                                     className="w-5 h-5 rounded border border-border"
                                                     style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
                                                 />
@@ -1829,8 +1864,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
                                         <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
                                             >
                                                 <input
@@ -1862,8 +1897,8 @@ export function TemplateEditor() {
                                     <div className="space-y-3">
                                         <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Color</label>
                                         <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div 
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" 
+                                            <div
+                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
                                                 style={{ backgroundColor: settings.codeBlocks?.borderColor || '#e0e0e0' }}
                                             >
                                                 <input
@@ -2005,7 +2040,7 @@ export function TemplateEditor() {
                                     {/* Title Settings */}
                                     <div className="pt-8 border-t border-border space-y-8">
                                         <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Title</h3>
-                                        
+
                                         <HeaderFooterPlateEditor
                                             content={settings.outline?.title?.content || ''}
                                             onChange={(value) => updateSetting('outline.title.content', value)}
@@ -2283,7 +2318,7 @@ export function TemplateEditor() {
                             <p className="text-sm text-muted-foreground">
                                 Define document variables that can be inserted into headers and footers. Variable values are set per-document when exporting.
                             </p>
-                            
+
                             <div className="space-y-3">
                                 {(settings.variables || []).map((variable: TemplateVariable, index: number) => (
                                     <div key={variable.id} className="flex items-center gap-3">
@@ -2311,7 +2346,7 @@ export function TemplateEditor() {
                                         </Button>
                                     </div>
                                 ))}
-                                
+
                                 <Button
                                     variant="outline"
                                     className="w-full rounded-xl border-dashed"

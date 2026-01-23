@@ -51,6 +51,9 @@ interface SerializeContext {
         };
         alignment?: 'left' | 'center' | 'right';
     };
+    alerts?: {
+        showHeader: boolean;
+    };
     /** Internal figure counter - managed during serialization */
     _figureCounter?: { value: number };
 }
@@ -93,7 +96,7 @@ function escapeTypstString(text: string): string {
 function scaleTypstUnit(value: string | number | undefined, factor: number): string {
     if (value === undefined || value === null || value === '') return '';
     const s = String(value).trim();
-    
+
     // Match number with optional unit
     const match = s.match(/^(-?\d+(?:\.\d+)?)(px|pt|%|mm|cm|em|in)?$/i);
     if (match) {
@@ -104,9 +107,39 @@ function scaleTypstUnit(value: string | number | undefined, factor: number): str
         const finalUnit = unit.toLowerCase() === 'px' ? 'pt' : unit;
         return `${scaled}${finalUnit}`;
     }
-    
+
     // If no match, return as-is through fixTypstUnit
     return fixTypstUnit(value);
+}
+
+function getAlertIconTypst(type: string): string {
+    let color = "#0070f3";
+    let path = "";
+    switch (type) {
+        case 'TIP':
+            color = "#38b2ac";
+            path = "<path d='M9 18h6m-5 4h4m1-10c0-2.209-1.791-4-4-4s-4 1.791-4 4c0 1.25.75 2.33 1.83 2.76.67.27 1.17.9 1.17 1.63V16h2v-1.61c0-.73.5-1.36 1.17-1.63C14.25 12.33 15 11.25 15 10z'></path>";
+            break;
+        case 'IMPORTANT':
+            color = "#9f7aea";
+            path = "<path d='M6 3h12l4 6-10 13L2 9z'></path>";
+            break;
+        case 'WARNING':
+            color = "#ed8936";
+            path = "<path d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'></path><line x1='12' y1='9' x2='12' y2='13'></line><line x1='12' y1='17' x2='12.01' y2='17'></line>";
+            break;
+        case 'CAUTION':
+            color = "#f56565";
+            path = "<path d='M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86L7.86 2z'></path><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>";
+            break;
+        case 'NOTE':
+        default:
+            color = "#0070f3";
+            path = "<circle cx='12' cy='12' r='10'></circle><line x1='12' y1='16' x2='12' y2='12'></line><line x1='12' y1='8' x2='12.01' y2='8'></line>";
+            break;
+    }
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='${color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${path}</svg>`;
+    return svg;
 }
 
 function serializeNode(node: Descendant, context: SerializeContext, nextSibling?: Descendant): string {
@@ -189,6 +222,61 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
         case 'blockquote':
             return `#quote(block: true)[${children}]\n`;
 
+        case 'callout': {
+            const icon = (element as any).icon;
+            let type = 'NOTE';
+            if (icon === '💡') type = 'TIP';
+            else if (icon === '💎') type = 'IMPORTANT';
+            else if (icon === '⚠️') type = 'WARNING';
+            else if (icon === '🚨') type = 'CAUTION';
+
+            let color = 'rgb("#f0f7ff")';
+            let stroke = 'rgb("#0070f3")';
+            let alertIcon = 'ℹ️';
+
+            switch (type) {
+                case 'TIP':
+                    color = 'rgb("#e6fffa")';
+                    stroke = 'rgb("#38b2ac")';
+                    break;
+                case 'IMPORTANT':
+                    color = 'rgb("#faf5ff")';
+                    stroke = 'rgb("#9f7aea")';
+                    break;
+                case 'WARNING':
+                    color = 'rgb("#fffaf0")';
+                    stroke = 'rgb("#ed8936")';
+                    break;
+                case 'CAUTION':
+                    color = 'rgb("#fff5f5")';
+                    stroke = 'rgb("#f56565")';
+                    break;
+                case 'NOTE':
+                default:
+                    color = 'rgb("#f0f7ff")';
+                    stroke = 'rgb("#0070f3")';
+                    break;
+            }
+
+            const showHeader = context.alerts?.showHeader !== false;
+
+            if (showHeader) {
+                return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+  #text(fill: ${stroke}, weight: "bold")[#box(height: 1.1em, baseline: 15%, image.decode("${getAlertIconTypst(type)}")) ${type}] \\
+  ${children}
+]\n`;
+            } else {
+                return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+  #grid(
+    columns: (auto, 1fr),
+    column-gutter: 12pt,
+    smallcaps(text(size: 2.2em, image.decode("${getAlertIconTypst(type)}"))),
+    align(horizon + left)[${children}]
+  )
+]\n`;
+            }
+        }
+
         case 'code_block':
             const lang = (element as any).lang || '';
             return `\`\`\`${lang}\n${element.children.map((c: any) => c.text).join('')}\n\`\`\`\n`;
@@ -237,23 +325,23 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             // Check for figcaption attribute or caption property
             const figcaptionText = e.figcaption || (e.caption ? (Array.isArray(e.caption) ? e.caption.map((c: any) => c.text || '').join('') : e.caption) : '');
             const captionEnabled = context.figures?.captionEnabled ?? true;
-            
+
             // Use align from element, or default from template
             const imgAlign = align || context.figures?.alignment;
-            
+
             // Helper to wrap content with alignment
             const wrapImgAlign = (content: string) => {
                 if (imgAlign === 'center') return `#align(center)[${content}]`;
                 if (imgAlign === 'right') return `#align(right)[${content}]`;
                 return content;
             };
-            
+
             // Helper to wrap content with margins block
             const wrapMargins = (content: string) => {
                 const margins = context.figures?.margins;
                 const hasMargins = margins && (margins.top || margins.bottom || margins.left || margins.right);
                 if (!hasMargins) return content;
-                
+
                 const marginArgs: string[] = [];
                 if (margins.top) marginArgs.push(`above: ${fixTypstUnit(margins.top)}`);
                 if (margins.bottom) marginArgs.push(`below: ${fixTypstUnit(margins.bottom)}`);
@@ -265,7 +353,7 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
                 }
                 return `#block(${marginArgs.join(', ')})[${content}]`;
             };
-            
+
             if (figcaptionText && captionEnabled) {
                 // Increment figure counter
                 if (context._figureCounter) {
@@ -277,7 +365,7 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
                 const formattedCaption = captionFormat
                     .replace('#', String(figNum))
                     .replace('{Caption}', figcaptionText);
-                
+
                 // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
                 const figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
                 return wrapMargins(wrapImgAlign(figureCall));
@@ -372,14 +460,14 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
     // Check if content needs context (page numbers, total pages, dates need context)
     // Title, variables are just plain text and don't need context
     const needsContext = placeholderType === 'page' || placeholderType === 'totalPages' || placeholderType === 'date';
-    
+
     // If we're NOT inside a context (i.e., in body/front page) and content needs context,
     // we must wrap the entire output in context
     const wrapInContext = needsContext && !context.insideContext;
 
     // Check if we need any styling
     const hasStyles = bold || italic || underline || fontSize || fontFamily;
-    
+
     if (!hasStyles) {
         // No styling - just return content, wrapped in context if needed
         if (wrapInContext) {
@@ -389,7 +477,7 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
         }
         return content;
     }
-    
+
     // Build style parameters
     const styles: string[] = [];
     if (bold) styles.push('weight: "bold"');
@@ -399,22 +487,22 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
         const cleanFont = fontFamily.replace(/^['"]|['"]$/g, '').split(',')[0].trim();
         styles.push(`font: "${cleanFont}"`);
     }
-    
+
     // Apply styling using #text()[...] wrapper
     // For header/footer (insideContext=true): context propagates into content brackets
     // For body (insideContext=false): we wrap everything in context at the end
     let result = content;
-    
+
     // Apply underline first (innermost)
     if (underline) {
         result = `#underline[${result}]`;
     }
-    
+
     // Apply text styling (outermost)
     if (styles.length > 0) {
         result = `#text(${styles.join(', ')})[${result}]`;
     }
-    
+
     // If content needs context and we're not already inside one, wrap in context
     if (wrapInContext) {
         // The result starts with # - we need to wrap the expression in context
@@ -423,7 +511,7 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
         const expr = result.startsWith('#') ? result.slice(1) : result;
         return `#context ${expr}`;
     }
-    
+
     return result;
 }
 
@@ -442,7 +530,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     // For header/footer tables (insideContext=true), always use '1fr' to fill width
     const isHeaderFooter = context.insideContext === true;
     const equalWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
-    const columns = equalWidth 
+    const columns = equalWidth
         ? `(${'1fr, '.repeat(maxCols).slice(0, -2)})`
         : `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
 
@@ -450,7 +538,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     // Plate stores borders on each cell, not on the table element
     // When "No Border" is selected, cells have borders.{top,right,bottom,left}.size = 0
     let hideBorders = false;
-    
+
     // Check table-level borderNone first
     if ((element as any).borderNone) {
         hideBorders = true;
@@ -462,7 +550,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             const cellBorders = firstCell?.borders;
             if (cellBorders) {
                 // If all border sizes are explicitly 0, hide borders
-                const hasNoBorders = 
+                const hasNoBorders =
                     (cellBorders.top?.size === 0 || cellBorders.top?.size === '0') &&
                     (cellBorders.right?.size === 0 || cellBorders.right?.size === '0') &&
                     (cellBorders.bottom?.size === 0 || cellBorders.bottom?.size === '0') &&
@@ -475,7 +563,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     }
 
     let tableContent = `table(\n  columns: ${columns},\n`;
-    
+
     // Add stroke settings
     if (hideBorders) {
         tableContent += `  stroke: none,\n`;
@@ -483,7 +571,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         // Apply custom border settings from template
         const borderWidth = context.tables?.border?.width;
         const borderColor = context.tables?.border?.color;
-        
+
         if (borderWidth || borderColor) {
             const strokeParts: string[] = [];
             if (borderWidth) strokeParts.push(`${borderWidth}pt`);
@@ -511,13 +599,13 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     // Estimate total lines in the table by counting lines in each cell
     let totalLines = 0;
     const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
-    
+
     rows.forEach(row => {
         (row.children as TElement[]).forEach(cell => {
             const cellContent = serializeNodesToTypst(cell.children, context).trim();
             const isHeader = cell.type === 'th';
             const verticalAlign = (cell as any).verticalAlign as string | undefined;
-            
+
             // Count lines in this cell: explicit newlines + estimated wrapping
             const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
             // Estimate additional lines from text wrapping (remove newlines for this calculation)
@@ -526,7 +614,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             // Use the maximum of explicit lines or estimated wrapped lines
             const cellLines = Math.max(explicitLines, estimatedWrappedLines);
             totalLines += cellLines;
-            
+
             // Apply text styles based on whether it's a header or regular cell
             let finalContent = cellContent;
             if (isHeader) {
@@ -538,16 +626,16 @@ function serializeTable(element: TElement, context: SerializeContext): string {
                 if (cellItalic) finalContent = `_${finalContent}_`;
                 if (cellUnderline) finalContent = `#underline[${finalContent}]`;
             }
-            
+
             // Apply text color based on cell type
             const textColor = isHeader ? headerTextColor : cellTextColor;
             if (textColor) {
                 finalContent = `#text(fill: rgb("${textColor}"))[${finalContent}]`;
             }
-            
+
             // Build table.cell arguments
             const cellArgs: string[] = [];
-            
+
             // Set explicit alignment - use textAlign from style settings, or vertical alignment if specified
             // Priority: vertical alignment if specified, otherwise use textAlign from header/cell style
             if (verticalAlign === 'middle') {
@@ -559,42 +647,42 @@ function serializeTable(element: TElement, context: SerializeContext): string {
                 const textAlign = isHeader ? headerTextAlign : cellTextAlign;
                 cellArgs.push(`align: ${textAlign}`);
             }
-            
+
             // Add background color based on cell type
             const bgColor = isHeader ? headerBgColor : cellBgColor;
             if (bgColor) {
                 cellArgs.push(`fill: rgb("${bgColor}")`);
             }
-            
+
             // Always use table.cell to ensure explicit alignment is set
             tableContent += `  table.cell(${cellArgs.join(', ')})[${finalContent}],\n`;
         });
     });
 
     tableContent += `)`;
-    
+
     // The table needs the # prefix to be a valid Typst expression
     const tableWithPrefix = `#${tableContent}`;
-    
+
     // For header/footer tables (insideContext=true), always use 100% width and ignore preventPageBreak
     // Also skip alignment wrapping for header/footer tables to ensure they fill width
     const maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
-    
+
     // Check if table is too large for a single page - if so, ignore preventPageBreak
     // Also ignore preventPageBreak for header/footer tables
     // Estimate: tables with more than 50 total lines are likely too tall for a single page
     // (assuming ~20-30 lines fit on a typical page with margins)
     const shouldPreventPageBreak = !isHeaderFooter && context.tables?.preventPageBreak && totalLines <= 50;
-    
+
     // For header/footer tables, return the table directly without alignment wrapping to ensure full width
     if (isHeaderFooter) {
         return `${tableWithPrefix}\n`;
     }
-    
+
     // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
     const alignment = context.tables?.alignment || 'center';
     let finalTable: string;
-    
+
     // Wrap in block() if preventPageBreak is enabled and table is not too large
     if (shouldPreventPageBreak) {
         // Combine breakable and width if maxWidth is less than 100%
@@ -603,7 +691,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             blockArgs.push(`width: ${maxWidth}%`);
         }
         const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
-        
+
         // Apply alignment to the block
         if (alignment === 'left') {
             finalTable = `#align(left)[${tableBlock}]`;
@@ -619,7 +707,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         if (maxWidth < 100) {
             tableWithWidth = `#block(width: ${maxWidth}%)[${tableWithPrefix}]`;
         }
-        
+
         // Apply alignment directly to the table (or table with width block)
         if (alignment === 'left') {
             finalTable = `#align(left)[${tableWithWidth}]`;
@@ -630,6 +718,6 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             finalTable = `#align(center)[${tableWithWidth}]`;
         }
     }
-    
+
     return `${finalTable}\n`;
 }
