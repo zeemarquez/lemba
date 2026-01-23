@@ -37,7 +37,7 @@ export function useCustomFonts() {
                     try {
                         const url = URL.createObjectURL(font.blob);
                         blobUrlsRef.current.push(url);
-                        
+
                         return `
                             @font-face {
                                 font-family: '${font.family}';
@@ -53,7 +53,7 @@ export function useCustomFonts() {
                     }
                 })
             );
-            
+
             const validFontFaces = fontFaces.filter(face => face !== '');
             setFontStyles(validFontFaces.join('\n'));
         };

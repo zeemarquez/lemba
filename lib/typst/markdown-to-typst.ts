@@ -42,6 +42,9 @@ export interface MarkdownToTypstOptions {
         };
         alignment?: 'left' | 'center' | 'right';
     };
+    alerts?: {
+        showHeader: boolean;
+    };
 }
 
 // Strip frontmatter from markdown content
@@ -56,7 +59,7 @@ let figureCounter = 0;
 export function markdownToTypst(markdown: string, options: MarkdownToTypstOptions = {}): string {
     // Reset figure counter at the start of each document
     figureCounter = 0;
-    
+
     const instance = new Marked();
 
     instance.use(markedKatex({
@@ -67,7 +70,7 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 
     // Strip frontmatter (used for variables) before parsing
     const markdownWithoutFrontmatter = stripFrontmatter(markdown || '');
-    
+
     const tokens = instance.lexer(markdownWithoutFrontmatter);
     console.log(`[Typst] [Markdown] Lexed ${tokens.length} tokens.`);
 
@@ -118,6 +121,36 @@ function fixTypstUnit(value: string | number | undefined): string {
     return s;
 }
 
+function getAlertIconTypst(type: string): string {
+    let color = "#0070f3";
+    let path = "";
+    switch (type) {
+        case 'TIP':
+            color = "#38b2ac";
+            path = "<path d='M9 18h6m-5 4h4m1-10c0-2.209-1.791-4-4-4s-4 1.791-4 4c0 1.25.75 2.33 1.83 2.76.67.27 1.17.9 1.17 1.63V16h2v-1.61c0-.73.5-1.36 1.17-1.63C14.25 12.33 15 11.25 15 10z'></path>";
+            break;
+        case 'IMPORTANT':
+            color = "#9f7aea";
+            path = "<path d='M6 3h12l4 6-10 13L2 9z'></path>";
+            break;
+        case 'WARNING':
+            color = "#ed8936";
+            path = "<path d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'></path><line x1='12' y1='9' x2='12' y2='13'></line><line x1='12' y1='17' x2='12.01' y2='17'></line>";
+            break;
+        case 'CAUTION':
+            color = "#f56565";
+            path = "<path d='M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86L7.86 2z'></path><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>";
+            break;
+        case 'NOTE':
+        default:
+            color = "#0070f3";
+            path = "<circle cx='12' cy='12' r='10'></circle><line x1='12' y1='16' x2='12' y2='12'></line><line x1='12' y1='8' x2='12.01' y2='8'></line>";
+            break;
+    }
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='${color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${path}</svg>`;
+    return svg;
+}
+
 function processToken(token: any, options: MarkdownToTypstOptions = {}): string {
     switch (token.type) {
         case 'space':
@@ -138,8 +171,76 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             }).join('') + '\n';
         case 'code':
             return "```" + (token.lang || '') + "\n" + token.text + "\n```\n\n";
-        case 'blockquote':
+        case 'blockquote': {
+            // Check if it's a GitHub-style alert
+            const firstChild = token.tokens?.[0];
+            if (firstChild && firstChild.type === 'paragraph') {
+                const text = firstChild.text || '';
+                const match = text.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i);
+                if (match) {
+                    const type = match[1].toUpperCase();
+                    // Remove the alert prefix from the first child text
+                    firstChild.text = text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+
+                    // Also clean up the nested tokens to prevent duplication in rendering
+                    if (firstChild.tokens) {
+                        for (const subToken of firstChild.tokens) {
+                            if (subToken.type === 'text') {
+                                subToken.text = subToken.text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+                                break;
+                            }
+                        }
+                    }
+
+                    let color = 'rgb("#f0f4f8")';
+                    let stroke = 'rgb("#0070f3")';
+                    let icon = 'ℹ️';
+
+                    switch (type) {
+                        case 'TIP':
+                            color = 'rgb("#e6fffa")';
+                            stroke = 'rgb("#38b2ac")';
+                            break;
+                        case 'IMPORTANT':
+                            color = 'rgb("#faf5ff")';
+                            stroke = 'rgb("#9f7aea")';
+                            break;
+                        case 'WARNING':
+                            color = 'rgb("#fffaf0")';
+                            stroke = 'rgb("#ed8936")';
+                            break;
+                        case 'CAUTION':
+                            color = 'rgb("#fff5f5")';
+                            stroke = 'rgb("#f56565")';
+                            break;
+                        case 'NOTE':
+                        default:
+                            color = 'rgb("#f0f7ff")';
+                            stroke = 'rgb("#0070f3")';
+                            break;
+                    }
+
+                    const showHeader = options.alerts?.showHeader !== false;
+
+                    if (showHeader) {
+                        return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+  #text(fill: ${stroke}, weight: "bold")[#box(height: 1.1em, baseline: 15%, image.decode("${getAlertIconTypst(type)}")) ${type}] \\
+  ${parseTokens(token.tokens, options)}
+]\n\n`;
+                    } else {
+                        return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+  #grid(
+    columns: (auto, 1fr),
+    column-gutter: 12pt,
+    smallcaps(text(size: 2.2em, image.decode("${getAlertIconTypst(type)}"))),
+    align(horizon + left)[${parseTokens(token.tokens, options)}]
+  )
+]\n\n`;
+                    }
+                }
+            }
             return `#quote(block: true)[${parseTokens(token.tokens, options)}]\n\n`;
+        }
         case 'table':
             const cols = token.header.length;
             // Get header style settings
@@ -161,17 +262,17 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             // Get border settings
             const borderWidth = options.tables?.border?.width;
             const borderColor = options.tables?.border?.color;
-            
+
             // Determine column sizing based on equalWidthColumns setting
             // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
             // When equalWidthColumns is true, use '1fr' for equal width columns
             const equalWidth = options.tables?.equalWidthColumns === true;
-            const columnSpec = equalWidth 
+            const columnSpec = equalWidth
                 ? `(${'1fr, '.repeat(cols).slice(0, -2)})`
                 : `(${'auto, '.repeat(cols).slice(0, -2)})`;
-            
+
             let tableInner = `table(\n  columns: ${columnSpec},\n  inset: 10pt,\n  align: horizon,\n`;
-            
+
             // Apply custom border settings
             if (borderWidth || borderColor) {
                 const strokeParts: string[] = [];
@@ -182,28 +283,28 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             // Estimate total lines in the table by counting lines in each cell
             let totalLines = 0;
             const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
-            
+
             token.header.forEach((cell: any) => {
                 const cellContent = parseInline(cell.tokens);
                 let formattedContent = cellContent;
-                
+
                 // Count lines in this cell: explicit newlines + estimated wrapping
                 const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
                 const textWithoutNewlines = cellContent.replace(/\n/g, ' ');
                 const estimatedWrappedLines = Math.max(1, Math.ceil(textWithoutNewlines.length / estimatedCharsPerLine));
                 const cellLines = Math.max(explicitLines, estimatedWrappedLines);
                 totalLines += cellLines;
-                
+
                 // Apply text styles for header cells
                 if (headerBold) formattedContent = `*${formattedContent}*`;
                 if (headerItalic) formattedContent = `_${formattedContent}_`;
                 if (headerUnderline) formattedContent = `#underline[${formattedContent}]`;
-                
+
                 // Apply text color for header cells
                 if (headerTextColor) {
                     formattedContent = `#text(fill: rgb("${headerTextColor}"))[${formattedContent}]`;
                 }
-                
+
                 // Use textAlign from header style settings
                 const cellArgs: string[] = [`align: ${headerTextAlign}`];
                 if (headerBgColor) {
@@ -215,24 +316,24 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 row.forEach((cell: any) => {
                     const cellContent = parseInline(cell.tokens);
                     let formattedContent = cellContent;
-                    
+
                     // Count lines in this cell: explicit newlines + estimated wrapping
                     const explicitLines = (cellContent.match(/\n/g) || []).length + 1;
                     const textWithoutNewlines = cellContent.replace(/\n/g, ' ');
                     const estimatedWrappedLines = Math.max(1, Math.ceil(textWithoutNewlines.length / estimatedCharsPerLine));
                     const cellLines = Math.max(explicitLines, estimatedWrappedLines);
                     totalLines += cellLines;
-                    
+
                     // Apply text styles for regular cells
                     if (cellBold) formattedContent = `*${formattedContent}*`;
                     if (cellItalic) formattedContent = `_${formattedContent}_`;
                     if (cellUnderline) formattedContent = `#underline[${formattedContent}]`;
-                    
+
                     // Apply text color for regular cells
                     if (cellTextColor) {
                         formattedContent = `#text(fill: rgb("${cellTextColor}"))[${formattedContent}]`;
                     }
-                    
+
                     // Use textAlign from cell style settings
                     const cellArgs: string[] = [`align: ${cellTextAlign}`];
                     if (cellBgColor) {
@@ -242,22 +343,22 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 });
             });
             tableInner += ')';
-            
+
             // The table needs the # prefix to be a valid Typst expression
             const tableWithPrefix = `#${tableInner}`;
-            
+
             // Apply maxWidth if specified (as percentage)
             const maxWidth = options.tables?.maxWidth ?? 100;
-            
+
             // Check if table is too large for a single page - if so, ignore preventPageBreak
             // Estimate: tables with more than 50 total lines are likely too tall for a single page
             // (assuming ~20-30 lines fit on a typical page with margins)
             const shouldPreventPageBreak = options.tables?.preventPageBreak && totalLines <= 50;
-            
+
             // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
             const alignment = options.tables?.alignment || 'center';
             let finalTable: string;
-            
+
             // Wrap in block() if preventPageBreak is enabled and table is not too large
             if (shouldPreventPageBreak) {
                 // Combine breakable and width if maxWidth is less than 100%
@@ -266,7 +367,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                     blockArgs.push(`width: ${maxWidth}%`);
                 }
                 const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
-                
+
                 // Apply alignment to the block
                 if (alignment === 'left') {
                     finalTable = `#align(left)[${tableBlock}]`;
@@ -282,7 +383,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 if (maxWidth < 100) {
                     tableWithWidth = `#block(width: ${maxWidth}%)[${tableWithPrefix}]`;
                 }
-                
+
                 // Apply alignment directly to the table (or table with width block)
                 if (alignment === 'left') {
                     finalTable = `#align(left)[${tableWithWidth}]`;
@@ -293,7 +394,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                     finalTable = `#align(center)[${tableWithWidth}]`;
                 }
             }
-            
+
             return `${finalTable}\n\n`;
         case 'html':
             if (token.text.match(/<!--\s*pagebreak\s*-->/i)) {
@@ -329,7 +430,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                         align = 'right';
                     }
                 }
-                
+
                 // Apply default alignment from template if not specified in image
                 if (!align) {
                     align = options.figures?.alignment || 'center';
@@ -338,11 +439,11 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 // 3. Parse figcaption attribute
                 const figcaptionMatch = token.text.match(/figcaption=["']([^"']*)["']/i);
                 const figcaption = figcaptionMatch ? figcaptionMatch[1] : undefined;
-                
+
                 // 4. Build margins block if specified
                 const margins = options.figures?.margins;
                 const hasMargins = margins && (margins.top || margins.bottom || margins.left || margins.right);
-                
+
                 // 5. If we have a caption and captions are enabled, use Typst figure
                 const captionEnabled = options.figures?.captionEnabled ?? true;
                 if (figcaption && captionEnabled) {
@@ -352,14 +453,14 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                     const formattedCaption = captionFormat
                         .replace('#', String(figureCounter))
                         .replace('{Caption}', figcaption);
-                    
+
                     // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
                     let figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
-                    
+
                     // Apply alignment
                     if (align === 'center') figureCall = `#align(center)[${figureCall}]`;
                     else if (align === 'right') figureCall = `#align(right)[${figureCall}]`;
-                    
+
                     // Wrap with block for margins
                     if (hasMargins) {
                         const marginArgs: string[] = [];
@@ -380,7 +481,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 let result = `#${imgCall}`;
                 if (align === 'center') result = `#align(center)[${result}]`;
                 else if (align === 'right') result = `#align(right)[${result}]`;
-                
+
                 // Wrap with block for margins
                 if (hasMargins) {
                     const marginArgs: string[] = [];

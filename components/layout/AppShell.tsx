@@ -135,11 +135,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                             </>
                                         )}
 
-                                    {isFile ? (
-                                        <FileText size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
-                                    ) : (
-                                        <LayoutTemplate size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
-                                    )}
+                                        {isFile ? (
+                                            <FileText size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                        ) : (
+                                            <LayoutTemplate size={14} className={cn("opacity-40 shrink-0", isActive && "opacity-100 text-primary")} />
+                                        )}
                                         {/* Hide extension in tabs too? User asked for sidebar, but tabs might be nice too. 
                                             User said: "Dont show the extension file of lies or templates"
                                             "file of lies" -> "file list" probably.
