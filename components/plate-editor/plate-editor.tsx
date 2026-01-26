@@ -1,17 +1,23 @@
 'use client';
 
-import React, { useMemo, useEffect, useRef, useCallback, useState } from 'react';
-import { createPlateEditor, Plate, usePlateEditor } from 'platejs/react';
+import { useMemo, useEffect, useRef, useCallback } from 'react';
+import { Plate, usePlateEditor } from 'platejs/react';
 import { useStore } from '@/lib/store';
 import { useMounted } from '@/hooks/use-mounted';
+import { debounce } from 'lodash';
 
 import { EditorKit } from '@/components/plate-editor/editor-kit';
 import { Editor, EditorContainer } from '@/components/plate-ui/editor';
 import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
 import { SourceEditor } from '@/components/editor/SourceEditor';
-import { preprocessMathDelimiters, postprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
+import { postprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 import { Path, Node } from 'slate';
+import { 
+  processMarkdownDiff, 
+  updateCacheFromMarkdown,
+  isCacheValid 
+} from '@/lib/markdown-processor';
 
 interface PlateEditorProps {
   content: string;
@@ -21,80 +27,152 @@ interface PlateEditorProps {
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode } = useStore();
   const mounted = useMounted();
-  const [isLoading, setIsLoading] = React.useState(true);
 
   // Use a ref to track if we're currently updating from Plate to avoid infinite loops
   const isUpdatingFromPlate = useRef(false);
-
-  // Cache the last content we deserialized to avoid re-doing work
+  // Track previous editor view mode to detect actual mode switches
+  const prevEditorViewMode = useRef(editorViewMode);
+  // Track last deserialized content to avoid redundant deserialization
   const lastDeserializedContent = useRef<string | null>(null);
+  // Track the last nodes array reference we set - to avoid redundant setValue calls
+  const lastSetNodesRef = useRef<any[] | null>(null);
+  // Refs to store latest values for debounced function
+  const editorRef = useRef<any>(null);
+  const contentRef = useRef(content);
+  const onChangeRef = useRef(onChange);
 
+  // Update refs when values change
+  useEffect(() => {
+    contentRef.current = content;
+    onChangeRef.current = onChange;
+  }, [content, onChange]);
+
+  // Compute initialValue using the optimized processor with caching
+  // Only compute once on mount - subsequent updates go through useEffect
   const initialValue = useMemo(() => {
-    // Optimization: Initialize empty to allow immediate mount.
-    // The useEffect below will handle the actual content deserialization asynchronously.
-    const tempEditor = createPlateEditor({ plugins: EditorKit });
-    lastDeserializedContent.current = null;
-    return tempEditor.api.markdown.deserialize('');
-  }, []); // Only once
+    // Use the cached processor for initial value - this also warms up the cache
+    const { nodes } = processMarkdownDiff(content);
+    lastDeserializedContent.current = content;
+    lastSetNodesRef.current = nodes; // Track initial nodes
+    return nodes;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only compute once on mount
 
   const editor = usePlateEditor({
     plugins: EditorKit,
     value: initialValue,
   });
 
+  // Update editor ref
+  editorRef.current = editor;
+
+  // Create debounced serialization function using refs to always use latest values
+  const debouncedSerialize = useMemo(
+    () =>
+      debounce((value: any) => {
+        // Use refs to get latest values at execution time
+        const currentEditor = editorRef.current;
+        const currentContent = contentRef.current;
+        const currentOnChange = onChangeRef.current;
+
+        if (!currentEditor) return;
+
+        // Serialize and postprocess to normalize block equation format
+        const rawMd = currentEditor.api.markdown.serialize({ value });
+        const md = postprocessMathDelimiters(rawMd);
+        if (md !== currentContent) {
+          // Update cache with the serialized content and current nodes
+          // This keeps the cache in sync during WYSIWYG editing
+          updateCacheFromMarkdown(md, value);
+          currentOnChange(md);
+        }
+      }, 300),
+    [] // Empty deps - function uses refs for latest values
+  );
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSerialize.cancel();
+    };
+  }, [debouncedSerialize]);
+
   // Sync content from Source view back to Plate if content changed externally or in source mode
   useEffect(() => {
     // Optimization: Skip deserialization when in source mode to prevent lag.
     if (editorViewMode === 'source') {
-      setIsLoading(false);
+      prevEditorViewMode.current = editorViewMode;
+      return;
+    }
+
+    // Check if cache is already valid for this content (fast hash comparison)
+    const cacheValid = isCacheValid(content);
+    
+    // Only deserialize when switching FROM source mode or when content changed
+    // Note: We already checked editorViewMode !== 'source' above, so this is just checking prevEditorViewMode
+    const isSwitchingFromSource = prevEditorViewMode.current === 'source';
+    
+    // Check if content has actually changed using cache validity
+    // Skip if cache is valid AND we're not switching from source mode
+    if (cacheValid && !isSwitchingFromSource) {
+      prevEditorViewMode.current = editorViewMode;
       return;
     }
 
     if (!isUpdatingFromPlate.current) {
-      // Optimization: Check if content actually changed significantly or if we just cached it
-      if (lastDeserializedContent.current === content) {
-        setIsLoading(false);
-        return;
+      // Capture values at scheduling time to avoid stale closures
+      const contentToDeserialize = content;
+
+      // Defer deserialization to prevent blocking the main thread
+      // Use requestIdleCallback if available for better performance, otherwise setTimeout
+      const performDeserialization = () => {
+        
+        // Use optimized processor with caching and differential updates
+        // This only re-processes chunks that have changed
+        const { nodes, unchanged } = processMarkdownDiff(contentToDeserialize);
+        
+        // Skip setValue if:
+        // 1. Content is unchanged (cache hit) AND not switching from source, OR
+        // 2. The nodes reference is the same as what we already set (avoids expensive setValue)
+        if (unchanged && !isSwitchingFromSource) {
+          return;
+        }
+        
+        // Skip setValue if we'd be setting the exact same nodes array (by reference)
+        // This is the key optimization for mode switches when content hasn't changed
+        if (nodes === lastSetNodesRef.current) {
+          console.log('[PlateEditor] Skipping setValue - same nodes reference');
+          lastDeserializedContent.current = contentToDeserialize;
+          return;
+        }
+        
+        editor.tf.setValue(nodes);
+        lastSetNodesRef.current = nodes;
+        lastDeserializedContent.current = contentToDeserialize;
+      };
+
+      let cleanup: (() => void) | undefined;
+
+      if (typeof (window as any).requestIdleCallback !== 'undefined' && isSwitchingFromSource) {
+        // Use requestIdleCallback for mode switches to avoid blocking
+        // Reduced timeout from 1000ms to 150ms for faster perceived response
+        const idleCallbackId = (window as any).requestIdleCallback(performDeserialization, { timeout: 150 });
+        cleanup = () => {
+          if (typeof (window as any).cancelIdleCallback !== 'undefined') {
+            (window as any).cancelIdleCallback(idleCallbackId);
+          }
+        };
+      } else {
+        // Use setTimeout to yield to the browser's event loop
+        const timeoutId = setTimeout(performDeserialization, 0);
+        cleanup = () => clearTimeout(timeoutId);
       }
 
-      // Optimization: For small/medium documents, process synchronously to avoid "Loading..." flicker
-      // 50,000 characters is roughly 15-20 pages of text.
-      if (content.length < 50000) {
-        try {
-          const preprocessed = preprocessMathDelimiters(content);
-          const newValue = editor.api.markdown.deserialize(preprocessed);
-          editor.tf.setValue(newValue);
-          lastDeserializedContent.current = content;
-        } catch (e) {
-          console.error('Error deserializing markdown:', e);
-        } finally {
-          setIsLoading(false);
-        }
-        return;
-      }
+      prevEditorViewMode.current = editorViewMode;
 
-      setIsLoading(true);
-
-      // Wrap in setTimeout to unblock main thread/render cycle, allowing loading spinner to show
-      // and preventing UI freeze on large documents
-      const timer = setTimeout(() => {
-        try {
-          // Preprocess to convert single-line $$..$$ to multi-line for correct parsing
-          const preprocessed = preprocessMathDelimiters(content);
-          const newValue = editor.api.markdown.deserialize(preprocessed);
-
-          // Use withoutNormalizing for performance if possible
-          editor.tf.setValue(newValue);
-
-          lastDeserializedContent.current = content;
-        } catch (error) {
-          console.error('Error deserializing large markdown:', error);
-        } finally {
-          setIsLoading(false);
-        }
-      }, 10);
-
-      return () => clearTimeout(timer);
+      return cleanup;
+    } else {
+      prevEditorViewMode.current = editorViewMode;
     }
   }, [content, editor, editorViewMode]);
 
@@ -102,26 +180,26 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const handleNavigateToLine = useCallback((event: CustomEvent<{ line: number }>) => {
     // Only handle in non-source mode
     if (editorViewMode === 'source') return;
-
+    
     const { line } = event.detail;
     const lines = content.split('\n');
-
+    
     // Find the heading text at the target line
     const targetLine = lines[line - 1];
     if (!targetLine) return;
-
+    
     const headingMatch = targetLine.match(/^#{1,6}\s+(.+)$/);
     if (!headingMatch) return;
-
+    
     const headingText = headingMatch[1].trim();
-
+    
     // Find the heading node in the editor
     // Use editor.children directly and iterate with proper typing
     const findHeadingNode = (nodes: typeof editor.children, basePath: Path = []): void => {
       for (let i = 0; i < nodes.length; i++) {
         const node = nodes[i];
         const path = [...basePath, i];
-
+        
         if ('type' in node && typeof node.type === 'string' && node.type.startsWith('h')) {
           // Get the text content of this heading
           const textContent = Node.string(node);
@@ -140,14 +218,14 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
             return;
           }
         }
-
+        
         // Recursively check children if they exist
         if ('children' in node && Array.isArray(node.children)) {
           findHeadingNode(node.children as typeof editor.children, path);
         }
       }
     };
-
+    
     findHeadingNode(editor.children);
   }, [editorViewMode, content, editor]);
 
@@ -169,20 +247,8 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       editor={editor}
       onChange={({ value }) => {
         isUpdatingFromPlate.current = true;
-
-        // Debounce the serialization/update to avoid checking every keystroke synchronously if possible
-        // But for Controlled inputs we usually need it. 
-        // We'll trust Plate's internal optimization but help it by not re-rendering unnecessarily.
-
-        // Serialize and postprocess to normalize block equation format
-        const rawMd = editor.api.markdown.serialize({ value });
-        const md = postprocessMathDelimiters(rawMd);
-
-        if (md !== content) {
-          lastDeserializedContent.current = md; // Update cache so we don't re-deserialize our own change
-          onChange(md);
-        }
-
+        // Use debounced serialization to reduce expensive operations during typing
+        debouncedSerialize(value);
         // Defer resetting the flag to allow the useEffect to see it as true
         // This prevents the effect from resetting the editor and losing focus
         setTimeout(() => {
@@ -196,7 +262,19 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         </FixedToolbar>
 
         <div className="flex-1 overflow-hidden relative w-full h-full">
-          {editorViewMode === 'source' ? (
+          {/* 
+            PERFORMANCE OPTIMIZATION: Keep both editors mounted but toggle visibility with CSS.
+            This avoids expensive mount/unmount cycles when switching modes.
+            The Editor component renders all Slate nodes on mount which is expensive (~2s for large docs).
+            Using visibility:hidden + position:absolute keeps the component in React's tree but hidden.
+          */}
+          <div 
+            className="absolute inset-0"
+            style={{ 
+              visibility: editorViewMode === 'source' ? 'visible' : 'hidden',
+              zIndex: editorViewMode === 'source' ? 10 : 0 
+            }}
+          >
             <SourceEditor
               content={content}
               onChange={(val) => {
@@ -204,17 +282,17 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
                 onChange(val);
               }}
             />
-          ) : (
+          </div>
+          <div 
+            className="h-full"
+            style={{ 
+              visibility: editorViewMode !== 'source' ? 'visible' : 'hidden',
+            }}
+          >
             <EditorContainer>
-              {isLoading ? (
-                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-r-transparent" />
-                  <p className="mt-4 text-sm text-muted-foreground animate-pulse">Processing content...</p>
-                </div>
-              ) : null}
               <Editor variant="demo" />
             </EditorContainer>
-          )}
+          </div>
         </div>
       </div>
     </Plate>

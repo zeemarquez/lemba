@@ -3,7 +3,7 @@
 import { TrailingBlockPlugin, type Value } from 'platejs';
 import { type TPlateEditor, useEditorRef } from 'platejs/react';
 
-import { AIKit } from '@/components/plate-editor/plugins/ai-kit';
+
 import { AlignKit } from '@/components/plate-editor/plugins/align-kit';
 import { AutoformatKit } from '@/components/plate-editor/plugins/autoformat-kit';
 import { BasicBlocksKit } from '@/components/plate-editor/plugins/basic-blocks-kit';
@@ -14,7 +14,7 @@ import { CalloutKit } from '@/components/plate-editor/plugins/callout-kit';
 import { CodeBlockKit } from '@/components/plate-editor/plugins/code-block-kit';
 import { ColumnKit } from '@/components/plate-editor/plugins/column-kit';
 import { CommentKit } from '@/components/plate-editor/plugins/comment-kit';
-import { CopilotKit } from '@/components/plate-editor/plugins/copilot-kit';
+
 import { CursorOverlayKit } from '@/components/plate-editor/plugins/cursor-overlay-kit';
 import { DateKit } from '@/components/plate-editor/plugins/date-kit';
 import { DiscussionKit } from '@/components/plate-editor/plugins/discussion-kit';
@@ -41,8 +41,6 @@ import { PageBreakPlugin } from '@/components/plate-editor/plugins/page-break-pl
 import { PageBreakElement } from '@/components/plate-ui/page-break-element';
 
 export const EditorKit = [
-  ...CopilotKit,
-  ...AIKit,
 
   // Elements
   PageBreakPlugin.configure({
