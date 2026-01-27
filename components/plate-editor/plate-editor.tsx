@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
 import { Plate, usePlateEditor } from 'platejs/react';
 import { useStore } from '@/lib/store';
 import { useMounted } from '@/hooks/use-mounted';
@@ -15,6 +15,7 @@ import { postprocessMathDelimiters } from '@/components/plate-editor/plugins/mar
 import { Path, Node } from 'slate';
 import { 
   processMarkdownDiff, 
+  processMarkdownChunked,
   updateCacheFromMarkdown,
   isCacheValid 
 } from '@/lib/markdown-processor';
@@ -24,9 +25,16 @@ interface PlateEditorProps {
   onChange: (value: string) => void;
 }
 
+// Threshold for using async loading (characters)
+const ASYNC_LOAD_THRESHOLD = 5000;
+
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode } = useStore();
   const mounted = useMounted();
+  
+  // Loading state for large documents
+  const [isLoading, setIsLoading] = useState(() => content.length > ASYNC_LOAD_THRESHOLD);
+  const [loadProgress, setLoadProgress] = useState(0);
 
   // Use a ref to track if we're currently updating from Plate to avoid infinite loops
   const isUpdatingFromPlate = useRef(false);
@@ -36,6 +44,8 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const lastDeserializedContent = useRef<string | null>(null);
   // Track the last nodes array reference we set - to avoid redundant setValue calls
   const lastSetNodesRef = useRef<any[] | null>(null);
+  // Track if initial async load has completed
+  const initialLoadComplete = useRef(false);
   // Refs to store latest values for debounced function
   const editorRef = useRef<any>(null);
   const contentRef = useRef(content);
@@ -47,14 +57,21 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     onChangeRef.current = onChange;
   }, [content, onChange]);
 
-  // Compute initialValue using the optimized processor with caching
-  // Only compute once on mount - subsequent updates go through useEffect
+  // Compute initialValue - use placeholder for large docs, full parse for small docs
+  // This prevents blocking the main thread on startup
   const initialValue = useMemo(() => {
-    // Use the cached processor for initial value - this also warms up the cache
-    const { nodes } = processMarkdownDiff(content);
-    lastDeserializedContent.current = content;
-    lastSetNodesRef.current = nodes; // Track initial nodes
-    return nodes;
+    // For small documents, parse synchronously (fast enough)
+    if (content.length <= ASYNC_LOAD_THRESHOLD) {
+      const { nodes } = processMarkdownDiff(content);
+      lastDeserializedContent.current = content;
+      lastSetNodesRef.current = nodes;
+      initialLoadComplete.current = true;
+      return nodes;
+    }
+    
+    // For large documents, start with a loading placeholder
+    // Actual content will be loaded asynchronously after mount
+    return [{ type: 'p', children: [{ text: '' }] }];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty deps - only compute once on mount
 
@@ -65,6 +82,63 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   // Update editor ref
   editorRef.current = editor;
+
+  // Async loading for large documents - runs after mount to avoid blocking
+  useEffect(() => {
+    // Skip if already loaded or small document
+    if (initialLoadComplete.current || content.length <= ASYNC_LOAD_THRESHOLD) {
+      return;
+    }
+
+    let cancelled = false;
+    
+    const loadContentAsync = async () => {
+      console.log('[PlateEditor] Starting async content load', { contentLength: content.length });
+      const startTime = performance.now();
+      
+      try {
+        // Use chunked processing that yields to main thread
+        const nodes = await processMarkdownChunked(content, (progress) => {
+          if (!cancelled) {
+            setLoadProgress(Math.round(progress));
+          }
+        });
+        
+        if (cancelled) return;
+        
+        console.log('[PlateEditor] Async load complete', { 
+          time: performance.now() - startTime,
+          nodeCount: nodes.length 
+        });
+        
+        // Set the editor value with loaded content
+        editor.tf.setValue(nodes);
+        lastDeserializedContent.current = content;
+        lastSetNodesRef.current = nodes;
+        initialLoadComplete.current = true;
+        setIsLoading(false);
+      } catch (error) {
+        console.error('[PlateEditor] Async load failed:', error);
+        if (!cancelled) {
+          // Fallback to sync load if async fails
+          const { nodes } = processMarkdownDiff(content);
+          editor.tf.setValue(nodes);
+          lastDeserializedContent.current = content;
+          lastSetNodesRef.current = nodes;
+          initialLoadComplete.current = true;
+          setIsLoading(false);
+        }
+      }
+    };
+
+    // Start loading after a brief delay to let the UI render first
+    const timeoutId = setTimeout(loadContentAsync, 50);
+    
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [content, editor]); // Only run on mount (content won't change during initial load)
 
   // Create debounced serialization function using refs to always use latest values
   const debouncedSerialize = useMemo(
@@ -99,6 +173,11 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   // Sync content from Source view back to Plate if content changed externally or in source mode
   useEffect(() => {
+    // Skip while initial async loading is in progress
+    if (isLoading) {
+      return;
+    }
+    
     // Optimization: Skip deserialization when in source mode to prevent lag.
     if (editorViewMode === 'source') {
       prevEditorViewMode.current = editorViewMode;
@@ -174,7 +253,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     } else {
       prevEditorViewMode.current = editorViewMode;
     }
-  }, [content, editor, editorViewMode]);
+  }, [content, editor, editorViewMode, isLoading]);
 
   // Listen for navigation events from the outline (for WYSIWYG mode)
   const handleNavigateToLine = useCallback((event: CustomEvent<{ line: number }>) => {
@@ -246,6 +325,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     <Plate
       editor={editor}
       onChange={({ value }) => {
+        // Don't process changes while still loading
+        if (isLoading) return;
+        
         isUpdatingFromPlate.current = true;
         // Use debounced serialization to reduce expensive operations during typing
         debouncedSerialize(value);
@@ -262,6 +344,23 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         </FixedToolbar>
 
         <div className="flex-1 overflow-hidden relative w-full h-full">
+          {/* Loading overlay for large documents */}
+          {isLoading && (
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-4">
+                <div className="h-2 w-48 overflow-hidden rounded-full bg-muted">
+                  <div 
+                    className="h-full bg-primary transition-all duration-150 ease-out"
+                    style={{ width: `${loadProgress}%` }}
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Loading document... {loadProgress}%
+                </p>
+              </div>
+            </div>
+          )}
+          
           {/* 
             PERFORMANCE OPTIMIZATION: Keep both editors mounted but toggle visibility with CSS.
             This avoids expensive mount/unmount cycles when switching modes.
