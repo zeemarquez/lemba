@@ -347,22 +347,47 @@ export const useStore = create<AppState>()(
                         const filesRoot = tree.find(n => n.name === 'Files');
                         const hasFiles = filesRoot?.children && filesRoot.children.length > 0;
 
-                        // If no files exist, load the default showcase file from /preloaded/
+                        // If no files exist, load all preloaded files from manifest
                         if (!hasFiles) {
                             try {
-                                const response = await fetch('/preloaded/Lorem Ipsum.md');
-                                if (response.ok) {
-                                    const content = await response.text();
-                                    const path = 'Files/Lorem Ipsum.md';
-                                    await browserStorage.createFile(path, content);
-                                    // Re-fetch tree after creating default file
+                                // Fetch the manifest to get list of preloaded files
+                                const manifestResponse = await fetch('/preloaded/manifest.json');
+                                if (manifestResponse.ok) {
+                                    const manifest = await manifestResponse.json();
+                                    const preloadedFiles: string[] = manifest.files || [];
+                                    
+                                    let firstFilePath: string | null = null;
+                                    
+                                    // Load all preloaded files
+                                    for (const fileName of preloadedFiles) {
+                                        try {
+                                            const response = await fetch(`/preloaded/${encodeURIComponent(fileName)}`);
+                                            if (response.ok) {
+                                                const content = await response.text();
+                                                const path = `Files/${fileName}`;
+                                                await browserStorage.createFile(path, content);
+                                                
+                                                // Track the first file to open it later
+                                                if (!firstFilePath) {
+                                                    firstFilePath = path;
+                                                }
+                                            }
+                                        } catch (err) {
+                                            console.error(`Failed to load preloaded file ${fileName}:`, err);
+                                        }
+                                    }
+                                    
+                                    // Re-fetch tree after creating preloaded files
                                     const result = await browserStorage.list();
                                     tree = result.tree;
-                                    // Open the default file
-                                    setTimeout(() => get().openFile(path), 100);
+                                    
+                                    // Open the first file
+                                    if (firstFilePath) {
+                                        setTimeout(() => get().openFile(firstFilePath!), 100);
+                                    }
                                 }
                             } catch (err) {
-                                console.error('Failed to load default showcase file:', err);
+                                console.error('Failed to load preloaded files:', err);
                             }
                         }
 

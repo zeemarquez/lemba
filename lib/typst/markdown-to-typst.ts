@@ -85,6 +85,148 @@ function parseTokens(tokens: any[], options: MarkdownToTypstOptions = {}): strin
     return output;
 }
 
+/**
+ * Detects if a codepoint is part of an emoji
+ * Uses Unicode ranges for emojis
+ */
+function isEmojiCodePoint(codePoint: number): boolean {
+    return (
+        // Emoticons
+        (codePoint >= 0x1F600 && codePoint <= 0x1F64F) ||
+        // Miscellaneous Symbols and Pictographs
+        (codePoint >= 0x1F300 && codePoint <= 0x1F5FF) ||
+        // Supplemental Symbols and Pictographs
+        (codePoint >= 0x1F900 && codePoint <= 0x1F9FF) ||
+        // Symbols and Pictographs Extended-A
+        (codePoint >= 0x1FA00 && codePoint <= 0x1FAFF) ||
+        // Dingbats
+        (codePoint >= 0x2700 && codePoint <= 0x27BF) ||
+        // Miscellaneous Symbols
+        (codePoint >= 0x2600 && codePoint <= 0x26FF) ||
+        // Transport and Map Symbols
+        (codePoint >= 0x1F680 && codePoint <= 0x1F6FF) ||
+        // Regional Indicator Symbols (flags)
+        (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) ||
+        // Enclosed Alphanumeric Supplement (some emojis like Ⓜ️)
+        (codePoint >= 0x1F200 && codePoint <= 0x1F2FF) ||
+        // Common emoji-like symbols
+        codePoint === 0x2764 || // ❤
+        codePoint === 0x2763 || // ❣
+        codePoint === 0x2665 || // ♥
+        codePoint === 0x2666 || // ♦
+        codePoint === 0x2660 || // ♠
+        codePoint === 0x2663 || // ♣
+        codePoint === 0x270C || // ✌
+        codePoint === 0x270B || // ✋
+        codePoint === 0x270A || // ✊
+        codePoint === 0x270D || // ✍
+        codePoint === 0x2728 || // ✨
+        codePoint === 0x2B50 || // ⭐
+        codePoint === 0x2B55 || // ⭕
+        codePoint === 0x274C || // ❌
+        codePoint === 0x274E || // ❎
+        codePoint === 0x2753 || // ❓
+        codePoint === 0x2757 || // ❗
+        codePoint === 0x203C || // ‼
+        codePoint === 0x2049 || // ⁉
+        codePoint === 0x00A9 || // ©
+        codePoint === 0x00AE || // ®
+        codePoint === 0x2122    // ™
+    );
+}
+
+/**
+ * Check if a character starts an emoji sequence
+ */
+function isEmoji(char: string): boolean {
+    const codePoint = char.codePointAt(0);
+    if (!codePoint) return false;
+    return isEmojiCodePoint(codePoint);
+}
+
+/**
+ * Convert emoji to Twemoji CDN URL
+ * Twemoji uses lowercase hex codepoints separated by dashes
+ */
+function emojiToTwemojiUrl(emoji: string): string {
+    // Get codepoints, excluding variation selector FE0F for the URL
+    const codePoints: string[] = [];
+    for (const char of emoji) {
+        const cp = char.codePointAt(0);
+        if (cp !== undefined && cp !== 0xFE0F) { // Skip variation selector-16
+            codePoints.push(cp.toString(16).toLowerCase());
+        }
+    }
+    
+    // Twemoji CDN URL - using a stable version
+    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints.join('-')}.svg`;
+}
+
+/**
+ * Processes text to handle emojis properly in Typst
+ * Converts emojis to inline Twemoji SVG images
+ */
+function processTextWithEmojis(text: string): string {
+    if (!text) return '';
+    
+    // Split text into segments: regular text and emojis
+    const segments: string[] = [];
+    let currentSegment = '';
+    let i = 0;
+    
+    // Use Array.from to properly handle surrogate pairs
+    const chars = Array.from(text);
+    
+    while (i < chars.length) {
+        const char = chars[i];
+        const codePoint = char.codePointAt(0);
+        
+        if (codePoint && isEmojiCodePoint(codePoint)) {
+            // Save current segment if any
+            if (currentSegment) {
+                segments.push(escapeTypst(currentSegment));
+                currentSegment = '';
+            }
+            
+            // Collect the full emoji sequence
+            let emojiSequence = char;
+            i++;
+            
+            // Handle emoji sequences (skin tone modifiers, ZWJ sequences, flags)
+            while (i < chars.length) {
+                const nextChar = chars[i];
+                const nextCodePoint = nextChar.codePointAt(0);
+                
+                if (nextCodePoint === 0xFE0F || // Variation selector-16
+                    nextCodePoint === 0x200D || // Zero-width joiner
+                    (nextCodePoint && nextCodePoint >= 0x1F3FB && nextCodePoint <= 0x1F3FF) || // Skin tone modifiers
+                    (nextCodePoint && isEmojiCodePoint(nextCodePoint))) {
+                    emojiSequence += nextChar;
+                    i++;
+                } else {
+                    break;
+                }
+            }
+            
+            // Convert emoji to Twemoji image
+            const twemojiUrl = emojiToTwemojiUrl(emojiSequence);
+            // Use box with baseline alignment for inline emoji rendering
+            // The image will be fetched by processTypstImages later
+            segments.push(`#box(baseline: 20%, image("${twemojiUrl}", height: 1em))`);
+        } else {
+            currentSegment += char;
+            i++;
+        }
+    }
+    
+    // Add remaining segment
+    if (currentSegment) {
+        segments.push(escapeTypst(currentSegment));
+    }
+    
+    return segments.join('');
+}
+
 function escapeTypst(text: string): string {
     if (!text) return '';
     return text
@@ -173,23 +315,39 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             return "```" + (token.lang || '') + "\n" + token.text + "\n```\n\n";
         case 'blockquote': {
             // Check if it's a GitHub-style alert
+            // Handle both escaped and non-escaped versions: [!NOTE] or \[!NOTE] or \[!NOTE\]
             const firstChild = token.tokens?.[0];
             if (firstChild && firstChild.type === 'paragraph') {
                 const text = firstChild.text || '';
-                const match = text.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i);
+                const match = text.match(/^\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]\s*/i);
                 if (match) {
                     const type = match[1].toUpperCase();
-                    // Remove the alert prefix from the first child text
-                    firstChild.text = text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+                    // Remove the alert prefix from the first child text (handle both escaped and non-escaped)
+                    firstChild.text = text.replace(/^\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]\s*/i, '');
 
                     // Also clean up the nested tokens to prevent duplication in rendering
                     if (firstChild.tokens) {
-                        for (const subToken of firstChild.tokens) {
+                        for (let i = 0; i < firstChild.tokens.length; i++) {
+                            const subToken = firstChild.tokens[i];
                             if (subToken.type === 'text') {
-                                subToken.text = subToken.text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+                                subToken.text = subToken.text.replace(/^\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]\s*/i, '');
+                                // If the text node is now empty, remove it
+                                if (subToken.text === '') {
+                                    firstChild.tokens.splice(i, 1);
+                                    i--;
+                                    // Also remove any leading 'br' tokens
+                                    while (firstChild.tokens[0]?.type === 'br') {
+                                        firstChild.tokens.shift();
+                                    }
+                                }
                                 break;
                             }
                         }
+                    }
+
+                    // If the first paragraph is now empty, remove it from the blockquote
+                    if (firstChild.text === '' && (!firstChild.tokens || firstChild.tokens.length === 0)) {
+                        token.tokens?.shift();
                     }
 
                     let color = 'rgb("#f0f4f8")';
@@ -455,7 +613,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                         .replace('{Caption}', figcaption);
 
                     // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
-                    let figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
+                    let figureCall = `#figure(${imgCall}, caption: [${processTextWithEmojis(formattedCaption)}], supplement: none)`;
 
                     // Apply alignment
                     if (align === 'center') figureCall = `#align(center)[${figureCall}]`;
@@ -557,7 +715,7 @@ function parseInline(tokens: any[]): string {
         const nextToken = tokens[i + 1];
         switch (token.type) {
             case 'text':
-                output += escapeTypst(token.text);
+                output += processTextWithEmojis(token.text);
                 break;
             case 'strong':
                 // In Typst, *bold* followed immediately by a word character causes "unclosed delimiter"
@@ -600,13 +758,13 @@ function parseInline(tokens: any[]): string {
                 }
                 break;
             case 'escape':
-                output += escapeTypst(token.text);
+                output += processTextWithEmojis(token.text);
                 break;
             case 'del':
                 output += `#strike[${parseInline(token.tokens)}]`;
                 break;
             default:
-                if (token.raw) output += escapeTypst(token.raw);
+                if (token.raw) output += processTextWithEmojis(token.raw);
         }
     }
     return output;

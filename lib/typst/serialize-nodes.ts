@@ -66,6 +66,148 @@ export function serializeNodesToTypst(nodes: Descendant[], context: SerializeCon
     return nodes.map(node => serializeNode(node, context)).join('\n');
 }
 
+/**
+ * Detects if a codepoint is part of an emoji
+ * Uses Unicode ranges for emojis
+ */
+function isEmojiCodePoint(codePoint: number): boolean {
+    return (
+        // Emoticons
+        (codePoint >= 0x1F600 && codePoint <= 0x1F64F) ||
+        // Miscellaneous Symbols and Pictographs
+        (codePoint >= 0x1F300 && codePoint <= 0x1F5FF) ||
+        // Supplemental Symbols and Pictographs
+        (codePoint >= 0x1F900 && codePoint <= 0x1F9FF) ||
+        // Symbols and Pictographs Extended-A
+        (codePoint >= 0x1FA00 && codePoint <= 0x1FAFF) ||
+        // Dingbats
+        (codePoint >= 0x2700 && codePoint <= 0x27BF) ||
+        // Miscellaneous Symbols
+        (codePoint >= 0x2600 && codePoint <= 0x26FF) ||
+        // Transport and Map Symbols
+        (codePoint >= 0x1F680 && codePoint <= 0x1F6FF) ||
+        // Regional Indicator Symbols (flags)
+        (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) ||
+        // Enclosed Alphanumeric Supplement (some emojis like Ⓜ️)
+        (codePoint >= 0x1F200 && codePoint <= 0x1F2FF) ||
+        // Common emoji-like symbols
+        codePoint === 0x2764 || // ❤
+        codePoint === 0x2763 || // ❣
+        codePoint === 0x2665 || // ♥
+        codePoint === 0x2666 || // ♦
+        codePoint === 0x2660 || // ♠
+        codePoint === 0x2663 || // ♣
+        codePoint === 0x270C || // ✌
+        codePoint === 0x270B || // ✋
+        codePoint === 0x270A || // ✊
+        codePoint === 0x270D || // ✍
+        codePoint === 0x2728 || // ✨
+        codePoint === 0x2B50 || // ⭐
+        codePoint === 0x2B55 || // ⭕
+        codePoint === 0x274C || // ❌
+        codePoint === 0x274E || // ❎
+        codePoint === 0x2753 || // ❓
+        codePoint === 0x2757 || // ❗
+        codePoint === 0x203C || // ‼
+        codePoint === 0x2049 || // ⁉
+        codePoint === 0x00A9 || // ©
+        codePoint === 0x00AE || // ®
+        codePoint === 0x2122    // ™
+    );
+}
+
+/**
+ * Check if a character starts an emoji sequence
+ */
+function isEmoji(char: string): boolean {
+    const codePoint = char.codePointAt(0);
+    if (!codePoint) return false;
+    return isEmojiCodePoint(codePoint);
+}
+
+/**
+ * Convert emoji to Twemoji CDN URL
+ * Twemoji uses lowercase hex codepoints separated by dashes
+ */
+function emojiToTwemojiUrl(emoji: string): string {
+    // Get codepoints, excluding variation selector FE0F for the URL
+    const codePoints: string[] = [];
+    for (const char of emoji) {
+        const cp = char.codePointAt(0);
+        if (cp !== undefined && cp !== 0xFE0F) { // Skip variation selector-16
+            codePoints.push(cp.toString(16).toLowerCase());
+        }
+    }
+    
+    // Twemoji CDN URL - using a stable version
+    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints.join('-')}.svg`;
+}
+
+/**
+ * Processes text to handle emojis properly in Typst
+ * Converts emojis to inline Twemoji SVG images
+ */
+function processTextWithEmojis(text: string): string {
+    if (!text) return '';
+    
+    // Split text into segments: regular text and emojis
+    const segments: string[] = [];
+    let currentSegment = '';
+    let i = 0;
+    
+    // Use Array.from to properly handle surrogate pairs
+    const chars = Array.from(text);
+    
+    while (i < chars.length) {
+        const char = chars[i];
+        const codePoint = char.codePointAt(0);
+        
+        if (codePoint && isEmojiCodePoint(codePoint)) {
+            // Save current segment if any
+            if (currentSegment) {
+                segments.push(escapeTypst(currentSegment));
+                currentSegment = '';
+            }
+            
+            // Collect the full emoji sequence
+            let emojiSequence = char;
+            i++;
+            
+            // Handle emoji sequences (skin tone modifiers, ZWJ sequences, flags)
+            while (i < chars.length) {
+                const nextChar = chars[i];
+                const nextCodePoint = nextChar.codePointAt(0);
+                
+                if (nextCodePoint === 0xFE0F || // Variation selector-16
+                    nextCodePoint === 0x200D || // Zero-width joiner
+                    (nextCodePoint && nextCodePoint >= 0x1F3FB && nextCodePoint <= 0x1F3FF) || // Skin tone modifiers
+                    (nextCodePoint && isEmojiCodePoint(nextCodePoint))) {
+                    emojiSequence += nextChar;
+                    i++;
+                } else {
+                    break;
+                }
+            }
+            
+            // Convert emoji to Twemoji image
+            const twemojiUrl = emojiToTwemojiUrl(emojiSequence);
+            // Use box with baseline alignment for inline emoji rendering
+            // The image will be fetched by processTypstImages later
+            segments.push(`#box(baseline: 20%, image("${twemojiUrl}", height: 1em))`);
+        } else {
+            currentSegment += char;
+            i++;
+        }
+    }
+    
+    // Add remaining segment
+    if (currentSegment) {
+        segments.push(escapeTypst(currentSegment));
+    }
+    
+    return segments.join('');
+}
+
 function escapeTypst(text: string): string {
     if (!text) return '';
     return text
@@ -164,7 +306,7 @@ function nextStartsWithWordChar(nextSibling?: Descendant): boolean {
 }
 
 function serializeTextNode(node: TText, nextSibling?: Descendant): string {
-    let text = escapeTypst(node.text || '');
+    let text = processTextWithEmojis(node.text || '');
 
     // Check if we need to add separator after bold/italic to prevent "unclosed delimiter" error
     // This happens when *bold* or _italic_ is immediately followed by a word character
@@ -367,7 +509,7 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
                     .replace('{Caption}', figcaptionText);
 
                 // Use Typst figure with custom caption (supplement: none to remove default "Figure" text since we handle it ourselves)
-                const figureCall = `#figure(${imgCall}, caption: [${escapeTypst(formattedCaption)}], supplement: none)`;
+                const figureCall = `#figure(${imgCall}, caption: [${processTextWithEmojis(formattedCaption)}], supplement: none)`;
                 return wrapMargins(wrapImgAlign(figureCall));
             }
 
@@ -450,11 +592,11 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
         }
         content = `#datetime.today().display(${dateFormat})`;
     } else if (placeholderType === 'title') {
-        content = escapeTypst(context.title || '');
+        content = processTextWithEmojis(context.title || '');
     } else if (placeholderType === 'variable') {
         const variableName = (element as any).variableName;
         const variableValue = context.variables?.[variableName] || '';
-        content = escapeTypst(variableValue);
+        content = processTextWithEmojis(variableValue);
     }
 
     // Check if content needs context (page numbers, total pages, dates need context)

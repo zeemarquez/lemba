@@ -166,11 +166,32 @@ const alertRules = {
       if (firstChild?.type === 'paragraph') {
         const firstText = firstChild.children?.[0];
         if (firstText?.type === 'text') {
-          const match = firstText.value.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i);
+          // Match both escaped and non-escaped versions: [!NOTE] or \[!NOTE] or \[!NOTE\]
+          const match = firstText.value.match(/^\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]\s*/i);
           if (match) {
             const type = match[1].toUpperCase();
-            // Remove the prefix from the text node
-            firstText.value = firstText.value.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(\n)?/i, '');
+            
+            // Deep clone the children to avoid mutation issues
+            const clonedChildren = JSON.parse(JSON.stringify(mdastNode.children));
+            const clonedFirstChild = clonedChildren[0];
+            const clonedFirstText = clonedFirstChild.children[0];
+            
+            // Remove the prefix from the cloned text node
+            clonedFirstText.value = clonedFirstText.value.replace(/^\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]\s*/i, '');
+
+            // If the first text node is now empty, remove it from the paragraph
+            if (clonedFirstText.value === '') {
+              clonedFirstChild.children.shift();
+              // Also remove any leading break nodes after the alert prefix
+              while (clonedFirstChild.children[0]?.type === 'break') {
+                clonedFirstChild.children.shift();
+              }
+            }
+
+            // If the first paragraph is now empty, remove it
+            if (clonedFirstChild.children.length === 0) {
+              clonedChildren.shift();
+            }
 
             // Map alert type to callout properties
             let icon = '💡';
@@ -201,7 +222,7 @@ const alertRules = {
 
             return {
               backgroundColor,
-              children: convertChildrenDeserialize(mdastNode.children, deco, options),
+              children: convertChildrenDeserialize(clonedChildren, deco, options),
               icon,
               type: 'callout',
             };
@@ -217,7 +238,6 @@ const alertRules = {
   },
   callout: {
     serialize: (node: any, options: any) => {
-      const children = options?.children ?? [];
       let type = 'NOTE';
       if (node.icon === '💡') type = 'TIP';
       else if (node.icon === '💎') type = 'IMPORTANT';
@@ -225,20 +245,58 @@ const alertRules = {
       else if (node.icon === '🚨') type = 'CAUTION';
       else if (node.icon === 'ℹ️') type = 'NOTE';
 
-      const firstChild = children[0];
+      // Convert Plate children to mdast format
+      // node.children contains Plate nodes like { type: 'p', children: [{ text: '...' }] }
+      // We need to convert to mdast like { type: 'paragraph', children: [{ type: 'text', value: '...' }] }
+      const convertPlateToMdast = (plateChildren: any[]): any[] => {
+        if (!plateChildren || !Array.isArray(plateChildren)) return [];
+        
+        return plateChildren.map((child: any) => {
+          if (child.type === 'p' || child.type === 'paragraph') {
+            // Convert paragraph
+            const textContent = child.children?.map((textNode: any) => {
+              if (typeof textNode.text === 'string') {
+                return { type: 'text', value: textNode.text };
+              }
+              return { type: 'text', value: '' };
+            }) ?? [];
+            return { type: 'paragraph', children: textContent };
+          }
+          // For other types, try to extract text content
+          if (child.children) {
+            return { type: 'paragraph', children: convertPlateToMdast(child.children) };
+          }
+          if (typeof child.text === 'string') {
+            return { type: 'text', value: child.text };
+          }
+          return { type: 'text', value: '' };
+        });
+      };
+
+      // Use options.children if available, otherwise convert node.children
+      let mdastChildren = options?.children;
+      if (!mdastChildren || mdastChildren.length === 0) {
+        mdastChildren = convertPlateToMdast(node.children);
+      }
+      
+      // Deep clone to avoid mutation issues
+      const clonedChildren = JSON.parse(JSON.stringify(mdastChildren));
+      
+      // Add the alert prefix to the first paragraph
+      const firstChild = clonedChildren[0];
       if (firstChild && firstChild.type === 'paragraph') {
         const pChildren = firstChild.children ?? [];
         pChildren.unshift({ type: 'text', value: `[!${type}]\n` });
         firstChild.children = pChildren;
       } else {
-        children.unshift({
+        clonedChildren.unshift({
           children: [{ type: 'text', value: `[!${type}]\n` }],
           type: 'paragraph',
         });
       }
 
       return {
-        children,
+        children: clonedChildren,
         type: 'blockquote',
       };
     },
@@ -300,9 +358,17 @@ export function preprocessMathDelimiters(markdown: string): string {
 export function postprocessMathDelimiters(markdown: string): string {
   if (!markdown) return markdown;
 
+  // First, fix escaped alert syntax in blockquotes
+  // remark-stringify escapes [ to \[ which breaks GitHub-style alerts
+  // Convert \[!NOTE] back to [!NOTE] (and other alert types)
+  let result = markdown.replace(
+    /^(>\s*)\\?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\?\]/gim,
+    '$1[!$2]'
+  );
+
   // Convert multi-line block math to single-line format
   // Match: $$ newline content newline $$
-  return markdown.replace(
+  return result.replace(
     /\$\$\n([\s\S]*?)\n\$\$/g,
     (match, content) => {
       const trimmed = content.trim();
