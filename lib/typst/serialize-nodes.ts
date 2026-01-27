@@ -67,6 +67,13 @@ export function serializeNodesToTypst(nodes: Descendant[], context: SerializeCon
 }
 
 /**
+ * Fast regex to detect if text contains any potential emoji characters
+ * This is much faster than iterating character by character
+ * Matches Unicode ranges where emojis typically appear
+ */
+const EMOJI_QUICK_TEST = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{1FA00}-\u{1FAFF}]|[\u{1F1E6}-\u{1F1FF}]|[\u{1F200}-\u{1F2FF}]|[\u2764\u2763\u2665\u2666\u2660\u2663\u270C\u270B\u270A\u270D\u2728\u2B50\u2B55\u274C\u274E\u2753\u2757\u203C\u2049\u00A9\u00AE\u2122]/u;
+
+/**
  * Detects if a codepoint is part of an emoji
  * Uses Unicode ranges for emojis
  */
@@ -117,15 +124,6 @@ function isEmojiCodePoint(codePoint: number): boolean {
 }
 
 /**
- * Check if a character starts an emoji sequence
- */
-function isEmoji(char: string): boolean {
-    const codePoint = char.codePointAt(0);
-    if (!codePoint) return false;
-    return isEmojiCodePoint(codePoint);
-}
-
-/**
  * Convert emoji to Twemoji CDN URL
  * Twemoji uses lowercase hex codepoints separated by dashes
  */
@@ -146,11 +144,20 @@ function emojiToTwemojiUrl(emoji: string): string {
 /**
  * Processes text to handle emojis properly in Typst
  * Converts emojis to inline Twemoji SVG images
+ * 
+ * PERFORMANCE OPTIMIZATION: Uses fast regex pre-check to skip expensive
+ * character-by-character iteration when no emojis are present (common case)
  */
 function processTextWithEmojis(text: string): string {
     if (!text) return '';
     
-    // Split text into segments: regular text and emojis
+    // FAST PATH: If no emojis detected by quick regex, just escape and return
+    // This avoids Array.from() and character iteration for most text
+    if (!EMOJI_QUICK_TEST.test(text)) {
+        return escapeTypst(text);
+    }
+    
+    // SLOW PATH: Text contains emojis, do full processing
     const segments: string[] = [];
     let currentSegment = '';
     let i = 0;
