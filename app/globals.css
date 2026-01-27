@@ -167,5 +167,5 @@
 }
 
 .app-chrome svg {
-  transform: scale(var(--ui-icon-scale, 1));
+  scale: var(--ui-icon-scale, 1);
 }

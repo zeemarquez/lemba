@@ -481,7 +481,9 @@ export function ExportSidebar() {
                 >
                     {isExporting ? (
                         <>
-                            <Loader2 size={16} className="mr-2 animate-spin" />
+                            <div className="mr-2 animate-spin flex items-center justify-center">
+                                <Loader2 size={16} />
+                            </div>
                             Exporting...
                         </>
                     ) : (

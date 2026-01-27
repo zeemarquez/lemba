@@ -29,8 +29,14 @@ export function useCustomFonts() {
             const fontFaces = await Promise.all(
                 customFonts.map(async (font) => {
                     // Ensure the blob is valid
-                    if (!font.blob || !(font.blob instanceof Blob)) {
-                        console.warn(`[useCustomFonts] Invalid blob for font: ${font.family}`);
+                    if (!font.blob) {
+                        console.warn(`[useCustomFonts] No blob for font: ${font.family}`);
+                        return '';
+                    }
+                    
+                    // Check if it's a Blob-like object (has size and type)
+                    if (typeof font.blob.size !== 'number' || font.blob.size === 0) {
+                        console.warn(`[useCustomFonts] Invalid blob size for font: ${font.family}`, font.blob);
                         return '';
                     }
 

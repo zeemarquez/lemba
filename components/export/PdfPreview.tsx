@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { usePdfCompiler } from "@/hooks/use-pdf-compiler";
 import { cn } from "@/lib/utils";
 
-
 // We import PDF.js dynamically to avoid SSR issues
 let pdfjsLib: any = null;
 
@@ -22,6 +21,33 @@ interface TextItem {
     height: number;
 }
 
+// Fast hash function for image data comparison
+// Uses sampling to avoid hashing entire image data
+function hashImageData(dataUrl: string): string {
+    // Sample characters from the data URL for fast comparison
+    // The base64 data portion starts after "data:image/webp;base64,"
+    const dataStart = dataUrl.indexOf(',') + 1;
+    const data = dataUrl.substring(dataStart);
+    const len = data.length;
+    
+    // Sample ~100 characters spread across the data
+    let hash = 0;
+    const sampleSize = Math.min(100, len);
+    const step = Math.max(1, Math.floor(len / sampleSize));
+    
+    for (let i = 0; i < len; i += step) {
+        const char = data.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    
+    // Also include length for additional uniqueness
+    hash = ((hash << 5) - hash) + len;
+    hash = hash & hash;
+    
+    return hash.toString();
+}
+
 interface PdfPreviewProps {
     /** When true, enables landscape detection for horizontal page layout in standalone windows */
     isStandaloneWindow?: boolean;
@@ -30,20 +56,27 @@ interface PdfPreviewProps {
 export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
     const { activeFileId, files, activeTemplateId, templates, previewQuality } = useStore();
     const [mounted, setMounted] = useState(false);
-    const [pageImages, setPageImages] = useState<string[]>([]);
+    const [pageImages, setPageImages] = useState<(string | null)[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [scale, setScale] = useState(0.8);
     const [viewMode, setViewMode] = useState<'zoom' | 'FitH' | 'FitV'>('FitH');
     const [error, setError] = useState<string | null>(null);
     const [isLandscape, setIsLandscape] = useState(false);
+    const [renderingProgress, setRenderingProgress] = useState<{ current: number; total: number } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
     const lastContentHashRef = useRef<string>('');
     const viewportRef = useRef<HTMLDivElement>(null);
     const pdfDocumentRef = useRef<any>(null);
+    // Cache stores: pageNum -> { imageDataUrl, imageHash }
+    const pageCacheRef = useRef<Map<number, { imageDataUrl: string; imageHash: string }>>(new Map());
+    const pageRenderQueueRef = useRef<Set<number>>(new Set());
+    const isRenderingRef = useRef(false);
+    const totalPagesRef = useRef(0);
+    const previousContentRef = useRef<string>('');
+    const estimatedChangePageRef = useRef<number>(1);
 
     // Detect if window is landscape (wider than tall) for horizontal page layout
-    // Only applies in standalone window mode
     useEffect(() => {
         if (!isStandaloneWindow) {
             setIsLandscape(false);
@@ -59,17 +92,15 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return () => window.removeEventListener('resize', checkLandscape);
     }, [isStandaloneWindow]);
 
-    // Use client-side PDF compiler
-    const { compilePdf, isInitialized, initError } = usePdfCompiler();
+    // Use client-side PDF compiler with Web Worker
+    const { compilePdf, cancelCompilation, isInitialized, initError, compilationStage } = usePdfCompiler();
 
     useEffect(() => {
         const initPdfJs = async () => {
             if (typeof window !== 'undefined' && !pdfjsLib) {
                 try {
                     const pdfjs = await import('pdfjs-dist');
-                    // Use the legacy/standard bundle if possible, but dist/build/pdf.mjs is usually fine
                     pdfjsLib = pdfjs;
-                    // Version 4.x+ uses .mjs for worker
                     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
                     setMounted(true);
                 } catch (err) {
@@ -100,47 +131,144 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return hash.toString();
     }, []);
 
+    // Estimate which page the change occurred on by comparing content
+    const estimateChangePage = useCallback((currentContent: string, totalPages: number): number => {
+        const prevContent = previousContentRef.current;
+        
+        // If no previous content or first render, default to page 1
+        if (!prevContent || totalPages <= 1) {
+            return 1;
+        }
+        
+        // Find the first position where content differs
+        const minLength = Math.min(currentContent.length, prevContent.length);
+        let changePosition = -1;
+        
+        // Find first difference
+        for (let i = 0; i < minLength; i++) {
+            if (currentContent[i] !== prevContent[i]) {
+                changePosition = i;
+                break;
+            }
+        }
+        
+        // If no difference found in common part, change is at the end (content added/removed)
+        if (changePosition === -1) {
+            changePosition = minLength;
+        }
+        
+        // Estimate page based on position ratio
+        // Use the longer content length for ratio calculation
+        const contentLength = Math.max(currentContent.length, prevContent.length);
+        if (contentLength === 0) return 1;
+        
+        const positionRatio = changePosition / contentLength;
+        const estimatedPage = Math.max(1, Math.min(totalPages, Math.ceil(positionRatio * totalPages)));
+        
+        return estimatedPage;
+    }, []);
+
     const [pageDimensions, setPageDimensions] = useState<{ width: number, height: number } | null>(null);
-    // Render scale for the actual image quality (fixed, not tied to display scale)
     const renderScaleRef = useRef(2.0);
 
-    const renderPages = useCallback(async (pdf: any) => {
-        const images: string[] = [];
+    // Render a single page and compare with cache
+    // Returns { imageDataUrl, changed } where changed indicates if page content differs from cache
+    const renderSinglePage = useCallback(async (pdf: any, pageNum: number): Promise<{ imageDataUrl: string; changed: boolean }> => {
+        const page = await pdf.getPage(pageNum);
         const renderScale = renderScaleRef.current;
-        
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale: renderScale });
+        const viewport = page.getViewport({ scale: renderScale });
 
-            if (i === 1) {
-                const baseViewport = page.getViewport({ scale: 1.0 });
-                setPageDimensions({ width: baseViewport.width, height: baseViewport.height });
-            }
-
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            if (!context) continue;
-
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-
-            await page.render({
-                canvasContext: context,
-                viewport: viewport,
-                canvas: canvas as any
-            }).promise;
-
-            images.push(canvas.toDataURL('image/webp', 0.9));
+        if (pageNum === 1) {
+            const baseViewport = page.getViewport({ scale: 1.0 });
+            setPageDimensions({ width: baseViewport.width, height: baseViewport.height });
         }
-        setPageImages(images);
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Cannot get canvas context');
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({
+            canvasContext: context,
+            viewport: viewport,
+            canvas: canvas as any
+        }).promise;
+
+        const imageDataUrl = canvas.toDataURL('image/webp', 0.9);
+        const imageHash = hashImageData(imageDataUrl);
+        
+        // Check if this page's content has changed from cached version
+        const cached = pageCacheRef.current.get(pageNum);
+        if (cached && cached.imageHash === imageHash) {
+            // Page content hasn't changed - return cached image, mark as unchanged
+            return { imageDataUrl: cached.imageDataUrl, changed: false };
+        }
+        
+        // Page content changed - update cache
+        pageCacheRef.current.set(pageNum, { imageDataUrl, imageHash });
+        return { imageDataUrl, changed: true };
     }, []);
+
+    // Process render queue with yielding to main thread
+    // Prioritizes pages closest to where the change occurred
+    const processRenderQueue = useCallback(async (pdf: any, existingImages: (string | null)[]) => {
+        if (isRenderingRef.current || pageRenderQueueRef.current.size === 0) return;
+        
+        isRenderingRef.current = true;
+        const changePage = estimatedChangePageRef.current;
+        
+        try {
+            while (pageRenderQueueRef.current.size > 0) {
+                // Sort pages by proximity to the estimated change page
+                // This renders the change page first, then expands outward (before/after)
+                const sortedPages = Array.from(pageRenderQueueRef.current).sort((a, b) => {
+                    const distA = Math.abs(a - changePage);
+                    const distB = Math.abs(b - changePage);
+                    if (distA !== distB) {
+                        return distA - distB; // Closer pages first
+                    }
+                    // For equal distance, prefer the page before (lower number)
+                    return a - b;
+                });
+                const nextPage = sortedPages[0];
+                
+                if (nextPage === undefined) break;
+                
+                pageRenderQueueRef.current.delete(nextPage);
+                
+                try {
+                    const { imageDataUrl, changed } = await renderSinglePage(pdf, nextPage);
+                    
+                    // Only update state if page content actually changed
+                    if (changed || !existingImages[nextPage - 1]) {
+                        setPageImages(prev => {
+                            const newImages = [...prev];
+                            newImages[nextPage - 1] = imageDataUrl;
+                            return newImages;
+                        });
+                    }
+                    
+                    setRenderingProgress({ current: totalPagesRef.current - pageRenderQueueRef.current.size, total: totalPagesRef.current });
+                    
+                    // Yield to main thread to keep UI responsive
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                } catch (err) {
+                    console.error(`Error rendering page ${nextPage}:`, err);
+                }
+            }
+        } finally {
+            isRenderingRef.current = false;
+            setRenderingProgress(null);
+        }
+    }, [renderSinglePage]);
 
     const fitToWidth = useCallback(async () => {
         if (viewportRef.current && pdfDocumentRef.current) {
             setViewMode('FitH');
             const page = await pdfDocumentRef.current.getPage(1);
             const viewportAtScale1 = page.getViewport({ scale: 1.0 });
-            // Use a slightly larger buffer to account for rounding and potential vertical scrollbar
             const availableWidth = viewportRef.current.clientWidth - 64;
             setScale(availableWidth / viewportAtScale1.width);
         }
@@ -151,27 +279,31 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             setViewMode('FitV');
             const page = await pdfDocumentRef.current.getPage(1);
             const viewportAtScale1 = page.getViewport({ scale: 1.0 });
-            const availableHeight = viewportRef.current.clientHeight - 80; // p-6 + page labels + buffer
+            const availableHeight = viewportRef.current.clientHeight - 80;
             setScale(availableHeight / viewportAtScale1.height);
         }
     }, []);
 
     // Fetch and render preview using client-side compilation
     const fetchPreview = useCallback(async () => {
-        if (!activeFile || !isInitialized) return;
+        if (!activeFile || !isInitialized || !pdfjsLib) return;
 
         const currentHash = getContentHash(content, settings, previewQuality);
 
         // Skip if content hasn't changed
-        if (currentHash === lastContentHashRef.current && pageImages.length > 0) {
+        if (currentHash === lastContentHashRef.current && pageImages.some(img => img !== null)) {
             return;
         }
 
+        // Cancel any previous compilation
+        cancelCompilation();
+        
         setIsLoading(true);
         setError(null);
+        pageRenderQueueRef.current.clear();
 
         try {
-            // Compile PDF using client-side WASM compiler
+            // Compile PDF using Web Worker
             const pdfBuffer = await compilePdf({
                 markdown: content,
                 title: activeFile.name.replace(/\.[^/.]+$/, ""),
@@ -182,25 +314,62 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
             const pdf = await loadingTask.promise;
             pdfDocumentRef.current = pdf;
-
-            await renderPages(pdf);
+            totalPagesRef.current = pdf.numPages;
             lastContentHashRef.current = currentHash;
+
+            // Estimate which page the change occurred on (before updating previous content)
+            const estimatedPage = estimateChangePage(content, pdf.numPages);
+            estimatedChangePageRef.current = estimatedPage;
+            previousContentRef.current = content;
+
+            // Keep existing page images for comparison (don't reset to nulls)
+            // This allows unchanged pages to be reused from cache
+            const existingImages = [...pageImages];
+            
+            // Adjust array size if page count changed
+            if (pdf.numPages !== existingImages.length) {
+                // If page count changed, we need to resize
+                if (pdf.numPages > existingImages.length) {
+                    // Add nulls for new pages
+                    while (existingImages.length < pdf.numPages) {
+                        existingImages.push(null);
+                    }
+                } else {
+                    // Remove extra pages and clear their cache
+                    for (let i = pdf.numPages; i < existingImages.length; i++) {
+                        pageCacheRef.current.delete(i + 1);
+                    }
+                    existingImages.length = pdf.numPages;
+                }
+                setPageImages(existingImages);
+            }
+            
+            // Queue ALL pages for rendering (cache comparison happens during render)
+            for (let i = 1; i <= pdf.numPages; i++) {
+                pageRenderQueueRef.current.add(i);
+            }
+            
+            // Start rendering with existing images for comparison
+            // Pages will be rendered starting from the estimated change page, expanding outward
+            processRenderQueue(pdf, existingImages);
 
             // Apply fit mode after PDF loads
             if (viewMode === 'FitH') fitToWidth();
             else if (viewMode === 'FitV') fitToHeight();
 
         } catch (err: any) {
-            console.error('Preview error:', err);
-            setError(err.message || 'Failed to generate preview');
+            if (err.message !== 'Compilation cancelled') {
+                console.error('Preview error:', err);
+                setError(err.message || 'Failed to generate preview');
+            }
         } finally {
             setIsLoading(false);
         }
-    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages.length, renderPages, viewMode, fitToWidth, fitToHeight, compilePdf, isInitialized]);
+    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages, viewMode, fitToWidth, fitToHeight, compilePdf, cancelCompilation, isInitialized, processRenderQueue, estimateChangePage]);
 
     // Debounced preview generation
     useEffect(() => {
-        if (!activeFile || !isInitialized) return;
+        if (!activeFile || !isInitialized || !mounted) return;
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(() => {
             fetchPreview();
@@ -208,14 +377,14 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return () => {
             if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         };
-    }, [content, settings, activeFile, fetchPreview, isInitialized]);
+    }, [content, settings, activeFile, fetchPreview, isInitialized, mounted]);
 
     // Initial load
     useEffect(() => {
-        if (activeFile && pageImages.length === 0 && isInitialized) {
+        if (activeFile && !pageImages.some(img => img !== null) && isInitialized && mounted) {
             fetchPreview();
         }
-    }, [activeFile, isInitialized]);
+    }, [activeFile, isInitialized, mounted, fetchPreview, pageImages]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -226,28 +395,23 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return () => window.removeEventListener('resize', handleResize);
     }, [viewMode, fitToWidth, fitToHeight]);
 
-    // Listen for navigation events from the outline and scroll to the corresponding page
+    // Listen for navigation events from the outline
     const scrollToHeading = useCallback(async (headingText: string) => {
         if (!pdfDocumentRef.current || !viewportRef.current) return;
         
         const pdf = pdfDocumentRef.current;
         const numPages = pdf.numPages;
         
-        // Calculate pages to skip (front page, TOC, and their empty pages after)
         let pagesToSkip = 0;
         if (settings?.frontPage?.enabled) {
             pagesToSkip += 1 + (settings.frontPage.emptyPagesAfter || 0);
         }
         if (settings?.outline?.enabled) {
-            // TOC typically takes 1 page, but could be more - we'll skip at least 1
-            // plus any empty pages configured after it
             pagesToSkip += 1 + (settings.outline.emptyPagesAfter || 0);
         }
         
-        // Start searching after the front matter pages
         const startPage = Math.min(pagesToSkip + 1, numPages);
         
-        // Search through each page for the heading text (starting after TOC)
         for (let pageNum = startPage; pageNum <= numPages; pageNum++) {
             try {
                 const page = await pdf.getPage(pageNum);
@@ -256,13 +420,10 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                     .map((item: any) => item.str)
                     .join(' ');
                 
-                // Check if this page contains the heading text
-                // We normalize whitespace and do a case-insensitive search
                 const normalizedPageText = pageText.replace(/\s+/g, ' ').toLowerCase();
                 const normalizedHeading = headingText.replace(/\s+/g, ' ').toLowerCase();
                 
                 if (normalizedPageText.includes(normalizedHeading)) {
-                    // Found the page! Scroll to it
                     const pageElements = viewportRef.current?.querySelectorAll('[data-page-index]');
                     if (pageElements && pageElements[pageNum - 1]) {
                         pageElements[pageNum - 1].scrollIntoView({ 
@@ -270,10 +431,9 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                             block: 'start' 
                         });
                     } else {
-                        // Fallback: calculate approximate scroll position
                         const pageContainer = viewportRef.current?.querySelector('.p-6');
                         if (pageContainer) {
-                            const pageHeight = (pageDimensions?.height || 842) * scale + 24 + 20; // page + gap + label
+                            const pageHeight = (pageDimensions?.height || 842) * scale + 24 + 20;
                             const scrollTop = (pageNum - 1) * pageHeight;
                             viewportRef.current?.scrollTo({ 
                                 top: scrollTop, 
@@ -289,6 +449,65 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         }
     }, [pageDimensions, scale, settings]);
 
+    // Function to scroll to text in PDF (for cursor sync)
+    const scrollToText = useCallback(async (searchText: string) => {
+        if (!pdfDocumentRef.current || !viewportRef.current || !searchText) return;
+        
+        const pdf = pdfDocumentRef.current;
+        const numPages = pdf.numPages;
+        
+        let pagesToSkip = 0;
+        if (settings?.frontPage?.enabled) {
+            pagesToSkip += 1 + (settings.frontPage.emptyPagesAfter || 0);
+        }
+        if (settings?.outline?.enabled) {
+            pagesToSkip += 1 + (settings.outline.emptyPagesAfter || 0);
+        }
+        
+        const startPage = Math.min(pagesToSkip + 1, numPages);
+        
+        // Normalize search text
+        const normalizedSearch = searchText.replace(/\s+/g, ' ').toLowerCase().trim();
+        if (normalizedSearch.length < 3) return; // Skip very short searches
+        
+        // Search from start page to end
+        for (let pageNum = startPage; pageNum <= numPages; pageNum++) {
+            try {
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items
+                    .map((item: any) => item.str)
+                    .join(' ');
+                
+                const normalizedPageText = pageText.replace(/\s+/g, ' ').toLowerCase();
+                
+                // Check if search text appears in this page
+                if (normalizedPageText.includes(normalizedSearch)) {
+                    const pageElements = viewportRef.current?.querySelectorAll('[data-page-index]');
+                    if (pageElements && pageElements[pageNum - 1]) {
+                        pageElements[pageNum - 1].scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start' 
+                        });
+                    } else {
+                        const pageContainer = viewportRef.current?.querySelector('.p-6');
+                        if (pageContainer) {
+                            const pageHeight = (pageDimensions?.height || 842) * scale + 24 + 20;
+                            const scrollTop = (pageNum - 1) * pageHeight;
+                            viewportRef.current?.scrollTo({ 
+                                top: scrollTop, 
+                                behavior: 'smooth' 
+                            });
+                        }
+                    }
+                    return; // Found and scrolled, exit
+                }
+            } catch (err) {
+                console.error(`Error searching page ${pageNum}:`, err);
+            }
+        }
+    }, [pageDimensions, scale, settings]);
+
     useEffect(() => {
         const handleNavigateToLine = (event: CustomEvent<{ headingText?: string }>) => {
             if (event.detail.headingText) {
@@ -296,13 +515,21 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             }
         };
         
+        const handleSyncPdfToCursor = (event: CustomEvent<{ searchText?: string }>) => {
+            if (event.detail.searchText) {
+                scrollToText(event.detail.searchText);
+            }
+        };
+        
         window.addEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+        window.addEventListener('sync-pdf-to-cursor', handleSyncPdfToCursor as EventListener);
         return () => {
             window.removeEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+            window.removeEventListener('sync-pdf-to-cursor', handleSyncPdfToCursor as EventListener);
         };
-    }, [scrollToHeading]);
+    }, [scrollToHeading, scrollToText]);
 
-    // Zoom with scroll position adjustment to keep content centered
+    // Zoom with scroll position adjustment
     const zoomAtPoint = useCallback((newScale: number, clientX?: number, clientY?: number) => {
         const viewport = viewportRef.current;
         if (!viewport) {
@@ -315,29 +542,23 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         
         if (clampedNewScale === oldScale) return;
 
-        // Get the point to zoom around (default to center of viewport)
         const rect = viewport.getBoundingClientRect();
         const pointX = clientX !== undefined ? clientX - rect.left : rect.width / 2;
         const pointY = clientY !== undefined ? clientY - rect.top : rect.height / 2;
 
-        // Current scroll position
         const scrollLeft = viewport.scrollLeft;
         const scrollTop = viewport.scrollTop;
 
-        // Point in content coordinates before zoom
         const contentX = scrollLeft + pointX;
         const contentY = scrollTop + pointY;
 
-        // Calculate the ratio of scale change
         const scaleRatio = clampedNewScale / oldScale;
 
-        // New scroll position to keep the same content point under the cursor/center
         const newScrollLeft = contentX * scaleRatio - pointX;
         const newScrollTop = contentY * scaleRatio - pointY;
 
         setScale(clampedNewScale);
         
-        // Use requestAnimationFrame to ensure scroll happens after render
         requestAnimationFrame(() => {
             viewport.scrollLeft = Math.max(0, newScrollLeft);
             viewport.scrollTop = Math.max(0, newScrollTop);
@@ -354,18 +575,15 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         zoomAtPoint(scale - 0.1);
     }, [scale, zoomAtPoint]);
 
-    // Handle Ctrl+scroll wheel zoom and trackpad pinch gestures
-    // Using window-level listener like Three.js does to properly intercept browser zoom
+    // Wheel zoom handling
     const lastGestureScale = useRef(1);
     const isHovering = useRef(false);
     const scaleRef = useRef(scale);
     
-    // Keep scaleRef in sync
     useEffect(() => {
         scaleRef.current = scale;
     }, [scale]);
 
-    // Track mouse enter/leave to know when pointer is over our component
     const handleMouseEnter = useCallback(() => {
         isHovering.current = true;
     }, []);
@@ -374,23 +592,16 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         isHovering.current = false;
     }, []);
 
-    // Window-level wheel listener to intercept browser zoom
     useEffect(() => {
         const handleWheel = (e: WheelEvent) => {
-            // Only handle when Ctrl/Cmd is pressed (browsers set ctrlKey for pinch gestures)
             if (!e.ctrlKey && !e.metaKey) return;
-            
-            // Only handle when pointer is over our component
             if (!isHovering.current) return;
 
-            // Prevent browser zoom
             e.preventDefault();
 
             const viewport = viewportRef.current;
             if (!viewport) return;
 
-            // deltaY is negative when zooming in (scroll up / pinch out)
-            // deltaY is positive when zooming out (scroll down / pinch in)
             const zoomSensitivity = 0.008;
             const delta = -e.deltaY * zoomSensitivity;
             
@@ -399,7 +610,6 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             
             if (newScale === oldScale) return;
 
-            // Zoom centered on mouse position
             const rect = viewport.getBoundingClientRect();
             const pointX = e.clientX - rect.left;
             const pointY = e.clientY - rect.top;
@@ -425,7 +635,6 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             });
         };
 
-        // Attach to window with passive: false - this is how Three.js does it
         window.addEventListener('wheel', handleWheel, { passive: false });
 
         return () => {
@@ -433,7 +642,7 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         };
     }, []);
 
-    // Safari gesture events for trackpad pinch
+    // Safari gesture events
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
@@ -458,7 +667,6 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             
             if (newScale === oldScale) return;
 
-            // Zoom centered on gesture position
             const rect = viewport.getBoundingClientRect();
             const pointX = (gestureEvent.clientX || rect.left + rect.width / 2) - rect.left;
             const pointY = (gestureEvent.clientY || rect.top + rect.height / 2) - rect.top;
@@ -488,7 +696,6 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             e.preventDefault();
         };
 
-        // Safari gesture events (only available on Safari/WebKit)
         container.addEventListener('gesturestart', handleGestureStart, { passive: false });
         container.addEventListener('gesturechange', handleGestureChange, { passive: false });
         container.addEventListener('gestureend', handleGestureEnd, { passive: false });
@@ -500,6 +707,16 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         };
     }, []);
 
+    // Get stage label for UI
+    const getStageLabel = useCallback(() => {
+        switch (compilationStage) {
+            case 'initializing': return 'Initializing...';
+            case 'processing-images': return 'Processing images...';
+            case 'compiling': return 'Compiling PDF...';
+            default: return 'Generating preview...';
+        }
+    }, [compilationStage]);
+
     if (!mounted) {
         return (
             <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center">
@@ -508,7 +725,6 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         );
     }
 
-    // Show initialization error if compiler failed to load
     if (initError) {
         return (
             <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center p-4">
@@ -521,12 +737,13 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         );
     }
 
-    // Show loading while compiler initializes
     if (!isInitialized) {
         return (
             <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center">
                 <div className="flex flex-col items-center gap-2">
-                    <Loader2 size={20} className="animate-spin text-muted-foreground" />
+                    <div className="animate-spin flex items-center justify-center">
+                        <Loader2 size={20} className="text-muted-foreground" />
+                    </div>
                     <p className="text-[10px] text-muted-foreground">Initializing PDF compiler...</p>
                 </div>
             </div>
@@ -542,6 +759,8 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             </div>
         );
     }
+
+    const totalPages = pageImages.length;
 
     return (
         <div className="flex-1 flex flex-col min-h-0 h-full">
@@ -566,8 +785,12 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                     </div>
 
                     <div className="flex items-center gap-1">
-                        {isLoading && (
-                            <Loader2 size={12} className="animate-spin text-primary mr-1" />
+                        {(isLoading || renderingProgress) && (
+                            <div className="flex items-center mr-1">
+                                <div className="animate-spin flex items-center justify-center">
+                                    <Loader2 size={12} className="text-primary" />
+                                </div>
+                            </div>
                         )}
                         <Button variant="ghost" size="icon" className={cn("h-6 w-6", viewMode === 'FitH' && "bg-accent")} onClick={fitToWidth} title="Fit to Width">
                             <MoveHorizontal size={14} />
@@ -580,17 +803,19 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
 
                 <div className="flex-1 h-full min-h-0 overflow-auto relative" ref={viewportRef}>
                     {/* Initial Loading */}
-                    {isLoading && pageImages.length === 0 && (
+                    {isLoading && totalPages === 0 && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80">
                             <div className="flex flex-col items-center gap-2">
-                                <Loader2 size={24} className="animate-spin text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">Generating preview...</p>
+                                <div className="animate-spin flex items-center justify-center">
+                                    <Loader2 size={24} className="text-muted-foreground" />
+                                </div>
+                                <p className="text-sm text-muted-foreground">{getStageLabel()}</p>
                             </div>
                         </div>
                     )}
 
                     {/* Error State */}
-                    {error && pageImages.length === 0 && (
+                    {error && totalPages === 0 && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80">
                             <div className="flex flex-col items-center gap-2 p-4 text-center">
                                 <p className="text-sm text-destructive">Preview Error</p>
@@ -622,34 +847,47 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                         }}
                     >
                         {pageImages.map((imageDataUrl, index) => (
-                            <div key={index} className="flex flex-col items-center shrink-0" data-page-index={index}>
+                            <div 
+                                key={index} 
+                                className="flex flex-col items-center shrink-0" 
+                                data-page-index={index}
+                            >
                                 <div
                                     className="shadow-2xl bg-white dark:bg-zinc-100 rounded-sm overflow-hidden border border-zinc-200 dark:border-zinc-800 select-none"
                                     style={{
                                         width: pageDimensions ? pageDimensions.width * scale : 'auto',
+                                        height: pageDimensions ? pageDimensions.height * scale : 'auto',
                                         maxWidth: 'none',
                                         willChange: 'width',
                                     }}
                                 >
-                                    <img
-                                        src={imageDataUrl}
-                                        alt={`Page ${index + 1}`}
-                                        style={{
-                                            width: '100%',
-                                            height: 'auto',
-                                            imageRendering: 'auto',
-                                        }}
-                                        className="block pointer-events-none"
-                                        draggable={false}
-                                    />
+                                    {imageDataUrl ? (
+                                        <img
+                                            src={imageDataUrl}
+                                            alt={`Page ${index + 1}`}
+                                            style={{
+                                                width: '100%',
+                                                height: 'auto',
+                                                imageRendering: 'auto',
+                                            }}
+                                            className="block pointer-events-none"
+                                            draggable={false}
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center bg-zinc-50">
+                                            <div className="animate-spin flex items-center justify-center">
+                                                <Loader2 size={16} className="text-muted-foreground" />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="mt-2 text-[9px] text-muted-foreground font-medium uppercase tracking-widest opacity-50">
-                                    Page {index + 1} of {pageImages.length}
+                                    Page {index + 1} of {totalPages}
                                 </div>
                             </div>
                         ))}
 
-                        {pageImages.length === 0 && !isLoading && !error && (
+                        {totalPages === 0 && !isLoading && !error && (
                             <div className="flex-1 flex items-center justify-center py-20">
                                 <p className="text-xs text-muted-foreground">Preview will appear here</p>
                             </div>

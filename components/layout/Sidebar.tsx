@@ -390,7 +390,10 @@ export function Sidebar() {
                                         <div className="px-3 pb-2">
                                             {isLoadingFileTree ? (
                                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
-                                                    <RefreshCw size={12} className="animate-spin" /> Loading...
+                                                    <div className="animate-spin flex items-center justify-center">
+                                                        <RefreshCw size={12} />
+                                                    </div>
+                                                    Loading...
                                                 </div>
                                             ) : (
                                                 <FileTree
@@ -452,7 +455,10 @@ export function Sidebar() {
 
                             {isLoadingFileTree ? (
                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
-                                    <RefreshCw size={12} className="animate-spin" /> Loading...
+                                    <div className="animate-spin flex items-center justify-center">
+                                        <RefreshCw size={12} />
+                                    </div>
+                                    Loading...
                                 </div>
                             ) : (
                                 <FileTree
@@ -492,7 +498,10 @@ export function Sidebar() {
 
                             {isLoadingFileTree ? (
                                 <div className="px-2 py-4 text-xs text-muted-foreground flex items-center gap-2">
-                                    <RefreshCw size={12} className="animate-spin" /> Loading...
+                                    <div className="animate-spin flex items-center justify-center">
+                                        <RefreshCw size={12} />
+                                    </div>
+                                    Loading...
                                 </div>
                             ) : (
                                 <FileTree

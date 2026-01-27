@@ -216,7 +216,8 @@ const alertRules = {
     },
   },
   callout: {
-    serialize: (node: any, { children }: any) => {
+    serialize: (node: any, options: any) => {
+      const children = options?.children ?? [];
       let type = 'NOTE';
       if (node.icon === '💡') type = 'TIP';
       else if (node.icon === '💎') type = 'IMPORTANT';
@@ -226,7 +227,9 @@ const alertRules = {
 
       const firstChild = children[0];
       if (firstChild && firstChild.type === 'paragraph') {
-        firstChild.children.unshift({ type: 'text', value: `[!${type}]\n` });
+        const pChildren = firstChild.children ?? [];
+        pChildren.unshift({ type: 'text', value: `[!${type}]\n` });
+        firstChild.children = pChildren;
       } else {
         children.unshift({
           children: [{ type: 'text', value: `[!${type}]\n` }],

@@ -18,6 +18,17 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      worker: {
+        format: 'es',
+        rollupOptions: {
+          output: {
+            entryFileNames: 'assets/[name]-[hash].js'
+          }
+        }
+      },
+      optimizeDeps: {
+        exclude: ['@myriaddreamin/typst.ts']
       }
     };
 });
