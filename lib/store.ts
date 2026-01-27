@@ -43,6 +43,7 @@ interface AppState {
 
     // Fonts State
     customFonts: FontEntry[];
+    fontsLoaded: boolean; // True after fonts have been fetched from IndexedDB (even if empty)
 
     // Actions
     fetchFileTree: () => Promise<void>;
@@ -326,6 +327,7 @@ export const useStore = create<AppState>()(
                 activeTemplateId: null,
                 activeTemplateCss: '',
                 customFonts: [],
+                fontsLoaded: false, // Set to true after fetchFonts() completes
                 editorViewMode: 'editing',
                 currentView: 'file',
                 isSettingsOpen: false,
@@ -466,9 +468,16 @@ export const useStore = create<AppState>()(
                 fetchFonts: async () => {
                     try {
                         const fonts = await browserStorage.listFonts();
-                        set({ customFonts: fonts });
+                        // Set both customFonts and fontsLoaded atomically
+                        // fontsLoaded: true indicates fonts have been fetched from IndexedDB
+                        // (even if the result is an empty array)
+                        set({ customFonts: fonts, fontsLoaded: true });
+                        console.log(`[Store] fetchFonts completed: ${fonts.length} fonts loaded, fontsLoaded=true`);
                     } catch (error) {
                         console.error('Failed to fetch fonts:', error);
+                        // Even on error, mark as loaded to prevent infinite waiting
+                        // The app can function without custom fonts
+                        set({ fontsLoaded: true });
                     }
                 },
 
@@ -836,13 +845,16 @@ export const useStore = create<AppState>()(
                 editorViewMode: state.editorViewMode,
             }),
             merge: (persistedState, currentState) => {
-                // Ignore customFonts from localStorage as they are blobs and cannot be persisted there.
+                // Ignore customFonts and fontsLoaded from localStorage as they cannot be persisted there:
+                // - customFonts contains blobs which cannot be serialized
+                // - fontsLoaded must start as false and only become true after fetchFonts() completes
                 // This prevents 'poisoned' empty objects from overwriting valid fetched fonts
                 // if hydration happens after fetchFonts.
                 const merged = {
                     ...currentState,
                     ...(persistedState as object),
                     customFonts: currentState.customFonts,
+                    fontsLoaded: currentState.fontsLoaded,
                 };
                 return merged;
             }

@@ -387,6 +387,9 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     const pendingRequestsRef = useRef<Map<string, { resolve: (value: ArrayBuffer) => void; reject: (error: Error) => void }>>(new Map());
     const currentCompilationIdRef = useRef<string | null>(null);
     const customFonts = useStore((state) => state.customFonts);
+    // fontsLoaded is true only after fonts have been fetched from IndexedDB
+    // This prevents the race condition where compiler initializes before fonts are loaded
+    const fontsLoaded = useStore((state) => state.fontsLoaded);
     // Use null to indicate "never initialized" vs empty string for "initialized with no fonts"
     const fontsLoadedRef = useRef<string | null>(null);
     const initializingRef = useRef(false);
@@ -522,7 +525,17 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     }, [workerFailed, isInitialized, initMainThread]);
 
     // Initialize worker or main thread with fonts when fonts change
+    // CRITICAL: Wait for fontsLoaded to be true before initializing
+    // This prevents the race condition where compiler initializes before fonts are loaded from IndexedDB
     useEffect(() => {
+        // GUARD: Do not initialize until fonts have been loaded from IndexedDB
+        // This is the key fix for the race condition - fontsLoaded only becomes true
+        // after fetchFonts() completes, ensuring we have the correct fonts before init
+        if (!fontsLoaded) {
+            console.log('[usePdfCompiler] Waiting for fonts to be loaded from IndexedDB...');
+            return;
+        }
+
         const fontSignature = customFonts.map(f => `${f.family}-${f.blob?.size || 0}`).join(',');
 
         // Skip if fonts haven't changed AND we're already initialized
@@ -535,7 +548,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             // fontsChanged is true only if we've initialized before AND the signature differs
             const fontsChanged = fontsLoadedRef.current !== null && fontsLoadedRef.current !== fontSignature;
             
-            console.log('[usePdfCompiler] initWithFonts called, fonts:', validFonts.map(f => f.family), 'fontsChanged:', fontsChanged);
+            console.log('[usePdfCompiler] initWithFonts called, fonts:', validFonts.map(f => f.family), 'fontsChanged:', fontsChanged, 'fontsLoaded:', fontsLoaded);
 
             // Check if we should fall back to main thread (worker failed)
             if (shouldFallbackToMainThreadRef.current) {
@@ -594,7 +607,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
 
         // Store the promise so compilePdf can wait for fonts to be ready
         fontInitPromiseRef.current = initWithFonts();
-    }, [customFonts, initMainThread, isInitialized]);
+    }, [customFonts, fontsLoaded, initMainThread, isInitialized]);
 
     // Cancel current compilation
     const cancelCompilation = useCallback(() => {
@@ -661,10 +674,25 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
         try {
             // CRITICAL: Wait for font initialization to complete before building Typst source
             // This ensures registeredCustomFontFamilies is populated for generatePreamble
+            // 
+            // The fontInitPromiseRef.current is only set AFTER fontsLoaded is true (due to our guard),
+            // so if it's null, fonts haven't been loaded from IndexedDB yet.
+            // In that case, we wait a bit and check again - this handles the edge case where
+            // compilePdf is called very early (e.g., from an auto-preview).
+            let waitCount = 0;
+            const maxWaitCount = 50; // 50 * 100ms = 5 seconds max wait
+            while (!fontInitPromiseRef.current && waitCount < maxWaitCount) {
+                console.log(`[usePdfCompiler] Fonts not initialized yet, waiting... (${waitCount + 1})`);
+                await new Promise(resolve => setTimeout(resolve, 100));
+                waitCount++;
+            }
+            
             if (fontInitPromiseRef.current) {
                 console.log('[usePdfCompiler] Waiting for font initialization...');
                 await fontInitPromiseRef.current;
                 console.log('[usePdfCompiler] Font initialization complete');
+            } else {
+                console.warn('[usePdfCompiler] Font initialization timed out, proceeding without custom fonts');
             }
 
             // Build Typst source (this needs main thread for IndexedDB access)
