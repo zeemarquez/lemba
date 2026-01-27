@@ -73,6 +73,8 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
     const pageRenderQueueRef = useRef<Set<number>>(new Set());
     const isRenderingRef = useRef(false);
     const totalPagesRef = useRef(0);
+    const previousContentRef = useRef<string>('');
+    const estimatedChangePageRef = useRef<number>(1);
 
     // Detect if window is landscape (wider than tall) for horizontal page layout
     useEffect(() => {
@@ -129,6 +131,43 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return hash.toString();
     }, []);
 
+    // Estimate which page the change occurred on by comparing content
+    const estimateChangePage = useCallback((currentContent: string, totalPages: number): number => {
+        const prevContent = previousContentRef.current;
+        
+        // If no previous content or first render, default to page 1
+        if (!prevContent || totalPages <= 1) {
+            return 1;
+        }
+        
+        // Find the first position where content differs
+        const minLength = Math.min(currentContent.length, prevContent.length);
+        let changePosition = -1;
+        
+        // Find first difference
+        for (let i = 0; i < minLength; i++) {
+            if (currentContent[i] !== prevContent[i]) {
+                changePosition = i;
+                break;
+            }
+        }
+        
+        // If no difference found in common part, change is at the end (content added/removed)
+        if (changePosition === -1) {
+            changePosition = minLength;
+        }
+        
+        // Estimate page based on position ratio
+        // Use the longer content length for ratio calculation
+        const contentLength = Math.max(currentContent.length, prevContent.length);
+        if (contentLength === 0) return 1;
+        
+        const positionRatio = changePosition / contentLength;
+        const estimatedPage = Math.max(1, Math.min(totalPages, Math.ceil(positionRatio * totalPages)));
+        
+        return estimatedPage;
+    }, []);
+
     const [pageDimensions, setPageDimensions] = useState<{ width: number, height: number } | null>(null);
     const renderScaleRef = useRef(2.0);
 
@@ -173,15 +212,26 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
     }, []);
 
     // Process render queue with yielding to main thread
+    // Prioritizes pages closest to where the change occurred
     const processRenderQueue = useCallback(async (pdf: any, existingImages: (string | null)[]) => {
         if (isRenderingRef.current || pageRenderQueueRef.current.size === 0) return;
         
         isRenderingRef.current = true;
+        const changePage = estimatedChangePageRef.current;
         
         try {
             while (pageRenderQueueRef.current.size > 0) {
-                // Get the next page in order
-                const sortedPages = Array.from(pageRenderQueueRef.current).sort((a, b) => a - b);
+                // Sort pages by proximity to the estimated change page
+                // This renders the change page first, then expands outward (before/after)
+                const sortedPages = Array.from(pageRenderQueueRef.current).sort((a, b) => {
+                    const distA = Math.abs(a - changePage);
+                    const distB = Math.abs(b - changePage);
+                    if (distA !== distB) {
+                        return distA - distB; // Closer pages first
+                    }
+                    // For equal distance, prefer the page before (lower number)
+                    return a - b;
+                });
                 const nextPage = sortedPages[0];
                 
                 if (nextPage === undefined) break;
@@ -236,7 +286,7 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
 
     // Fetch and render preview using client-side compilation
     const fetchPreview = useCallback(async () => {
-        if (!activeFile || !isInitialized) return;
+        if (!activeFile || !isInitialized || !pdfjsLib) return;
 
         const currentHash = getContentHash(content, settings, previewQuality);
 
@@ -267,6 +317,11 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             totalPagesRef.current = pdf.numPages;
             lastContentHashRef.current = currentHash;
 
+            // Estimate which page the change occurred on (before updating previous content)
+            const estimatedPage = estimateChangePage(content, pdf.numPages);
+            estimatedChangePageRef.current = estimatedPage;
+            previousContentRef.current = content;
+
             // Keep existing page images for comparison (don't reset to nulls)
             // This allows unchanged pages to be reused from cache
             const existingImages = [...pageImages];
@@ -295,6 +350,7 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             }
             
             // Start rendering with existing images for comparison
+            // Pages will be rendered starting from the estimated change page, expanding outward
             processRenderQueue(pdf, existingImages);
 
             // Apply fit mode after PDF loads
@@ -309,11 +365,11 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages, viewMode, fitToWidth, fitToHeight, compilePdf, cancelCompilation, isInitialized, processRenderQueue]);
+    }, [activeFile, content, settings, previewQuality, getContentHash, pageImages, viewMode, fitToWidth, fitToHeight, compilePdf, cancelCompilation, isInitialized, processRenderQueue, estimateChangePage]);
 
     // Debounced preview generation
     useEffect(() => {
-        if (!activeFile || !isInitialized) return;
+        if (!activeFile || !isInitialized || !mounted) return;
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(() => {
             fetchPreview();
@@ -321,14 +377,14 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return () => {
             if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         };
-    }, [content, settings, activeFile, fetchPreview, isInitialized]);
+    }, [content, settings, activeFile, fetchPreview, isInitialized, mounted]);
 
     // Initial load
     useEffect(() => {
-        if (activeFile && !pageImages.some(img => img !== null) && isInitialized) {
+        if (activeFile && !pageImages.some(img => img !== null) && isInitialized && mounted) {
             fetchPreview();
         }
-    }, [activeFile, isInitialized]);
+    }, [activeFile, isInitialized, mounted, fetchPreview, pageImages]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -393,6 +449,65 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         }
     }, [pageDimensions, scale, settings]);
 
+    // Function to scroll to text in PDF (for cursor sync)
+    const scrollToText = useCallback(async (searchText: string) => {
+        if (!pdfDocumentRef.current || !viewportRef.current || !searchText) return;
+        
+        const pdf = pdfDocumentRef.current;
+        const numPages = pdf.numPages;
+        
+        let pagesToSkip = 0;
+        if (settings?.frontPage?.enabled) {
+            pagesToSkip += 1 + (settings.frontPage.emptyPagesAfter || 0);
+        }
+        if (settings?.outline?.enabled) {
+            pagesToSkip += 1 + (settings.outline.emptyPagesAfter || 0);
+        }
+        
+        const startPage = Math.min(pagesToSkip + 1, numPages);
+        
+        // Normalize search text
+        const normalizedSearch = searchText.replace(/\s+/g, ' ').toLowerCase().trim();
+        if (normalizedSearch.length < 3) return; // Skip very short searches
+        
+        // Search from start page to end
+        for (let pageNum = startPage; pageNum <= numPages; pageNum++) {
+            try {
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items
+                    .map((item: any) => item.str)
+                    .join(' ');
+                
+                const normalizedPageText = pageText.replace(/\s+/g, ' ').toLowerCase();
+                
+                // Check if search text appears in this page
+                if (normalizedPageText.includes(normalizedSearch)) {
+                    const pageElements = viewportRef.current?.querySelectorAll('[data-page-index]');
+                    if (pageElements && pageElements[pageNum - 1]) {
+                        pageElements[pageNum - 1].scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start' 
+                        });
+                    } else {
+                        const pageContainer = viewportRef.current?.querySelector('.p-6');
+                        if (pageContainer) {
+                            const pageHeight = (pageDimensions?.height || 842) * scale + 24 + 20;
+                            const scrollTop = (pageNum - 1) * pageHeight;
+                            viewportRef.current?.scrollTo({ 
+                                top: scrollTop, 
+                                behavior: 'smooth' 
+                            });
+                        }
+                    }
+                    return; // Found and scrolled, exit
+                }
+            } catch (err) {
+                console.error(`Error searching page ${pageNum}:`, err);
+            }
+        }
+    }, [pageDimensions, scale, settings]);
+
     useEffect(() => {
         const handleNavigateToLine = (event: CustomEvent<{ headingText?: string }>) => {
             if (event.detail.headingText) {
@@ -400,11 +515,19 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
             }
         };
         
+        const handleSyncPdfToCursor = (event: CustomEvent<{ searchText?: string }>) => {
+            if (event.detail.searchText) {
+                scrollToText(event.detail.searchText);
+            }
+        };
+        
         window.addEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+        window.addEventListener('sync-pdf-to-cursor', handleSyncPdfToCursor as EventListener);
         return () => {
             window.removeEventListener('navigate-to-line', handleNavigateToLine as EventListener);
+            window.removeEventListener('sync-pdf-to-cursor', handleSyncPdfToCursor as EventListener);
         };
-    }, [scrollToHeading]);
+    }, [scrollToHeading, scrollToText]);
 
     // Zoom with scroll position adjustment
     const zoomAtPoint = useCallback((newScale: number, clientX?: number, clientY?: number) => {

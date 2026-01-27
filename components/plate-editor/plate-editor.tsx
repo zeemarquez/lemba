@@ -286,10 +286,10 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
             // Select the heading and scroll to it
             try {
               editor.tf.select(editor.api.start(path));
-              // Scroll the heading into view
+              // Scroll the heading into view at the top
               const domNode = editor.api.toDOMNode(node);
               if (domNode) {
-                domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                domNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }
             } catch (e) {
               // Ignore selection errors
@@ -399,6 +399,87 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     }
   }, [editor, editorViewMode, setActiveHeadingId, findHeadingInMarkdown]);
 
+  // Function to extract text around cursor for PDF sync
+  const extractTextAroundCursor = useCallback(() => {
+    if (!editor || !editor.selection || editorViewMode === 'source') {
+      return '';
+    }
+
+    try {
+      // Get the current block node at cursor
+      const block = editor.api.block({ at: editor.selection.anchor });
+      if (!block) return '';
+
+      const [node] = block;
+      
+      // Get text from current node
+      let text = Node.string(node).trim();
+      
+      // If text is too short, try to get text from surrounding nodes
+      if (text.length < 20) {
+        const path = editor.api.findPath(node);
+        if (path) {
+          // Try to get text from previous and next siblings
+          const parent = editor.api.parent({ at: path });
+          if (parent) {
+            const [parentNode, parentPath] = parent;
+            if ('children' in parentNode && Array.isArray(parentNode.children)) {
+              const currentIndex = path[path.length - 1];
+              const siblings: string[] = [];
+              
+              // Get previous sibling
+              if (currentIndex > 0) {
+                const prevSibling = parentNode.children[currentIndex - 1];
+                if (prevSibling) {
+                  siblings.push(Node.string(prevSibling).trim());
+                }
+              }
+              
+              // Current node
+              siblings.push(text);
+              
+              // Get next sibling
+              if (currentIndex < parentNode.children.length - 1) {
+                const nextSibling = parentNode.children[currentIndex + 1];
+                if (nextSibling) {
+                  siblings.push(Node.string(nextSibling).trim());
+                }
+              }
+              
+              text = siblings.filter(s => s.length > 0).join(' ').trim();
+            }
+          }
+        }
+      }
+      
+      // Extract a meaningful snippet (about 10-15 words)
+      const words = text.split(/\s+/).filter(w => w.length > 0);
+      if (words.length === 0) return '';
+      
+      // Get middle portion of words
+      const start = Math.max(0, Math.floor(words.length / 2) - 5);
+      const end = Math.min(words.length, start + 10);
+      const snippet = words.slice(start, end).join(' ');
+      
+      return snippet.trim();
+    } catch (error) {
+      return '';
+    }
+  }, [editor, editorViewMode]);
+
+  // Debounced function to sync PDF preview with cursor position
+  const debouncedSyncPdfPreview = useMemo(
+    () => debounce((text: string) => {
+      if (!text) return;
+      // Dispatch event to sync PDF preview
+      const event = new CustomEvent('sync-pdf-to-cursor', {
+        detail: { searchText: text }
+      });
+      window.dispatchEvent(event);
+    }, 300), // Debounce to avoid too frequent updates
+    []
+  );
+
   // Debounced function to update active heading
   const debouncedFindActiveHeading = useMemo(
     () => debounce(() => {
@@ -426,8 +507,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     // Cleanup
     return () => {
       debouncedFindActiveHeading.cancel();
+      debouncedSyncPdfPreview.cancel();
     };
-  }, [editor, editorViewMode, debouncedFindActiveHeading]);
+  }, [editor, editorViewMode, debouncedFindActiveHeading, debouncedSyncPdfPreview]);
 
   if (!mounted) {
     return (
@@ -449,6 +531,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // Update active heading when selection changes
         if (editorViewMode !== 'source' && editor.selection) {
           debouncedFindActiveHeading();
+          
+          // Sync PDF preview with cursor position
+          const text = extractTextAroundCursor();
+          if (text) {
+            debouncedSyncPdfPreview(text);
+          }
         }
         
         // Defer resetting the flag to allow the useEffect to see it as true
