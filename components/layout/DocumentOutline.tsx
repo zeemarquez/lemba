@@ -2,7 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMemo, useState, useCallback } from "react";
 
@@ -75,6 +75,26 @@ function OutlineItem({ heading, isActive, isExpanded, hasChildren, onToggleExpan
     // Calculate indentation based on heading level
     const paddingLeft = (heading.level - 1) * 12;
     
+    // Style based on heading level
+    const getHeadingStyle = (level: number) => {
+        switch (level) {
+            case 1:
+                return "text-sm font-bold";
+            case 2:
+                return "text-sm font-semibold";
+            case 3:
+                return "text-xs font-semibold";
+            case 4:
+                return "text-xs font-medium";
+            case 5:
+                return "text-xs font-normal";
+            case 6:
+                return "text-xs font-normal";
+            default:
+                return "text-xs font-normal";
+        }
+    };
+    
     const handleChevronClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (hasChildren) {
@@ -86,7 +106,7 @@ function OutlineItem({ heading, isActive, isExpanded, hasChildren, onToggleExpan
         <button
             onClick={onClick}
             className={cn(
-                "w-full text-left px-2 py-1.5 text-xs rounded-md transition-colors",
+                "w-full text-left px-2 py-1.5 rounded-md transition-colors",
                 "hover:bg-accent/50 focus:bg-accent/50 focus:outline-none",
                 "flex items-center gap-1.5 min-h-[28px]",
                 isActive && "bg-accent text-accent-foreground"
@@ -111,7 +131,7 @@ function OutlineItem({ heading, isActive, isExpanded, hasChildren, onToggleExpan
                     <ChevronRight size={14} className="text-muted-foreground/40" />
                 )}
             </span>
-            <span className="truncate">{heading.text}</span>
+            <span className={cn("truncate", getHeadingStyle(heading.level))}>{heading.text}</span>
         </button>
     );
 }
@@ -180,6 +200,18 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
             return next;
         });
     }, []);
+
+    const collapseAllHeadings = useCallback(() => {
+        const headingsWithChildren = headings
+            .map((heading, index) => ({ heading, index }))
+            .filter(({ index }) => hasChildren(headings, index))
+            .map(({ heading }) => heading.id);
+        setCollapsedHeadings(new Set(headingsWithChildren));
+    }, [headings]);
+
+    const expandAllHeadings = useCallback(() => {
+        setCollapsedHeadings(new Set());
+    }, []);
     
     const handleHeadingClick = (heading: HeadingItem) => {
         // Dispatch a custom event that editors can listen to for navigation
@@ -223,12 +255,12 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
     }
     
     return (
-        <div className={cn("flex flex-col", className)}>
-            <div 
-                className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-accent/30"
-                onClick={onToggleCollapse}
-            >
-                <div className="flex items-center gap-2">
+        <div className={cn("flex flex-col h-full", className)}>
+            <div className="flex items-center justify-between px-3 py-2 shrink-0">
+                <div 
+                    className="flex items-center gap-2 cursor-pointer hover:bg-accent/30 rounded px-1 py-0.5 -ml-1"
+                    onClick={onToggleCollapse}
+                >
                     {isCollapsed ? (
                         <ChevronRight size={14} className="text-muted-foreground" />
                     ) : (
@@ -238,10 +270,29 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
                         Outline
                     </span>
                 </div>
-                {headings.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/60">
-                        {headings.length}
-                    </span>
+                {!isCollapsed && headings.length > 0 && (
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                expandAllHeadings();
+                            }}
+                            className="p-1 hover:bg-accent/50 rounded transition-colors"
+                            title="Expand all"
+                        >
+                            <ChevronsUpDown size={12} className="text-muted-foreground" />
+                        </button>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                collapseAllHeadings();
+                            }}
+                            className="p-1 hover:bg-accent/50 rounded transition-colors"
+                            title="Collapse all"
+                        >
+                            <ChevronsDownUp size={12} className="text-muted-foreground" />
+                        </button>
+                    </div>
                 )}
             </div>
             
@@ -252,7 +303,7 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
                             No headings found
                         </div>
                     ) : (
-                        <ScrollArea className="flex-1">
+                        <ScrollArea className="flex-1 min-h-0">
                             <div className="px-1 pb-2 space-y-0.5">
                                 {visibleHeadings.map(({ heading, index }) => (
                                     <OutlineItem

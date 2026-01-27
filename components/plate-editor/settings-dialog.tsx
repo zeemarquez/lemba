@@ -25,6 +25,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/plate-ui/input';
 import {
   DropdownMenu,
@@ -56,39 +57,69 @@ export function SettingsDialog() {
     setSourceEditorFontSize,
   } = useStore();
 
-  const [fontFamilyName, setFontFamilyName] = React.useState('');
-  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const [isDragging, setIsDragging] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      // Auto-assign font name from filename if name is empty or unchanged
-      const nameWithoutExt = file.name.split('.').slice(0, -1).join('.');
-      // Simple heuristic: capitalize first letter, replace hyphens/underscores with spaces
-      const formattedName = nameWithoutExt
-        .replace(/[-_]/g, ' ')
-        .replace(/\b\w/g, c => c.toUpperCase());
-      
-      setFontFamilyName(formattedName);
-    } else {
-      setSelectedFile(null);
+  const processFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const fontFiles = fileArray.filter(file => 
+      file.name.match(/\.(ttf|otf|woff|woff2)$/i)
+    );
+
+    // Process all font files in parallel
+    await Promise.all(
+      fontFiles.map(async (file) => {
+        // Auto-assign font name from filename
+        const nameWithoutExt = file.name.split('.').slice(0, -1).join('.');
+        // Simple heuristic: capitalize first letter, replace hyphens/underscores with spaces
+        const formattedName = nameWithoutExt
+          .replace(/[-_]/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase());
+        
+        // Auto-upload immediately
+        await addFont(formattedName, file);
+      })
+    );
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
-  const handleFontUpload = async () => {
-    if (!selectedFile || !fontFamilyName) return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      processFiles(files);
+    }
+  };
 
-    await addFont(fontFamilyName, selectedFile);
-    setSelectedFile(null);
-    setFontFamilyName('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      processFiles(files);
+    }
   };
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden gap-0 flex flex-col min-h-[600px]">
+      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden gap-0 flex flex-col h-[600px]">
         <DialogHeader className="p-6 pb-2 border-b">
           <DialogTitle className="text-xl">Settings</DialogTitle>
           <DialogDescription>
@@ -96,7 +127,7 @@ export function SettingsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs className="flex-row gap-0 flex-1 items-stretch" defaultValue="general">
+        <Tabs className="flex-row gap-0 flex-1 items-stretch overflow-hidden min-h-0" defaultValue="general">
           <TabsList className="flex h-auto w-48 flex-col items-stretch justify-start rounded-none border-r bg-muted/20 p-2 gap-1">
             <TabsTrigger
               className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
@@ -116,10 +147,17 @@ export function SettingsDialog() {
             >
               Export
             </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="templates"
+            >
+              Templates
+            </TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 p-6">
-            <TabsContent className="mt-0 outline-none" value="general">
+          <ScrollArea className="flex-1 h-full">
+            <div className="p-6">
+              <TabsContent className="mt-0 outline-none" value="general">
               <div className="space-y-6">
                 <div className="space-y-4">
                   <h4 className="font-medium text-sm">Appearance</h4>
@@ -232,57 +270,6 @@ export function SettingsDialog() {
                         }`}
                       />
                     </button>
-                  </div>
-                </div>
-
-                <div className="space-y-4 pt-4 border-t">
-                  <h4 className="font-medium text-sm">Custom Fonts</h4>
-                  <div className="space-y-4">
-                    <div className="flex items-end gap-2">
-                      <div className="flex-1 space-y-2">
-                        <label className="text-xs text-muted-foreground">Upload Font (ttf, otf, woff, woff2)</label>
-                        <Input 
-                          type="file" 
-                          accept=".ttf,.otf,.woff,.woff2"
-                          ref={fileInputRef}
-                          onChange={handleFileChange}
-                          className="w-full cursor-pointer file:cursor-pointer"
-                        />
-                      </div>
-                      <Button 
-                        onClick={handleFontUpload} 
-                        disabled={!selectedFile || !fontFamilyName}
-                        size="icon"
-                        className="shrink-0"
-                      >
-                        <Upload className="size-4" />
-                      </Button>
-                    </div>
-
-                    {customFonts.length > 0 && (
-                      <div className="rounded-md border bg-muted/20 divide-y">
-                        {customFonts.map((font) => (
-                          <div key={font.id} className="flex items-center justify-between p-3">
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium" style={{ fontFamily: font.family }}>
-                                {font.family}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground">
-                                {font.fileName} ({font.format})
-                              </span>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              onClick={() => deleteFont(font.id)}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -403,8 +390,78 @@ function hello() {
                   </div>
                 </div>
               </div>
-            </TabsContent>
-          </div>
+              </TabsContent>
+
+              <TabsContent className="mt-0 outline-none" value="templates">
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-sm">Custom Fonts</h4>
+                    <div className="space-y-4">
+                      <div
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`
+                          relative border-2 border-dashed rounded-lg p-8 cursor-pointer
+                          transition-colors
+                          ${isDragging 
+                            ? 'border-primary bg-primary/5' 
+                            : 'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/20'
+                          }
+                        `}
+                      >
+                        <input
+                          type="file"
+                          accept=".ttf,.otf,.woff,.woff2"
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          multiple
+                          className="hidden"
+                        />
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <Upload className="size-8 text-muted-foreground" />
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              Drop font files here or click to select
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Supports: TTF, OTF, WOFF, WOFF2
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {customFonts.length > 0 && (
+                        <div className="rounded-md border bg-muted/20 divide-y">
+                          {customFonts.map((font) => (
+                            <div key={font.id} className="flex items-center justify-between p-3">
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium" style={{ fontFamily: font.family }}>
+                                  {font.family}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {font.fileName} ({font.format})
+                                </span>
+                              </div>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => deleteFont(font.id)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="size-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </div>
+          </ScrollArea>
         </Tabs>
       </DialogContent>
     </Dialog>
