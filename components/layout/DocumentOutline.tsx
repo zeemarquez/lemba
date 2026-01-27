@@ -4,7 +4,7 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 
 export interface HeadingItem {
     id: string;
@@ -143,7 +143,7 @@ interface DocumentOutlineProps {
 }
 
 export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: DocumentOutlineProps) {
-    const { files, activeFileId, currentView } = useStore();
+    const { files, activeFileId, currentView, activeHeadingId, setActiveHeadingId } = useStore();
     // Track which headings are collapsed (by their id)
     const [collapsedHeadings, setCollapsedHeadings] = useState<Set<string>>(new Set());
     
@@ -152,6 +152,11 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
         if (currentView !== 'file' || !activeFileId) return null;
         return files.find(f => f.id === activeFileId);
     }, [files, activeFileId, currentView]);
+
+    // Reset active heading when file changes
+    useEffect(() => {
+        setActiveHeadingId(null);
+    }, [activeFileId, setActiveHeadingId]);
     
     // Parse headings from the markdown content
     const headings = useMemo(() => {
@@ -309,6 +314,7 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
                                     <OutlineItem
                                         key={heading.id}
                                         heading={heading}
+                                        isActive={heading.id === activeHeadingId}
                                         hasChildren={hasChildren(headings, index)}
                                         isExpanded={!collapsedHeadings.has(heading.id)}
                                         onToggleExpand={() => toggleHeadingCollapse(heading.id)}

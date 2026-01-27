@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { markdownToTypst } from '@/lib/typst/markdown-to-typst';
 import { serializeNodesToTypst } from '@/lib/typst/serialize-nodes';
 import {
-    compileTypstToPdf,
+    compileTypstToPdf as compileTypstToPdfMainThread,
     generatePreamble,
     initializeCompiler,
     resetCompiler,
@@ -17,6 +17,11 @@ import { processTypstImages } from '@/lib/typst/client-image-manager';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import { useStore } from '@/lib/store';
 import { parseVariablesFromFrontmatter } from '@/components/export/ExportSidebar';
+import type {
+    WorkerRequest,
+    WorkerResponse,
+    FontDataTransfer
+} from '@/lib/typst/typst-worker';
 
 // Heading numbering settings
 interface HeadingNumbering {
@@ -44,10 +49,10 @@ export interface TemplateSettings {
     backgroundColor?: string;
     pageLayout?: 'vertical' | 'horizontal';
     pageSize?: {
-        preset?: string; // e.g., 'a4', 'letter', 'a3', etc.
+        preset?: string;
         custom?: {
-            width: string; // e.g., '210mm'
-            height: string; // e.g., '297mm'
+            width: string;
+            height: string;
         };
     };
     margins?: { top: string; bottom: string; left: string; right: string };
@@ -103,7 +108,7 @@ export interface TemplateSettings {
     };
     figures?: {
         captionEnabled?: boolean;
-        captionFormat?: string; // e.g., "Figure #: {Caption}"
+        captionFormat?: string;
         defaultWidth?: string;
         defaultHeight?: string;
         margins?: {
@@ -135,28 +140,32 @@ export interface CompileOptions {
 
 export interface UsePdfCompilerReturn {
     compilePdf: (options: CompileOptions) => Promise<ArrayBuffer>;
+    cancelCompilation: () => void;
     isCompiling: boolean;
     error: string | null;
     isInitialized: boolean;
     initError: string | null;
+    compilationStage: 'idle' | 'initializing' | 'compiling' | 'processing-images';
 }
 
 /**
  * Convert Plate/markdown content to Typst
- * @param scaleImages - If true, applies scaling to images (used for header/footer)
- * @param insideContext - If true, content will be rendered inside a context expression (header/footer)
- * @param tables - Table settings from template
- * @param pageNumberOffset - Calculated page number offset from startPageNumber setting
- * @param variables - Variable values from document frontmatter
- * @param figures - Figure caption settings from template
  */
-async function contentToTypst(content: string, context: { title?: string; scaleImages?: boolean; insideContext?: boolean; tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' }; pageNumberOffset?: number; variables?: Record<string, string>; figures?: { captionEnabled?: boolean; captionFormat?: string }; alerts?: { showHeader: boolean } }): Promise<string> {
+async function contentToTypst(content: string, context: { 
+    title?: string; 
+    scaleImages?: boolean; 
+    insideContext?: boolean; 
+    tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' }; 
+    pageNumberOffset?: number; 
+    variables?: Record<string, string>; 
+    figures?: { captionEnabled?: boolean; captionFormat?: string }; 
+    alerts?: { showHeader: boolean } 
+}): Promise<string> {
     if (!content) return '';
 
     try {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed) && parsed.length > 0) {
-            // It's Plate content (JSON)
             return serializeNodesToTypst(parsed, {
                 title: context.title,
                 scaleImages: context.scaleImages,
@@ -172,279 +181,142 @@ async function contentToTypst(content: string, context: { title?: string; scaleI
         // Not JSON, assume markdown string
     }
 
-    // For markdown content, we use our converter
     return markdownToTypst(content, { figures: context.figures, alerts: context.alerts }).trim();
 }
-
 
 /**
  * Convert Blob to Uint8Array
  */
 async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
-    try {
-        if (!blob) throw new Error('Blob is null or undefined');
-        console.log(`[usePdfCompiler] Converting blob of size ${blob.size} type ${blob.type}`);
-        const arrayBuffer = await blob.arrayBuffer();
-        if (arrayBuffer.byteLength === 0) {
-            console.warn('[usePdfCompiler] Warning: Blob converted to empty ArrayBuffer');
-        }
-        return new Uint8Array(arrayBuffer);
-    } catch (error) {
-        console.error('[usePdfCompiler] Failed to convert blob to Uint8Array:', error);
-        throw error;
-    }
+    const arrayBuffer = await blob.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
 }
 
 /**
- * Hook for compiling PDFs using client-side Typst WASM
+ * Generate unique ID for requests
  */
-export function usePdfCompiler(): UsePdfCompilerReturn {
-    const [isCompiling, setIsCompiling] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [isInitialized, setIsInitialized] = useState(false);
-    const [initError, setInitError] = useState<string | null>(null);
+function generateId(): string {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
 
-    const initializingRef = useRef(false);
-    const customFonts = useStore((state) => state.customFonts);
-    const fontsLoadedRef = useRef<string>('');
+/**
+ * Build Typst source from options (shared between worker and main thread)
+ */
+async function buildTypstSource(options: CompileOptions): Promise<string> {
+    const { markdown, title, settings } = options;
 
-    // Initialize compiler on mount and when custom fonts change
-    useEffect(() => {
-        const initWithFonts = async () => {
-            try {
-                // If we have fonts but they are empty blobs, something is wrong
-                const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
+    // Pre-process images (needs DOM/IndexedDB)
+    const markdownWithImages = await convertIndexedDbImagesToBase64(markdown || '');
+    const variables = parseVariablesFromFrontmatter(markdownWithImages);
+    const typstBody = markdownToTypst(markdownWithImages, {
+        tables: settings?.tables,
+        figures: settings?.figures,
+        alerts: settings?.alerts
+    });
 
-                if (customFonts.length > 0 && validFonts.length === 0) {
-                    console.warn('[usePdfCompiler] Custom fonts present but all have empty blobs. Waiting for valid data.');
-                    return;
-                }
+    // Prepare Header/Footer/Front Page
+    let headerContent = '';
+    let footerContent = '';
+    let frontPageContent = '';
 
-                // Convert store fonts to FontData format
-                const fontDataPromises = validFonts.map(async (font): Promise<FontData> => {
-                    try {
-                        const data = await blobToUint8Array(font.blob);
-                        return {
-                            family: font.family,
-                            data
-                        };
-                    } catch (e) {
-                        console.error(`[usePdfCompiler] Error processing font ${font.family}:`, e);
-                        throw e;
+    const startPageNumber = settings?.startPageNumber || 1;
+    const pageNumberOffset = 1 - startPageNumber;
+
+    if (settings?.header?.enabled && settings?.header?.content) {
+        const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);
+        headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
+    }
+
+    if (settings?.footer?.enabled && settings?.footer?.content) {
+        const footerWithImages = await convertIndexedDbImagesToBase64(settings.footer.content);
+        footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
+    }
+
+    if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
+        const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
+        frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts });
+    }
+
+    // Generate Preamble
+    const typstOptions: TypstOptions = {
+        ...settings,
+        header: headerContent,
+        headerMargins: settings?.header?.margins,
+        headerStartPage: settings?.header?.startPage || 1,
+        footer: footerContent,
+        footerMargins: settings?.footer?.margins,
+        footerStartPage: settings?.footer?.startPage || 1,
+        fontFamily: settings?.fontFamily || 'Inter',
+        frontPage: frontPageContent,
+    };
+
+    const preamble = generatePreamble(typstOptions);
+
+    // Build body content
+    let bodyContent = typstBody;
+
+    // Build outline section if enabled
+    let outlineContent = '';
+    if (settings?.outline?.enabled) {
+        const outlineSettings = settings.outline;
+        const entriesSettings = outlineSettings.entries || {};
+        const entriesFontSize = entriesSettings.fontSize || '12px';
+        const entriesBold = entriesSettings.bold || false;
+        const entriesItalic = entriesSettings.italic || false;
+        const entriesUnderline = entriesSettings.underline || false;
+        const entriesFiller = entriesSettings.filler || 'dotted';
+        const entriesSizePt = entriesFontSize.replace('px', 'pt');
+
+        let fillerTypst = 'repeat([.])';
+        if (entriesFiller === 'line') fillerTypst = 'line(length: 100%)';
+        else if (entriesFiller === 'empty') fillerTypst = 'none';
+
+        const entryStyles: string[] = [];
+        entryStyles.push(`size: ${entriesSizePt}`);
+        if (entriesBold) entryStyles.push('weight: "bold"');
+        if (entriesItalic) entryStyles.push('style: "italic"');
+
+        let titleTypst = '';
+        if (outlineSettings.title?.content) {
+            const titleWithImages = await convertIndexedDbImagesToBase64(outlineSettings.title.content);
+            titleTypst = await contentToTypst(titleWithImages, { title, scaleImages: false, insideContext: false, pageNumberOffset });
+        }
+
+        const textSetRule = `#set text(${entryStyles.join(', ')})`;
+        const enabledLevels = getEnabledHeadingLevels(settings);
+
+        const underlineWrapStart = entriesUnderline ? 'underline[' : '';
+        const underlineWrapEnd = entriesUnderline ? ']' : '';
+
+        const buildNumberingLogic = () => {
+            let logic = '  let lvl = it.element.level\n';
+            logic += '  let num-str = ""\n';
+            if (enabledLevels.length === 0) return logic;
+
+            enabledLevels.forEach((level, idx) => {
+                const ancestorLevels = enabledLevels.filter(l => l <= level);
+                const condition = idx === 0 ? 'if' : 'else if';
+                logic += `  ${condition} lvl == ${level} {\n`;
+                const parts = ancestorLevels.map(l => {
+                    if (l === level) {
+                        return `str(counter("h${l}-counter").at(loc).first() + 1)`;
+                    } else {
+                        return `str(counter("h${l}-counter").at(loc).first())`;
                     }
                 });
-                const fontData = await Promise.all(fontDataPromises);
-
-                // Create a signature to detect changes
-                const fontSignature = customFonts.map(f => `${f.family}-${f.blob.size}`).join(',');
-
-                // Only reinit if fonts changed or first init
-                if (fontsLoadedRef.current !== fontSignature || !initializingRef.current) {
-                    console.log('[usePdfCompiler] Loading fonts:', customFonts.map(f => f.family).join(', ') || 'none');
-
-                    // Set custom fonts (this will trigger reinit if needed)
-                    await setCustomFonts(fontData);
-
-                    // Initialize compiler
-                    await initializeCompiler();
-
-                    fontsLoadedRef.current = fontSignature;
-                    initializingRef.current = true;
-                    setIsInitialized(true);
-                    console.log('[usePdfCompiler] Compiler initialized with fonts');
+                if (parts.length > 0) {
+                    logic += `    num-str = ${parts.join(' + "." + ')} + "."\n`;
                 }
-            } catch (e: any) {
-                console.error('[usePdfCompiler] Failed to initialize compiler:', e);
-                setInitError(e.message || 'Failed to initialize PDF compiler');
-            }
+                logic += '  }\n';
+            });
+            return logic;
         };
 
-        initWithFonts();
-    }, [customFonts]);
+        const numberingLogic = buildNumberingLogic();
 
-    const compilePdf = useCallback(async (options: CompileOptions): Promise<ArrayBuffer> => {
-        const { markdown, title, settings } = options;
-
-        setIsCompiling(true);
-        setError(null);
-
-        try {
-            // Reset compiler state before each compilation
-            await resetCompiler();
-
-            // 1. Convert IndexedDB images to base64/data URLs in markdown
-            const markdownWithImages = await convertIndexedDbImagesToBase64(markdown || '');
-
-            // 1.5. Parse variable values from frontmatter
-            const variables = parseVariablesFromFrontmatter(markdownWithImages);
-
-            // 2. Convert Markdown to Typst
-            const typstBody = markdownToTypst(markdownWithImages, {
-                tables: settings?.tables,
-                figures: settings?.figures,
-                alerts: settings?.alerts
-            });
-
-            // 3. Prepare Header/Footer/Front Page
-            let headerContent = '';
-            let footerContent = '';
-            let frontPageContent = '';
-
-            // Calculate page number offset from startPageNumber setting
-            // If startPageNumber is 2, page 2 should display as 1, so offset = 1 - 2 = -1
-            const startPageNumber = settings?.startPageNumber || 1;
-            const pageNumberOffset = 1 - startPageNumber;
-
-            if (settings?.header?.enabled && settings?.header?.content) {
-                const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);
-                // Header is inside context expression, so insideContext=true
-                headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
-            }
-
-            if (settings?.footer?.enabled && settings?.footer?.content) {
-                const footerWithImages = await convertIndexedDbImagesToBase64(settings.footer.content);
-                // Footer is inside context expression, so insideContext=true
-                footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
-            }
-
-            if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
-                const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
-                // Front page is in document body, NOT inside context, so insideContext=false
-                frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts });
-            }
-
-            // 4. Generate Preamble
-            const typstOptions: TypstOptions = {
-                ...settings,
-                header: headerContent,
-                headerMargins: settings?.header?.margins,
-                headerStartPage: settings?.header?.startPage || 1,
-                footer: footerContent,
-                footerMargins: settings?.footer?.margins,
-                footerStartPage: settings?.footer?.startPage || 1,
-                fontFamily: settings?.fontFamily || 'Inter',
-                frontPage: frontPageContent,
-            };
-
-            const preamble = generatePreamble(typstOptions);
-
-            // 5. Combine source and process images (convert URLs to data URLs)
-            // If front page is enabled, add it before the main content with a page break
-            // If outline is enabled, add it after front page (if any) but before main content
-            let bodyContent = typstBody;
-
-            // Build outline section if enabled
-            let outlineContent = '';
-            if (settings?.outline?.enabled) {
-                const outlineSettings = settings.outline;
-                const entriesSettings = outlineSettings.entries || {};
-
-                // Build entries style
-                const entriesFontSize = entriesSettings.fontSize || '12px';
-                const entriesBold = entriesSettings.bold || false;
-                const entriesItalic = entriesSettings.italic || false;
-                const entriesUnderline = entriesSettings.underline || false;
-                const entriesFiller = entriesSettings.filler || 'dotted';
-
-                // Convert font size to Typst format (remove 'px' and add 'pt')
-                const entriesSizePt = entriesFontSize.replace('px', 'pt');
-
-                // Build filler string for Typst (set on outline.entry, not outline)
-                let fillerTypst = 'repeat([.])'; // dotted (default)
-                if (entriesFiller === 'line') {
-                    fillerTypst = 'line(length: 100%)';
-                } else if (entriesFiller === 'empty') {
-                    fillerTypst = 'none';
-                }
-
-                // Build entry text styles for #set text()
-                const entryStyles: string[] = [];
-                entryStyles.push(`size: ${entriesSizePt}`);
-                if (entriesBold) entryStyles.push('weight: "bold"');
-                if (entriesItalic) entryStyles.push('style: "italic"');
-
-                // Process title content (rich text from Plate editor)
-                let titleTypst = '';
-                if (outlineSettings.title?.content) {
-                    const titleWithImages = await convertIndexedDbImagesToBase64(outlineSettings.title.content);
-                    titleTypst = await contentToTypst(titleWithImages, { title, scaleImages: false, insideContext: false, pageNumberOffset });
-                }
-
-                // Build the outline with custom title and styling
-                // Note: fill is set on outline.entry, not on outline() directly (Typst 0.13+)
-                // Build text set rule for styling
-                const textSetRule = `#set text(${entryStyles.join(', ')})`;
-
-                // Get enabled heading levels for custom counter lookup
-                const enabledLevels = getEnabledHeadingLevels(settings);
-
-                // Build show rule for outline entries
-                // Since we use custom counters (h1c, h2c, etc.) for heading numbering,
-                // we need to manually build the numbering prefix for outline entries
-                let outlineShowRule = '';
-
-                // Build the underline wrapper if needed
-                const underlineWrapStart = entriesUnderline ? 'underline[' : '';
-                const underlineWrapEnd = entriesUnderline ? ']' : '';
-
-                // Build the numbering logic for outline entries
-                // Only query counters for enabled levels, building hierarchical numbering
-                // e.g., if only h2 and h3 are enabled: "1." for h2, "1.1." for h3
-                // Headings at disabled levels get no numbering prefix (empty string)
-                //
-                // IMPORTANT: counter.at(loc) returns the counter value BEFORE the heading's
-                // show rule steps it. So for the current level, we need to add 1 to get
-                // the actual displayed value. Ancestor levels are already stepped.
-                const buildNumberingLogic = () => {
-                    // Always initialize num-str as empty
-                    let logic = '  let lvl = it.element.level\n';
-                    logic += '  let num-str = ""\n';
-
-                    if (enabledLevels.length === 0) {
-                        // No enabled levels - all headings get no numbering
-                        return logic;
-                    }
-
-                    // For each enabled level, check if the entry is at that level
-                    // and build the appropriate numbering string
-                    // Disabled levels will fall through and keep num-str as ""
-                    enabledLevels.forEach((level, idx) => {
-                        // ancestorLevels = only the enabled levels at or above this level
-                        const ancestorLevels = enabledLevels.filter(l => l <= level);
-                        const condition = idx === 0 ? 'if' : 'else if';
-
-                        logic += `  ${condition} lvl == ${level} {\n`;
-
-                        // Build numbering from all enabled ancestor levels
-                        // For the current level (l == level), add 1 because counter.at(loc)
-                        // returns the value before the step() call in the show rule
-                        const parts = ancestorLevels.map(l => {
-                            if (l === level) {
-                                // Current level: counter hasn't been stepped yet at this location
-                                return `str(counter("h${l}-counter").at(loc).first() + 1)`;
-                            } else {
-                                // Ancestor level: counter was already stepped
-                                return `str(counter("h${l}-counter").at(loc).first())`;
-                            }
-                        });
-                        if (parts.length > 0) {
-                            logic += `    num-str = ${parts.join(' + "." + ')} + "."\n`;
-                        }
-
-                        logic += '  }\n';
-                    });
-                    // Note: if lvl doesn't match any enabled level, num-str stays ""
-                    // This means disabled levels (like H1 when only H2/H3 enabled) get no prefix
-
-                    return logic;
-                };
-
-                // Always use custom show rule since we use custom counters
-                const numberingLogic = buildNumberingLogic();
-
-                if (pageNumberOffset !== 0) {
-                    // With page offset: adjust page numbers and use custom numbering
-                    outlineShowRule = `
+        let outlineShowRule = '';
+        if (pageNumberOffset !== 0) {
+            outlineShowRule = `
 #show link: it => it.body
 #show outline.entry: it => {
   let loc = it.element.location()
@@ -454,25 +326,23 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
 ${numberingLogic}
   block(link(loc, ${underlineWrapStart}it.indented([#num-str], [#it.body() #box(width: 1fr, it.fill) #page-display])${underlineWrapEnd}))
 }`;
-                } else {
-                    // No offset: use custom numbering with default page display
-                    outlineShowRule = `
+        } else {
+            outlineShowRule = `
 #show link: it => it.body
 #show outline.entry: it => {
   let loc = it.element.location()
 ${numberingLogic}
   block(link(loc, ${underlineWrapStart}it.indented([#num-str], [#it.body() #box(width: 1fr, it.fill) #it.page()])${underlineWrapEnd}))
 }`;
-                }
+        }
 
-                // Add empty pages after outline if specified
-                const outlineEmptyPages = settings.outline?.emptyPagesAfter || 0;
-                let outlineEmptyPagesTypst = '';
-                for (let i = 0; i < outlineEmptyPages; i++) {
-                    outlineEmptyPagesTypst += '#page[]\n';
-                }
+        const outlineEmptyPages = settings.outline?.emptyPagesAfter || 0;
+        let outlineEmptyPagesTypst = '';
+        for (let i = 0; i < outlineEmptyPages; i++) {
+            outlineEmptyPagesTypst += '#page[]\n';
+        }
 
-                outlineContent = `// Table of Contents
+        outlineContent = `// Table of Contents
 ${titleTypst}
 #v(1em)
 #set outline.entry(fill: ${fillerTypst})
@@ -482,49 +352,338 @@ ${outlineShowRule}
 #pagebreak()
 ${outlineEmptyPagesTypst}
 `;
+    }
+
+    const frontPageEmptyPages = settings?.frontPage?.emptyPagesAfter || 0;
+    let frontPageEmptyPagesTypst = '';
+    for (let i = 0; i < frontPageEmptyPages; i++) {
+        frontPageEmptyPagesTypst += '#page[]\n';
+    }
+
+    if (frontPageContent) {
+        bodyContent = `${frontPageContent}\n#pagebreak()\n${frontPageEmptyPagesTypst}${outlineContent}${typstBody}`;
+    } else if (outlineContent) {
+        bodyContent = `${outlineContent}${typstBody}`;
+    }
+
+    const fullSourceRaw = `${preamble}\n\n${bodyContent}`;
+    const typstResult = await processTypstImages(fullSourceRaw);
+    return typstResult.source;
+}
+
+/**
+ * Hook for compiling PDFs using client-side Typst WASM
+ * Attempts to use Web Worker for non-blocking compilation, falls back to main thread
+ */
+export function usePdfCompiler(): UsePdfCompilerReturn {
+    const [isCompiling, setIsCompiling] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
+    const [initError, setInitError] = useState<string | null>(null);
+    const [compilationStage, setCompilationStage] = useState<'idle' | 'initializing' | 'compiling' | 'processing-images'>('idle');
+
+    const workerRef = useRef<Worker | null>(null);
+    const workerAvailableRef = useRef<boolean>(false);
+    const pendingRequestsRef = useRef<Map<string, { resolve: (value: ArrayBuffer) => void; reject: (error: Error) => void }>>(new Map());
+    const currentCompilationIdRef = useRef<string | null>(null);
+    const customFonts = useStore((state) => state.customFonts);
+    const fontsLoadedRef = useRef<string>('');
+    const initializingRef = useRef(false);
+    const mainThreadInitializedRef = useRef(false);
+
+    // Flag to track if we should fall back to main thread
+    const shouldFallbackToMainThreadRef = useRef(false);
+
+    // Try to create worker on mount
+    useEffect(() => {
+        let worker: Worker | null = null;
+        
+        try {
+            // Try to create worker - may fail in some environments
+            worker = new Worker(
+                new URL('../lib/typst/typst-worker.ts', import.meta.url),
+                { type: 'module' }
+            );
+
+            worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+                const response = event.data;
+
+                switch (response.type) {
+                    case 'init-result': {
+                        if (response.success) {
+                            workerAvailableRef.current = true;
+                            setIsInitialized(true);
+                            setInitError(null);
+                            console.log('[usePdfCompiler] Worker initialized successfully');
+                        } else {
+                            // Worker init failed, fall back to main thread
+                            console.warn('[usePdfCompiler] Worker init failed, using main thread:', response.error);
+                            workerAvailableRef.current = false;
+                            shouldFallbackToMainThreadRef.current = true;
+                        }
+                        break;
+                    }
+
+                    case 'compile-result': {
+                        const pending = pendingRequestsRef.current.get(response.id);
+                        if (pending) {
+                            pendingRequestsRef.current.delete(response.id);
+                            if (response.success && response.pdf) {
+                                pending.resolve(response.pdf);
+                            } else {
+                                pending.reject(new Error(response.error || 'Compilation failed'));
+                            }
+                        }
+                        if (currentCompilationIdRef.current === response.id) {
+                            setIsCompiling(false);
+                            setCompilationStage('idle');
+                        }
+                        break;
+                    }
+
+                    case 'progress': {
+                        setCompilationStage(response.stage);
+                        break;
+                    }
+                }
+            };
+
+            worker.onerror = (error) => {
+                console.warn('[usePdfCompiler] Worker error, falling back to main thread:', error);
+                workerAvailableRef.current = false;
+                shouldFallbackToMainThreadRef.current = true;
+            };
+
+            workerRef.current = worker;
+        } catch (e) {
+            console.warn('[usePdfCompiler] Failed to create worker, using main thread:', e);
+            workerAvailableRef.current = false;
+            shouldFallbackToMainThreadRef.current = true;
+        }
+
+        // Cleanup
+        return () => {
+            if (worker) {
+                worker.terminate();
             }
+            workerRef.current = null;
+        };
+    }, []);
 
-            // Add empty pages after front page if specified
-            const frontPageEmptyPages = settings?.frontPage?.emptyPagesAfter || 0;
-            let frontPageEmptyPagesTypst = '';
-            for (let i = 0; i < frontPageEmptyPages; i++) {
-                frontPageEmptyPagesTypst += '#page[]\n';
-            }
+    // Initialize main thread compiler (fallback)
+    // forceReinit: when true, reinitializes even if already initialized (for font changes)
+    const initMainThread = useCallback(async (forceReinit: boolean = false) => {
+        if (initializingRef.current) return;
+        if (mainThreadInitializedRef.current && !forceReinit) return;
+        
+        initializingRef.current = true;
 
-            if (frontPageContent) {
-                bodyContent = `${frontPageContent}\n#pagebreak()\n${frontPageEmptyPagesTypst}${outlineContent}${typstBody}`;
-            } else if (outlineContent) {
-                bodyContent = `${outlineContent}${typstBody}`;
-            }
-            const fullSourceRaw = `${preamble}\n\n${bodyContent}`;
-            const typstResult = await processTypstImages(fullSourceRaw);
-            const fullSource = typstResult.source;
+        try {
+            const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
+            const fontData: FontData[] = await Promise.all(
+                validFonts.map(async (font): Promise<FontData> => {
+                    const data = await blobToUint8Array(font.blob);
+                    return { family: font.family, data };
+                })
+            );
 
-            // 6. Compile to PDF
-            const pdfBuffer = await compileTypstToPdf({
-                source: fullSource
-            });
-
-            // Return as ArrayBuffer for compatibility with Blob
-            return pdfBuffer.buffer.slice(
-                pdfBuffer.byteOffset,
-                pdfBuffer.byteOffset + pdfBuffer.byteLength
-            ) as ArrayBuffer;
+            await setCustomFonts(fontData);
+            await initializeCompiler();
+            
+            mainThreadInitializedRef.current = true;
+            setIsInitialized(true);
+            setInitError(null);
+            console.log('[usePdfCompiler] Main thread compiler initialized with fonts:', validFonts.map(f => f.family));
         } catch (e: any) {
-            const errorMessage = e.message || 'Failed to compile PDF';
-            console.error('[usePdfCompiler] Compilation error:', e);
-            setError(errorMessage);
-            throw e;
+            console.error('[usePdfCompiler] Failed to initialize main thread compiler:', e);
+            setInitError(e.message || 'Failed to initialize PDF compiler');
         } finally {
+            initializingRef.current = false;
+        }
+    }, [customFonts]);
+
+    // Initialize worker or main thread with fonts when fonts change
+    useEffect(() => {
+        const fontSignature = customFonts.map(f => `${f.family}-${f.blob?.size || 0}`).join(',');
+
+        // Skip if fonts haven't changed
+        if (fontsLoadedRef.current === fontSignature) {
+            return;
+        }
+
+        const initWithFonts = async () => {
+            const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
+            const fontsChanged = fontsLoadedRef.current !== '' && fontsLoadedRef.current !== fontSignature;
+
+            // Check if we should fall back to main thread (worker failed)
+            if (shouldFallbackToMainThreadRef.current) {
+                await initMainThread(fontsChanged);
+                fontsLoadedRef.current = fontSignature;
+                return;
+            }
+
+            // Try worker if available
+            if (workerRef.current && !shouldFallbackToMainThreadRef.current) {
+                try {
+                    // Convert fonts once - use for both main thread and worker
+                    const fontDataArrays = await Promise.all(
+                        validFonts.map(async (font) => {
+                            const data = await blobToUint8Array(font.blob);
+                            return { family: font.family, data };
+                        })
+                    );
+
+                    // IMPORTANT: Register fonts on main thread for generatePreamble
+                    // generatePreamble runs on main thread even when using worker
+                    await setCustomFonts(fontDataArrays);
+
+                    // Prepare transferable format for worker (needs ArrayBuffer not Uint8Array)
+                    const fontDataForWorker: FontDataTransfer[] = fontDataArrays.map(f => ({
+                        family: f.family,
+                        data: f.data.buffer.slice(f.data.byteOffset, f.data.byteOffset + f.data.byteLength) as ArrayBuffer
+                    }));
+
+                    const initRequest: WorkerRequest = {
+                        type: 'init',
+                        id: generateId(),
+                        fonts: fontDataForWorker
+                    };
+
+                    // Transfer font buffers to worker
+                    const transferables = fontDataForWorker.map(f => f.data);
+                    workerRef.current.postMessage(initRequest, transferables);
+
+                    fontsLoadedRef.current = fontSignature;
+                    console.log('[usePdfCompiler] Initializing worker with fonts:', validFonts.map(f => f.family));
+                } catch (e: any) {
+                    console.warn('[usePdfCompiler] Failed to init worker with fonts, using main thread:', e);
+                    workerAvailableRef.current = false;
+                    shouldFallbackToMainThreadRef.current = true;
+                    // Force reinit if fonts changed
+                    await initMainThread(fontsChanged);
+                    fontsLoadedRef.current = fontSignature;
+                }
+            } else if (!workerRef.current) {
+                // Worker not created yet, use main thread
+                await initMainThread(fontsChanged);
+                fontsLoadedRef.current = fontSignature;
+            }
+        };
+
+        initWithFonts();
+    }, [customFonts, initMainThread]);
+
+    // Cancel current compilation
+    const cancelCompilation = useCallback(() => {
+        if (currentCompilationIdRef.current) {
+            // Send cancel to worker if using worker
+            if (workerRef.current && workerAvailableRef.current) {
+                const cancelRequest: WorkerRequest = {
+                    type: 'cancel',
+                    id: currentCompilationIdRef.current
+                };
+                workerRef.current.postMessage(cancelRequest);
+            }
+            
+            // Reject the pending promise
+            const pending = pendingRequestsRef.current.get(currentCompilationIdRef.current);
+            if (pending) {
+                pendingRequestsRef.current.delete(currentCompilationIdRef.current);
+                pending.reject(new Error('Compilation cancelled'));
+            }
+            
+            currentCompilationIdRef.current = null;
             setIsCompiling(false);
+            setCompilationStage('idle');
+            console.log('[usePdfCompiler] Compilation cancelled');
         }
     }, []);
 
+    // Compile using worker
+    const compileWithWorker = useCallback(async (source: string, compilationId: string): Promise<ArrayBuffer> => {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+            pendingRequestsRef.current.set(compilationId, { resolve, reject });
+
+            const compileRequest: WorkerRequest = {
+                type: 'compile',
+                id: compilationId,
+                source: source
+            };
+
+            workerRef.current!.postMessage(compileRequest);
+        });
+    }, []);
+
+    // Compile using main thread (fallback)
+    const compileWithMainThread = useCallback(async (source: string): Promise<ArrayBuffer> => {
+        await resetCompiler();
+        const pdfBuffer = await compileTypstToPdfMainThread({ source });
+        return pdfBuffer.buffer.slice(
+            pdfBuffer.byteOffset,
+            pdfBuffer.byteOffset + pdfBuffer.byteLength
+        ) as ArrayBuffer;
+    }, []);
+
+    const compilePdf = useCallback(async (options: CompileOptions): Promise<ArrayBuffer> => {
+        // Cancel any existing compilation
+        cancelCompilation();
+
+        setIsCompiling(true);
+        setError(null);
+        setCompilationStage('processing-images');
+
+        const compilationId = generateId();
+        currentCompilationIdRef.current = compilationId;
+
+        try {
+            // Build Typst source (this needs main thread for IndexedDB access)
+            const fullSource = await buildTypstSource(options);
+
+            // Check if cancelled
+            if (currentCompilationIdRef.current !== compilationId) {
+                throw new Error('Compilation cancelled');
+            }
+
+            setCompilationStage('compiling');
+
+            // Try worker first, fall back to main thread
+            if (workerRef.current && workerAvailableRef.current) {
+                try {
+                    return await compileWithWorker(fullSource, compilationId);
+                } catch (e: any) {
+                    if (e.message === 'Compilation cancelled') {
+                        throw e;
+                    }
+                    console.warn('[usePdfCompiler] Worker compilation failed, trying main thread:', e);
+                    // Fall through to main thread
+                }
+            }
+
+            // Main thread compilation
+            return await compileWithMainThread(fullSource);
+
+        } catch (e: any) {
+            const errorMessage = e.message || 'Failed to compile PDF';
+            if (errorMessage !== 'Compilation cancelled') {
+                console.error('[usePdfCompiler] Compilation error:', e);
+                setError(errorMessage);
+            }
+            throw e;
+        } finally {
+            if (currentCompilationIdRef.current === compilationId) {
+                setIsCompiling(false);
+                setCompilationStage('idle');
+            }
+        }
+    }, [cancelCompilation, compileWithWorker, compileWithMainThread]);
+
     return {
         compilePdf,
+        cancelCompilation,
         isCompiling,
         error,
         isInitialized,
-        initError
+        initError,
+        compilationStage
     };
 }

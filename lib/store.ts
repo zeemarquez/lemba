@@ -27,6 +27,7 @@ interface AppState {
     uiIconSize: 'small' | 'normal' | 'big';
     uiFontSize: 'small' | 'normal' | 'big';
     showOutline: boolean;
+    activeHeadingId: string | null;
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -81,6 +82,7 @@ interface AppState {
     setUiIconSize: (size: 'small' | 'normal' | 'big') => void;
     setUiFontSize: (size: 'small' | 'normal' | 'big') => void;
     setShowOutline: (show: boolean) => void;
+    setActiveHeadingId: (headingId: string | null) => void;
     setSourceEditorFontFamily: (fontFamily: string) => void;
     setSourceEditorFontSize: (fontSize: number) => void;
 
@@ -331,6 +333,7 @@ export const useStore = create<AppState>()(
                 uiIconSize: 'normal',
                 uiFontSize: 'normal',
                 showOutline: true,
+                activeHeadingId: null,
                 sourceEditorFontFamily: 'monospace',
                 sourceEditorFontSize: 14,
 
@@ -751,6 +754,7 @@ export const useStore = create<AppState>()(
                 setUiIconSize: (size) => set({ uiIconSize: size }),
                 setUiFontSize: (size) => set({ uiFontSize: size }),
                 setShowOutline: (show) => set({ showOutline: show }),
+                setActiveHeadingId: (headingId) => set({ activeHeadingId: headingId }),
                 setSourceEditorFontFamily: (fontFamily) => set({ sourceEditorFontFamily: fontFamily }),
                 setSourceEditorFontSize: (fontSize) => set({ sourceEditorFontSize: fontSize }),
                 addTemplate: (template) => set((state) => ({ templates: [...state.templates, template] })),

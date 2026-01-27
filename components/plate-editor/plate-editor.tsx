@@ -29,7 +29,7 @@ interface PlateEditorProps {
 const ASYNC_LOAD_THRESHOLD = 5000;
 
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
-  const { editorViewMode } = useStore();
+  const { editorViewMode, setActiveHeadingId } = useStore();
   const mounted = useMounted();
   
   // Loading state for large documents
@@ -315,6 +315,120 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     };
   }, [handleNavigateToLine]);
 
+  // Helper function to find heading in markdown content and set active heading ID
+  const findHeadingInMarkdown = useCallback((headingText: string, headingType: string) => {
+    if (!content) {
+      setActiveHeadingId(null);
+      return;
+    }
+
+    const lines = content.split('\n');
+    let inCodeBlock = false;
+
+    // Determine the expected number of # symbols
+    const level = parseInt(headingType.replace('h', '')) || 1;
+    const expectedPrefix = '#'.repeat(level);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Track code blocks to avoid parsing headings inside them
+      if (line.trim().startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        continue;
+      }
+      
+      if (inCodeBlock) continue;
+      
+      // Match ATX-style headings with the expected level
+      const match = line.match(/^(#{1,6})\s+(.+)$/);
+      if (match && match[1] === expectedPrefix) {
+        const text = match[2].trim();
+        if (text === headingText) {
+          setActiveHeadingId(`heading-${i}`);
+          return;
+        }
+      }
+    }
+
+    // Heading not found
+    setActiveHeadingId(null);
+  }, [content, setActiveHeadingId]);
+
+  // Function to find the active heading based on cursor position in Plate editor
+  const findActiveHeadingFromPlate = useCallback(() => {
+    if (!editor || !editor.selection || editorViewMode === 'source') {
+      return;
+    }
+
+    try {
+      // Find the block node that contains the cursor
+      const block = editor.api.block({ at: editor.selection.anchor });
+      if (!block) {
+        setActiveHeadingId(null);
+        return;
+      }
+
+      const [node, path] = block;
+      
+      // Check if the current node is a heading
+      if ('type' in node && typeof node.type === 'string' && node.type.startsWith('h')) {
+        // This is a heading, find it in the markdown content
+        const headingText = Node.string(node).trim();
+        findHeadingInMarkdown(headingText, node.type);
+        return;
+      }
+
+      // Walk up the tree to find the nearest heading ancestor
+      let currentPath = path;
+      while (currentPath.length > 0) {
+        const [ancestor] = editor.api.node({ at: currentPath });
+        if ('type' in ancestor && typeof ancestor.type === 'string' && ancestor.type.startsWith('h')) {
+          const headingText = Node.string(ancestor).trim();
+          findHeadingInMarkdown(headingText, ancestor.type);
+          return;
+        }
+        currentPath = currentPath.slice(0, -1);
+      }
+
+      // No heading found
+      setActiveHeadingId(null);
+    } catch (error) {
+      // Ignore errors (e.g., invalid selection)
+      setActiveHeadingId(null);
+    }
+  }, [editor, editorViewMode, setActiveHeadingId, findHeadingInMarkdown]);
+
+  // Debounced function to update active heading
+  const debouncedFindActiveHeading = useMemo(
+    () => debounce(() => {
+      findActiveHeadingFromPlate();
+    }, 100),
+    [findActiveHeadingFromPlate]
+  );
+
+  // Track cursor position changes in Plate editor
+  useEffect(() => {
+    if (editorViewMode === 'source' || !editor) return;
+
+    const updateActiveHeading = () => {
+      if (editor && editor.selection) {
+        debouncedFindActiveHeading();
+      }
+    };
+
+    // Initial update
+    updateActiveHeading();
+
+    // Listen for selection changes via the onChange handler
+    // This is handled in the onChange callback below
+
+    // Cleanup
+    return () => {
+      debouncedFindActiveHeading.cancel();
+    };
+  }, [editor, editorViewMode, debouncedFindActiveHeading]);
+
   if (!mounted) {
     return (
       <div className="h-full w-full bg-background" />
@@ -331,6 +445,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         isUpdatingFromPlate.current = true;
         // Use debounced serialization to reduce expensive operations during typing
         debouncedSerialize(value);
+        
+        // Update active heading when selection changes
+        if (editorViewMode !== 'source' && editor.selection) {
+          debouncedFindActiveHeading();
+        }
+        
         // Defer resetting the flag to allow the useEffect to see it as true
         // This prevents the effect from resetting the editor and losing focus
         setTimeout(() => {
