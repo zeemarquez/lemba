@@ -387,7 +387,8 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     const pendingRequestsRef = useRef<Map<string, { resolve: (value: ArrayBuffer) => void; reject: (error: Error) => void }>>(new Map());
     const currentCompilationIdRef = useRef<string | null>(null);
     const customFonts = useStore((state) => state.customFonts);
-    const fontsLoadedRef = useRef<string>('');
+    // Use null to indicate "never initialized" vs empty string for "initialized with no fonts"
+    const fontsLoadedRef = useRef<string | null>(null);
     const initializingRef = useRef(false);
     const mainThreadInitializedRef = useRef(false);
 
@@ -513,7 +514,8 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
 
         const initWithFonts = async () => {
             const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
-            const fontsChanged = fontsLoadedRef.current !== '' && fontsLoadedRef.current !== fontSignature;
+            // fontsChanged is true only if we've initialized before AND the signature differs
+            const fontsChanged = fontsLoadedRef.current !== null && fontsLoadedRef.current !== fontSignature;
 
             // Check if we should fall back to main thread (worker failed)
             if (shouldFallbackToMainThreadRef.current) {
