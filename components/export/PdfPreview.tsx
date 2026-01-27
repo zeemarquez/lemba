@@ -741,7 +741,9 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
         return (
             <div className="aspect-[210/297] bg-white dark:bg-zinc-900 border shadow-sm rounded flex items-center justify-center">
                 <div className="flex flex-col items-center gap-2">
-                    <Loader2 size={20} className="animate-spin text-muted-foreground" />
+                    <div className="animate-spin flex items-center justify-center">
+                        <Loader2 size={20} className="text-muted-foreground" />
+                    </div>
                     <p className="text-[10px] text-muted-foreground">Initializing PDF compiler...</p>
                 </div>
             </div>
@@ -784,13 +786,10 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
 
                     <div className="flex items-center gap-1">
                         {(isLoading || renderingProgress) && (
-                            <div className="flex items-center gap-1 mr-1">
-                                <Loader2 size={12} className="animate-spin text-primary" />
-                                {renderingProgress && (
-                                    <span className="text-[9px] text-muted-foreground">
-                                        {renderingProgress.current}/{renderingProgress.total}
-                                    </span>
-                                )}
+                            <div className="flex items-center mr-1">
+                                <div className="animate-spin flex items-center justify-center">
+                                    <Loader2 size={12} className="text-primary" />
+                                </div>
                             </div>
                         )}
                         <Button variant="ghost" size="icon" className={cn("h-6 w-6", viewMode === 'FitH' && "bg-accent")} onClick={fitToWidth} title="Fit to Width">
@@ -807,7 +806,9 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                     {isLoading && totalPages === 0 && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80">
                             <div className="flex flex-col items-center gap-2">
-                                <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                                <div className="animate-spin flex items-center justify-center">
+                                    <Loader2 size={24} className="text-muted-foreground" />
+                                </div>
                                 <p className="text-sm text-muted-foreground">{getStageLabel()}</p>
                             </div>
                         </div>
@@ -874,7 +875,9 @@ export function PdfPreview({ isStandaloneWindow = false }: PdfPreviewProps) {
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center bg-zinc-50">
-                                            <Loader2 size={16} className="animate-spin text-muted-foreground" />
+                                            <div className="animate-spin flex items-center justify-center">
+                                                <Loader2 size={16} className="text-muted-foreground" />
+                                            </div>
                                         </div>
                                     )}
                                 </div>
