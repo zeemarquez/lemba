@@ -67,6 +67,8 @@ let currentCompilationId: string | null = null;
 // Custom font families that have been registered
 const registeredCustomFontFamilies = new Map<string, string>();
 let pendingCustomFonts: { family: string; data: Uint8Array; internalName?: string }[] = [];
+// Track loaded font signature to detect changes
+let loadedFontSignature: string = '';
 
 /**
  * Parse font family name from TTF/OTF/WOFF font file
@@ -164,9 +166,46 @@ function parseFontFamilyName(data: Uint8Array): string | null {
 
 /**
  * Initialize the Typst WASM compiler
+ * @param fonts - If provided (including empty array), update fonts. If undefined, just ensure initialized.
  */
 async function initializeCompiler(fonts?: FontDataTransfer[]): Promise<void> {
-    if (isInitialized && typstCompiler) return;
+    // Only check for font changes if fonts are EXPLICITLY provided (not undefined)
+    // This distinguishes between:
+    // - initializeCompiler() - just ensure compiler is ready, don't change fonts
+    // - initializeCompiler([]) or initializeCompiler([...]) - explicitly set fonts
+    const fontsProvided = fonts !== undefined;
+    const newFontSignature = fontsProvided 
+        ? fonts.map(f => `${f.family}-${f.data.byteLength}`).sort().join(',')
+        : null;
+    
+    if (fontsProvided) {
+        const fontsChanged = loadedFontSignature !== newFontSignature;
+        
+        if (isInitialized && typstCompiler && !fontsChanged) {
+            console.log('[TypstWorker] Already initialized with same fonts, skipping');
+            return;
+        }
+        
+        // If fonts changed and we were already initialized, we need to reinitialize
+        if (isInitialized && fontsChanged) {
+            console.log('[TypstWorker] Fonts changed, reinitializing compiler...');
+            console.log('[TypstWorker] Old signature:', loadedFontSignature);
+            console.log('[TypstWorker] New signature:', newFontSignature);
+            isInitialized = false;
+            initPromise = null;
+            typstCompiler = null;
+            registeredCustomFontFamilies.clear();
+            pendingCustomFonts = [];
+        }
+        // Update the target signature (for both first init and reinit with fonts)
+        loadedFontSignature = newFontSignature!;
+    } else {
+        // fonts === undefined: Just ensure compiler is initialized, don't change fonts
+        if (isInitialized && typstCompiler) {
+            return;
+        }
+    }
+    
     if (initPromise) return initPromise;
 
     initPromise = (async () => {
@@ -212,7 +251,15 @@ async function initializeCompiler(fonts?: FontDataTransfer[]): Promise<void> {
             });
 
             isInitialized = true;
+            // If no fonts were provided (first init without explicit fonts), compute signature from pendingCustomFonts
+            if (!fontsProvided) {
+                loadedFontSignature = pendingCustomFonts.map(f => `${f.family}-${f.data.byteLength}`).sort().join(',');
+            }
             console.log('[TypstWorker] WASM compiler initialized successfully');
+            console.log('[TypstWorker] Font signature:', loadedFontSignature || '(none)');
+            if (pendingCustomFonts.length > 0) {
+                console.log('[TypstWorker] Custom fonts loaded:', pendingCustomFonts.map(f => f.family));
+            }
         } catch (error) {
             console.error('[TypstWorker] Failed to initialize compiler:', error);
             initPromise = null;

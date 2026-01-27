@@ -825,8 +825,9 @@ export function generatePreamble(options: TypstOptions): string {
     if (customFontInternalName) {
         // Use the internal font name that Typst will recognize
         cleanedFont = customFontInternalName;
-        console.log(`[Typst] [generatePreamble] Using custom font: "${fontFamily}" -> "${cleanedFont}"`);
+        console.log(`[Typst] [generatePreamble] ✓ Using custom font: "${fontFamily}" -> "${cleanedFont}"`);
     } else {
+        console.log(`[Typst] [generatePreamble] ✗ Custom font "${fontFamily}" not found in registeredCustomFontFamilies`);
         // Fall back to built-in fonts
         const fontMap: Record<string, string> = {
             // Serif fonts -> Libertinus Serif

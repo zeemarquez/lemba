@@ -391,9 +391,13 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     const fontsLoadedRef = useRef<string | null>(null);
     const initializingRef = useRef(false);
     const mainThreadInitializedRef = useRef(false);
+    // Track the current font initialization promise to ensure fonts are ready before compilation
+    const fontInitPromiseRef = useRef<Promise<void> | null>(null);
 
-    // Flag to track if we should fall back to main thread
+    // Flag to track if we should fall back to main thread (ref for sync access)
     const shouldFallbackToMainThreadRef = useRef(false);
+    // State to trigger fallback initialization when worker fails
+    const [workerFailed, setWorkerFailed] = useState(false);
 
     // Try to create worker on mount
     useEffect(() => {
@@ -421,6 +425,8 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
                             console.warn('[usePdfCompiler] Worker init failed, using main thread:', response.error);
                             workerAvailableRef.current = false;
                             shouldFallbackToMainThreadRef.current = true;
+                            // Trigger main thread initialization via state change
+                            setWorkerFailed(true);
                         }
                         break;
                     }
@@ -453,6 +459,8 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
                 console.warn('[usePdfCompiler] Worker error, falling back to main thread:', error);
                 workerAvailableRef.current = false;
                 shouldFallbackToMainThreadRef.current = true;
+                // Trigger main thread initialization via state change
+                setWorkerFailed(true);
             };
 
             workerRef.current = worker;
@@ -460,6 +468,8 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             console.warn('[usePdfCompiler] Failed to create worker, using main thread:', e);
             workerAvailableRef.current = false;
             shouldFallbackToMainThreadRef.current = true;
+            // Trigger main thread initialization via state change
+            setWorkerFailed(true);
         }
 
         // Cleanup
@@ -503,19 +513,29 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
         }
     }, [customFonts]);
 
+    // Handle worker failure - fall back to main thread initialization
+    useEffect(() => {
+        if (workerFailed && !isInitialized && !initializingRef.current) {
+            console.log('[usePdfCompiler] Worker failed, initializing main thread as fallback');
+            initMainThread(false);
+        }
+    }, [workerFailed, isInitialized, initMainThread]);
+
     // Initialize worker or main thread with fonts when fonts change
     useEffect(() => {
         const fontSignature = customFonts.map(f => `${f.family}-${f.blob?.size || 0}`).join(',');
 
-        // Skip if fonts haven't changed
-        if (fontsLoadedRef.current === fontSignature) {
+        // Skip if fonts haven't changed AND we're already initialized
+        if (fontsLoadedRef.current === fontSignature && isInitialized) {
             return;
         }
 
-        const initWithFonts = async () => {
+        const initWithFonts = async (): Promise<void> => {
             const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
             // fontsChanged is true only if we've initialized before AND the signature differs
             const fontsChanged = fontsLoadedRef.current !== null && fontsLoadedRef.current !== fontSignature;
+            
+            console.log('[usePdfCompiler] initWithFonts called, fonts:', validFonts.map(f => f.family), 'fontsChanged:', fontsChanged);
 
             // Check if we should fall back to main thread (worker failed)
             if (shouldFallbackToMainThreadRef.current) {
@@ -572,8 +592,9 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             }
         };
 
-        initWithFonts();
-    }, [customFonts, initMainThread]);
+        // Store the promise so compilePdf can wait for fonts to be ready
+        fontInitPromiseRef.current = initWithFonts();
+    }, [customFonts, initMainThread, isInitialized]);
 
     // Cancel current compilation
     const cancelCompilation = useCallback(() => {
@@ -638,6 +659,14 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
         currentCompilationIdRef.current = compilationId;
 
         try {
+            // CRITICAL: Wait for font initialization to complete before building Typst source
+            // This ensures registeredCustomFontFamilies is populated for generatePreamble
+            if (fontInitPromiseRef.current) {
+                console.log('[usePdfCompiler] Waiting for font initialization...');
+                await fontInitPromiseRef.current;
+                console.log('[usePdfCompiler] Font initialization complete');
+            }
+
             // Build Typst source (this needs main thread for IndexedDB access)
             const fullSource = await buildTypstSource(options);
 
