@@ -374,7 +374,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
                         id: request.id,
                         success: true,
                         pdf: pdfData.buffer
-                    } as CompileResponse, [pdfData.buffer]);
+                    } as CompileResponse, { transfer: [pdfData.buffer as ArrayBuffer] });
                 }
             } catch (error: any) {
                 // Only send error if not cancelled

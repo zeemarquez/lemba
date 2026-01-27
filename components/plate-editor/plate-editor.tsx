@@ -382,11 +382,14 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       // Walk up the tree to find the nearest heading ancestor
       let currentPath = path;
       while (currentPath.length > 0) {
-        const [ancestor] = editor.api.node({ at: currentPath });
-        if ('type' in ancestor && typeof ancestor.type === 'string' && ancestor.type.startsWith('h')) {
-          const headingText = Node.string(ancestor).trim();
-          findHeadingInMarkdown(headingText, ancestor.type);
-          return;
+        const nodeEntry = editor.api.node({ at: currentPath });
+        if (nodeEntry) {
+          const [ancestor] = nodeEntry;
+          if ('type' in ancestor && typeof ancestor.type === 'string' && ancestor.type.startsWith('h')) {
+            const headingText = Node.string(ancestor).trim();
+            findHeadingInMarkdown(headingText, ancestor.type);
+            return;
+          }
         }
         currentPath = currentPath.slice(0, -1);
       }
@@ -420,7 +423,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         const path = editor.api.findPath(node);
         if (path) {
           // Try to get text from previous and next siblings
-          const parent = editor.api.parent({ at: path });
+          const parent = editor.api.parent(path);
           if (parent) {
             const [parentNode, parentPath] = parent;
             if ('children' in parentNode && Array.isArray(parentNode.children)) {
