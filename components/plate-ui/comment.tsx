@@ -31,7 +31,6 @@ import {
   discussionPlugin,
   type TDiscussion,
 } from '@/components/plate-editor/plugins/discussion-kit';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/plate-ui/avatar';
 import { Button } from '@/components/plate-ui/button';
 import {
   DropdownMenu,
@@ -62,6 +61,7 @@ export function Comment(props: {
   documentContent?: string;
   showDocumentContent?: boolean;
   onEditorClick?: () => void;
+  isResolved?: boolean;
 }) {
   const {
     comment,
@@ -72,6 +72,7 @@ export function Comment(props: {
     setEditingId,
     showDocumentContent = false,
     onEditorClick,
+    isResolved = false,
   } = props;
 
   const editor = useEditorRef();
@@ -160,7 +161,7 @@ export function Comment(props: {
 
   const onResolveComment = () => {
     void resolveDiscussion(comment.discussionId);
-    tf.comment.unsetMark({ id: comment.discussionId });
+    // Keep the comment mark visible but styled as resolved
   };
 
   const isFirst = index === 0;
@@ -172,19 +173,11 @@ export function Comment(props: {
 
   return (
     <div
+      className={cn(isResolved && 'opacity-60')}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
       <div className="relative flex items-center">
-        <Avatar className="size-5">
-          <AvatarImage alt={userInfo?.name} src={userInfo?.avatarUrl} />
-          <AvatarFallback>{userInfo?.name?.[0]}</AvatarFallback>
-        </Avatar>
-        <h4 className="mx-2 font-semibold text-sm leading-none">
-          {/* Replace to your own backend or refer to potion */}
-          {userInfo?.name}
-        </h4>
-
         <div className="text-muted-foreground/80 text-xs leading-none">
           <span className="mr-1">
             {formatCommentDate(new Date(comment.createdAt))}
@@ -192,7 +185,7 @@ export function Comment(props: {
           {comment.isEdited && <span>(edited)</span>}
         </div>
 
-        {isMyComment && (hovering || dropdownOpen) && (
+        {isMyComment && (hovering || dropdownOpen) && !isResolved && (
           <div className="absolute top-0 right-0 flex space-x-1">
             {index === 0 && (
               <Button
@@ -227,7 +220,7 @@ export function Comment(props: {
       </div>
 
       {isFirst && showDocumentContent && (
-        <div className="relative mt-1 flex pl-[32px] text-sm text-subtle-foreground">
+        <div className="relative mt-1 flex text-sm text-subtle-foreground">
           {discussionLength > 1 && (
             <div className="absolute top-[5px] left-3 h-full w-0.5 shrink-0 bg-muted" />
           )}
@@ -236,14 +229,17 @@ export function Comment(props: {
         </div>
       )}
 
-      <div className="relative my-1 pl-[26px]">
+      <div className="relative my-1">
         {!isLast && (
           <div className="absolute top-0 left-3 h-full w-0.5 shrink-0 bg-muted" />
         )}
         <Plate editor={commentEditor} readOnly={!isEditing}>
           <EditorContainer variant="comment">
             <Editor
-              className="w-auto grow"
+              className={cn(
+                'w-auto grow',
+                isResolved && 'line-through text-muted-foreground/60'
+              )}
               onClick={() => onEditorClick?.()}
               variant="comment"
             />
@@ -419,7 +415,6 @@ export function CommentCreateForm({
   const commentId = useCommentId();
   const discussionId = discussionIdProp ?? commentId;
 
-  const userInfo = usePluginOption(discussionPlugin, 'currentUser');
   const [commentValue, setCommentValue] = React.useState<Value | undefined>();
   const commentContent = React.useMemo(
     () =>
@@ -546,14 +541,6 @@ export function CommentCreateForm({
 
   return (
     <div className={cn('flex w-full', className)}>
-      <div className="mt-2 mr-1 shrink-0">
-        {/* Replace to your own backend or refer to potion */}
-        <Avatar className="size-5">
-          <AvatarImage alt={userInfo?.name} src={userInfo?.avatarUrl} />
-          <AvatarFallback>{userInfo?.name?.[0]}</AvatarFallback>
-        </Avatar>
-      </div>
-
       <div className="relative flex grow gap-2">
         <Plate
           editor={commentEditor}

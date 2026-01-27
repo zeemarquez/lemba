@@ -292,6 +292,7 @@ function BlockComment({
             documentContent={discussion?.documentContent}
             editingId={editingId}
             index={index}
+            isResolved={discussion.isResolved}
             key={comment.id ?? index}
             setEditingId={setEditingId}
             showDocumentContent
@@ -355,8 +356,7 @@ const useResolvedDiscussion = (
 
       return (
         api.comment.has({ id: item.id }) &&
-        commentsIds.has(item.id) &&
-        !item.isResolved
+        commentsIds.has(item.id)
       );
     });
 
