@@ -5,6 +5,7 @@
  * 
  * Provides authentication context to the application.
  * Handles Firebase Auth state and sync service initialization.
+ * Manages user access levels (basic/premium) for feature gating.
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -13,16 +14,29 @@ import {
     signInWithGoogle,
     signOut as firebaseSignOut,
     isFirebaseConfigured,
+    getUserAccessLevel,
     type User,
+    type UserAccessLevel,
 } from '@/lib/firebase';
 import { syncService } from '@/lib/sync';
 import { useStore } from '@/lib/store';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // Auth context type
 interface AuthContextType {
     user: User | null;
     isLoading: boolean;
     isConfigured: boolean;
+    accessLevel: UserAccessLevel | null;
+    hasSyncAccess: boolean;
     signIn: () => Promise<void>;
     signOut: () => Promise<void>;
     error: string | null;
@@ -33,6 +47,8 @@ const AuthContext = createContext<AuthContextType>({
     user: null,
     isLoading: true,
     isConfigured: false,
+    accessLevel: null,
+    hasSyncAccess: false,
     signIn: async () => {},
     signOut: async () => {},
     error: null,
@@ -60,6 +76,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isConfigured] = useState(() => isFirebaseConfigured());
+    const [accessLevel, setAccessLevel] = useState<UserAccessLevel | null>(null);
+    const [showBasicUserPopup, setShowBasicUserPopup] = useState(false);
+
+    // Compute if user has sync access (premium only)
+    const hasSyncAccess = accessLevel === 'premium';
 
     // Listen for auth state changes
     useEffect(() => {
@@ -68,56 +89,71 @@ export function AuthProvider({ children }: AuthProviderProps) {
             return;
         }
 
-        const unsubscribe = onAuthStateChanged((user) => {
+        const unsubscribe = onAuthStateChanged(async (user) => {
             setUser(user);
-            setIsLoading(false);
 
-            // Initialize or stop sync service based on auth state
+            // Initialize or stop sync service based on auth state and access level
             if (user) {
-                const refreshStore = () => {
-                    console.log('[Sync] Refreshing store after sync...');
-                    useStore.getState().fetchFileTree();
-                    useStore.getState().fetchTemplates();
-                };
+                // Check user access level
+                const level = await getUserAccessLevel(user.uid);
+                setAccessLevel(level);
+                console.log('[Auth] User access level:', level);
 
-                syncService.start(user.uid, {
-                    onSyncError: (err) => {
-                        console.error('[Sync] Error:', err);
-                    },
-                    onSyncComplete: (stats) => {
-                        console.log('[Sync] Complete:', stats);
-                        refreshStore();
-                    },
-                });
-                
-                // Hydrate on first login (check if this is first sync)
-                const lastSync = syncService.getLastSyncTime();
-                console.log('[Sync] Last sync timestamp:', lastSync);
-                
-                if (lastSync === 0) {
-                    console.log('[Sync] First sync - running hydrate...');
-                    syncService.hydrate()
-                        .then((stats) => {
-                            console.log('[Sync] Hydrate completed:', stats);
+                // Only enable sync for premium users
+                if (level === 'premium') {
+                    const refreshStore = () => {
+                        console.log('[Sync] Refreshing store after sync...');
+                        useStore.getState().fetchFileTree();
+                        useStore.getState().fetchTemplates();
+                    };
+
+                    syncService.start(user.uid, {
+                        onSyncError: (err) => {
+                            console.error('[Sync] Error:', err);
+                        },
+                        onSyncComplete: (stats) => {
+                            console.log('[Sync] Complete:', stats);
                             refreshStore();
-                        })
-                        .catch((err) => {
-                            console.error('[Sync] Hydrate failed:', err);
-                        });
+                        },
+                    });
+                    
+                    // Hydrate on first login (check if this is first sync)
+                    const lastSync = syncService.getLastSyncTime();
+                    console.log('[Sync] Last sync timestamp:', lastSync);
+                    
+                    if (lastSync === 0) {
+                        console.log('[Sync] First sync - running hydrate...');
+                        syncService.hydrate()
+                            .then((stats) => {
+                                console.log('[Sync] Hydrate completed:', stats);
+                                refreshStore();
+                            })
+                            .catch((err) => {
+                                console.error('[Sync] Hydrate failed:', err);
+                            });
+                    } else {
+                        console.log('[Sync] Running delta sync...');
+                        syncService.pullDelta()
+                            .then((stats) => {
+                                console.log('[Sync] Delta sync completed:', stats);
+                                refreshStore();
+                            })
+                            .catch((err) => {
+                                console.error('[Sync] Delta sync failed:', err);
+                            });
+                    }
                 } else {
-                    console.log('[Sync] Running delta sync...');
-                    syncService.pullDelta()
-                        .then((stats) => {
-                            console.log('[Sync] Delta sync completed:', stats);
-                            refreshStore();
-                        })
-                        .catch((err) => {
-                            console.error('[Sync] Delta sync failed:', err);
-                        });
+                    // Basic user - show popup and don't start sync
+                    console.log('[Auth] Basic user - sync disabled');
+                    setShowBasicUserPopup(true);
+                    syncService.stop();
                 }
             } else {
+                setAccessLevel(null);
                 syncService.stop();
             }
+            
+            setIsLoading(false);
         });
 
         return () => unsubscribe();
@@ -157,6 +193,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user,
         isLoading,
         isConfigured,
+        accessLevel,
+        hasSyncAccess,
         signIn,
         signOut,
         error,
@@ -165,6 +203,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return (
         <AuthContext.Provider value={value}>
             {children}
+            
+            {/* Basic User Popup - shown when a basic user signs in */}
+            <AlertDialog open={showBasicUserPopup} onOpenChange={setShowBasicUserPopup}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Basic Account</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            You are signed in with a Basic account. Cloud sync is not available 
+                            for Basic users. Your documents will only be saved locally on this device.
+                            <br /><br />
+                            Upgrade to Premium to enable cloud sync and access your documents 
+                            from any device.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogAction onClick={() => setShowBasicUserPopup(false)}>
+                            Got it
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </AuthContext.Provider>
     );
 }

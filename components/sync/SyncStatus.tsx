@@ -63,7 +63,7 @@ export function SyncStatus({
     showLabel = false,
     size = 'icon' 
 }: SyncStatusProps) {
-    const { user, isConfigured } = useAuth();
+    const { user, isConfigured, hasSyncAccess } = useAuth();
     const { 
         status, 
         isActive, 
@@ -116,6 +116,30 @@ export function SyncStatus({
                     </TooltipTrigger>
                     <TooltipContent>
                         <p>Sign in to enable cloud sync</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        );
+    }
+
+    // Basic user - no sync access
+    if (!hasSyncAccess) {
+        return (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size={size}
+                            className={cn('text-muted-foreground', className)}
+                            disabled
+                        >
+                            <CloudOff className="h-4 w-4" />
+                            {showLabel && <span className="ml-2">Sync disabled</span>}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Cloud sync requires Premium account</p>
                     </TooltipContent>
                 </Tooltip>
             </TooltipProvider>

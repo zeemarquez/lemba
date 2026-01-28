@@ -42,3 +42,14 @@ export {
     // Types
     type FirestoreFileEntry,
 } from './firestore';
+
+// User Access Management
+export {
+    getUserAccessLevel,
+    getUserAccess,
+    createUserAccessRecord,
+    hasSyncAccess,
+    hasAccessLevel,
+    type UserAccessLevel,
+    type UserAccess,
+} from './user-access';

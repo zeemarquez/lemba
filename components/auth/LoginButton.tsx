@@ -33,7 +33,7 @@ export function LoginButton({
     showLabel = true,
     size = 'default' 
 }: LoginButtonProps) {
-    const { user, isLoading, isConfigured, signIn, signOut, error } = useAuth();
+    const { user, isLoading, isConfigured, signIn, signOut, error, accessLevel, hasSyncAccess } = useAuth();
     const [isSigningIn, setIsSigningIn] = useState(false);
 
     // Handle sign in
@@ -149,8 +149,21 @@ export function LoginButton({
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="gap-2" disabled>
-                    <Cloud className="h-4 w-4" />
-                    <span>Cloud sync enabled</span>
+                    <User className="h-4 w-4" />
+                    <span className="capitalize">{accessLevel || 'Basic'} account</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2" disabled>
+                    {hasSyncAccess ? (
+                        <>
+                            <Cloud className="h-4 w-4 text-green-500" />
+                            <span>Cloud sync enabled</span>
+                        </>
+                    ) : (
+                        <>
+                            <CloudOff className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-muted-foreground">Cloud sync disabled</span>
+                        </>
+                    )}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
