@@ -41,7 +41,7 @@ export function EditorContainer() {
     }
 
     return (
-        <div className="h-full flex flex-col relative w-full bg-background overflow-hidden border-l">
+        <div className="h-full flex flex-col relative w-full bg-background overflow-hidden">
             <PlateEditor
                 key={activeFile.id}
                 content={activeFile.content}
