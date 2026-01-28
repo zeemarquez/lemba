@@ -26,6 +26,8 @@ import {
     ResizablePanel,
     ResizableHandle,
 } from "@/components/ui/resizable";
+import { LoginButton } from "@/components/auth";
+import { SyncStatus } from "@/components/sync";
 
 export function Sidebar() {
     const {
@@ -299,17 +301,21 @@ export function Sidebar() {
                     <PanelLeftOpen size={18} />
                 </Button>
                 <div className="flex-1" />
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
-                    onClick={() => {
-                        setSettingsOpen(true);
-                    }}
-                    title="Settings"
-                >
-                    <Settings size={18} />
-                </Button>
+                <div className="flex flex-col gap-1 items-center">
+                    <LoginButton size="icon" showLabel={false} />
+                    <SyncStatus size="icon" showLabel={false} />
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+                        onClick={() => {
+                            setSettingsOpen(true);
+                        }}
+                        title="Settings"
+                    >
+                        <Settings size={18} />
+                    </Button>
+                </div>
             </div>
         );
     }
@@ -524,8 +530,11 @@ export function Sidebar() {
                     </ScrollArea>
                 )}
 
-                {/* Sidebar Footer - Settings */}
-                <div className="p-2 shrink-0">
+                {/* Sidebar Footer - Auth, Sync, Settings */}
+                <div className="p-2 shrink-0 flex items-center gap-1 border-t border-border/50">
+                    <LoginButton size="icon" showLabel={false} />
+                    <SyncStatus size="icon" showLabel={false} />
+                    <div className="flex-1" />
                     <Button
                         variant="ghost"
                         size="icon"

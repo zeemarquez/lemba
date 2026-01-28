@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry } from './types';
+import { syncService, syncQueue } from './sync';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
 
 
@@ -341,9 +342,11 @@ export const useStore = create<AppState>()(
 
                 // Actions implementation
                 fetchFileTree: async () => {
+                    console.log('[Store] fetchFileTree called');
                     set({ isLoadingFileTree: true });
                     try {
                         let { tree } = await browserStorage.list();
+                        console.log('[Store] fetchFileTree got tree:', tree.length, 'root items');
 
                         // Check if Files folder has any files
                         const filesRoot = tree.find(n => n.name === 'Files');
@@ -393,17 +396,20 @@ export const useStore = create<AppState>()(
                             }
                         }
 
+                        console.log('[Store] Setting fileTree with', tree.length, 'root items');
                         set({ fileTree: tree });
                     } catch (error) {
-                        console.error('Failed to fetch file tree:', error);
+                        console.error('[Store] Failed to fetch file tree:', error);
                     } finally {
                         set({ isLoadingFileTree: false });
                     }
                 },
 
                 fetchTemplates: async () => {
+                    console.log('[Store] fetchTemplates called');
                     try {
                         let templates = await browserStorage.listTemplates();
+                        console.log('[Store] fetchTemplates got', templates.length, 'templates');
 
                         // Check if "Default Templates" folder exists by checking if any template is in that folder
                         const defaultTemplatesFolder = 'Templates/Default Templates';
@@ -517,9 +523,15 @@ export const useStore = create<AppState>()(
 
                 createFile: async (path: string, content = '') => {
                     try {
-                        await browserStorage.createFile(path, content);
+                        const fileEntry = await browserStorage.createFile(path, content);
                         await get().fetchFileTree();
                         await get().openFile(path);
+                        
+                        // Trigger cloud sync (push + pull)
+                        if (syncService.isActive) {
+                            syncQueue.enqueueFile(fileEntry);
+                            syncService.pullDelta().catch(console.error);
+                        }
                     } catch (error) {
                         console.error('Failed to create file:', error);
                     }
@@ -527,8 +539,14 @@ export const useStore = create<AppState>()(
 
                 createFolder: async (path: string) => {
                     try {
-                        await browserStorage.createFolder(path);
+                        const folderEntry = await browserStorage.createFolder(path);
                         await get().fetchFileTree();
+                        
+                        // Trigger cloud sync (push + pull)
+                        if (syncService.isActive) {
+                            syncQueue.enqueueFile(folderEntry);
+                            syncService.pullDelta().catch(console.error);
+                        }
                     } catch (error) {
                         console.error('Failed to create folder:', error);
                     }
@@ -540,6 +558,15 @@ export const useStore = create<AppState>()(
                         await get().fetchFileTree();
                         await get().fetchTemplates();
                         get().openTemplate(path);
+                        
+                        // Trigger cloud sync (push + pull) - templates are stored as files
+                        if (syncService.isActive) {
+                            const fileEntry = await browserStorage.getFileEntry(path);
+                            if (fileEntry) {
+                                syncQueue.enqueueFile(fileEntry);
+                            }
+                            syncService.pullDelta().catch(console.error);
+                        }
                     } catch (error) {
                         console.error('Failed to create template:', error);
                     }
@@ -551,6 +578,14 @@ export const useStore = create<AppState>()(
                         set((state) => ({
                             templates: state.templates.map((t) => (t.id === path ? template : t))
                         }));
+                        
+                        // Trigger cloud sync (templates are stored as files)
+                        if (syncService.isActive) {
+                            const fileEntry = await browserStorage.getFileEntry(path);
+                            if (fileEntry) {
+                                syncQueue.enqueueFile(fileEntry);
+                            }
+                        }
                     } catch (error) {
                         console.error('Failed to save template:', error);
                     }
@@ -558,6 +593,16 @@ export const useStore = create<AppState>()(
 
                 deleteItem: async (path: string, type: 'file' | 'folder') => {
                     try {
+                        // For cloud sync: soft-delete, push immediately (before hard-delete), then pull
+                        if (syncService.isActive) {
+                            const deletedEntry = await browserStorage.softDeleteFile(path);
+                            if (deletedEntry) {
+                                await syncService.pushFile(deletedEntry);
+                            }
+                            syncService.pullDelta().catch(console.error);
+                        }
+                        
+                        // Hard delete locally
                         await browserStorage.delete(path, type);
                         await get().fetchFileTree();
 
@@ -622,6 +667,7 @@ export const useStore = create<AppState>()(
                     try {
                         await browserStorage.storeFont(family, file);
                         await get().fetchFonts();
+                        // Note: Fonts are NOT synced to cloud (local-only)
                     } catch (error) {
                         console.error('Failed to add font:', error);
                     }
@@ -631,6 +677,7 @@ export const useStore = create<AppState>()(
                     try {
                         await browserStorage.deleteFont(id);
                         await get().fetchFonts();
+                        // Note: Fonts are NOT synced to cloud (local-only)
                     } catch (error) {
                         console.error('Failed to delete font:', error);
                     }
@@ -694,7 +741,7 @@ export const useStore = create<AppState>()(
 
                 saveFile: async (path: string, content: string) => {
                     try {
-                        await browserStorage.writeFile(path, content);
+                        const fileEntry = await browserStorage.writeFile(path, content);
                         // Update local file content and sync to other windows
                         set((state) => ({
                             files: state.files.map((f) => (f.id === path ? { ...f, content } : f))
@@ -710,6 +757,11 @@ export const useStore = create<AppState>()(
                             } catch (error) {
                                 console.error('Failed to sync file content:', error);
                             }
+                        }
+                        
+                        // Trigger cloud sync
+                        if (syncService.isActive) {
+                            syncQueue.enqueueFile(fileEntry);
                         }
                     } catch (error) {
                         console.error('Failed to save file:', error);
