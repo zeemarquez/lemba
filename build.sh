@@ -9,6 +9,21 @@ FORCE_BUILD=false
 NO_BUMP=false
 HISTORY_FILE="build-history.json"
 PACKAGE_FILE="package.json"
+BUILD_SUCCESS=false
+VERSION_BUMPED=false
+
+# Get current version before any potential bump
+OLD_VERSION=$(node -e "console.log(require('./$PACKAGE_FILE').version)" 2>/dev/null || echo "0.0.1")
+
+cleanup() {
+  if [ "$VERSION_BUMPED" = true ] && [ "$BUILD_SUCCESS" = false ]; then
+    echo ""
+    echo "Build failed. Rolling back version bump to $OLD_VERSION..."
+    npm version "$OLD_VERSION" --no-git-tag-version > /dev/null 2>&1
+  fi
+}
+
+trap cleanup EXIT
 
 # Parse arguments
 for arg in "$@"; do
@@ -104,6 +119,7 @@ fi
 if [ "$NO_BUMP" = false ]; then
   echo "Bumping version..."
   NEW_VERSION=$(npm version patch --no-git-tag-version)
+  VERSION_BUMPED=true
   CLEAN_VERSION=${NEW_VERSION#v}
   echo "New Version: $CLEAN_VERSION"
 else
@@ -124,13 +140,13 @@ if [ "$BUILD_MAC" = true ]; then
     # We pass --no-bump and --force because we already handled them here
     ./build-mac-local.sh --no-bump --force > build-mac.log 2>&1 &
     PIDS+=($!)
-    echo "[JOBS] Started macOS build (PID: ${PIDS[-1]}) - Logging to build-mac.log"
+    echo "[JOBS] Started macOS build (PID: $!) - Logging to build-mac.log"
 fi
 
 if [ "$BUILD_WIN" = true ]; then
     ./build-win-local.sh --no-bump --force > build-win.log 2>&1 &
     PIDS+=($!)
-    echo "[JOBS] Started Windows build (PID: ${PIDS[-1]}) - Logging to build-win.log"
+    echo "[JOBS] Started Windows build (PID: $!) - Logging to build-win.log"
 fi
 
 # 5. Wait for both
@@ -145,6 +161,7 @@ for pid in "${PIDS[@]}"; do
 done
 
 if [ $EXIT_CODE -eq 0 ]; then
+    BUILD_SUCCESS=true
     echo "=============================================="
     echo "   ALL BUILDS COMPLETED SUCCESSFULLY!"
     echo "=============================================="

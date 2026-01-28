@@ -13,6 +13,21 @@ FORCE_BUILD=false
 NO_BUMP=false
 HISTORY_FILE="build-history.json"
 PACKAGE_FILE="package.json"
+BUILD_SUCCESS=false
+VERSION_BUMPED=false
+
+# Get current version before any potential bump
+OLD_VERSION=$(node -e "console.log(require('./$PACKAGE_FILE').version)" 2>/dev/null || echo "0.0.1")
+
+cleanup() {
+  if [ "$VERSION_BUMPED" = true ] && [ "$BUILD_SUCCESS" = false ]; then
+    echo ""
+    echo "Build failed. Rolling back version bump to $OLD_VERSION..."
+    npm version "$OLD_VERSION" --no-git-tag-version > /dev/null 2>&1
+  fi
+}
+
+trap cleanup EXIT
 
 # Parse arguments
 for arg in "$@"; do
@@ -107,6 +122,7 @@ if [ "$NO_BUMP" = false ]; then
   # Use npm version patch to handle the file update safely
   # --no-git-tag-version prevents it from creating a git tag/commit automatically
   NEW_VERSION=$(npm version patch --no-git-tag-version)
+  VERSION_BUMPED=true
   # Remove 'v' prefix if present for display or JSON consistency
   CLEAN_VERSION=${NEW_VERSION#v}
   echo "New Version: $CLEAN_VERSION"
@@ -116,8 +132,13 @@ else
 fi
 
 # 4. Run Build
+echo "Preparing dist/mac directory..."
+mkdir -p dist/mac
+# Clear existing contents
+rm -rf dist/mac/*
+
 echo "Starting macOS build..."
-npm run electron:build:mac
+npx electron-builder --mac --config.directories.output=dist/mac
 
 # 5. Update History
 echo "Updating build history..."
@@ -142,4 +163,5 @@ run_node "
   fs.writeFileSync(historyFile, JSON.stringify(history, null, 4));
 "
 
+BUILD_SUCCESS=true
 echo "Build complete! Artifacts are in dist/"

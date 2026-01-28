@@ -1,6 +1,6 @@
 {
     "name": "modern-markdown-editor",
-    "version": "0.1.8",
+    "version": "0.1.10",
     "private": true,
     "description": "A modern markdown editor with PDF export capabilities",
     "author": "zeemarquez",
@@ -195,7 +195,7 @@
                     ]
                 }
             ],
-            "icon": "public/favicon.ico",
+            "icon": "public/favicon.png",
             "artifactName": "${productName}-${version}-Windows-${arch}.${ext}",
             "signAndEditExecutable": false
         },
