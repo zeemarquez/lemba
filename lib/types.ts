@@ -178,6 +178,41 @@ export interface Template {
         };
         alerts?: {
             showHeader: boolean;
+            note?: {
+                icon?: string;
+                text?: string;
+                labelColor?: string;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            tip?: {
+                icon?: string;
+                text?: string;
+                labelColor?: string;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            important?: {
+                icon?: string;
+                text?: string;
+                labelColor?: string;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            warning?: {
+                icon?: string;
+                text?: string;
+                labelColor?: string;
+                backgroundColor?: string;
+                textColor?: string;
+            };
+            caution?: {
+                icon?: string;
+                text?: string;
+                labelColor?: string;
+                backgroundColor?: string;
+                textColor?: string;
+            };
         };
     }
 }

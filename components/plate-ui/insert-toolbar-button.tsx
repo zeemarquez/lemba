@@ -2,6 +2,7 @@
 
 import type { DropdownMenuProps } from '@radix-ui/react-dropdown-menu';
 import {
+  AlertCircle,
   CalendarIcon,
   ChevronRightIcon,
   Columns3Icon,
@@ -93,6 +94,11 @@ const groups: Group[] = [
         icon: <QuoteIcon />,
         label: 'Quote',
         value: KEYS.blockquote,
+      },
+      {
+        icon: <AlertCircle />,
+        label: 'Alert',
+        value: KEYS.callout,
       },
       {
         icon: <MinusIcon />,

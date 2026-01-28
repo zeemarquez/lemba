@@ -1,6 +1,5 @@
 'use client';
 
-import { insertCallout } from '@platejs/callout';
 import { insertCodeBlock, toggleCodeBlock } from '@platejs/code-block';
 import { insertDate } from '@platejs/date';
 import { insertExcalidraw } from '@platejs/excalidraw';
@@ -77,7 +76,15 @@ const insertBlockMap: Record<
   [ACTION_THREE_COLUMNS]: (editor) =>
     insertColumnGroup(editor, { columns: 3, select: true }),
   [KEYS.audio]: (editor) => insertAudioPlaceholder(editor, { select: true }),
-  [KEYS.callout]: (editor) => insertCallout(editor, { select: true }),
+  [KEYS.callout]: (editor) => {
+    // Insert callout with default NOTE (lucide-info) type
+    editor.tf.insertNodes({
+      type: KEYS.callout,
+      icon: 'lucide:info',
+      backgroundColor: 'hsla(210, 100%, 50%, 0.1)',
+      children: [{ type: 'p', children: [{ text: '' }] }],
+    }, { select: true });
+  },
   [KEYS.codeBlock]: (editor) => insertCodeBlock(editor, { select: true }),
   [KEYS.equation]: (editor) => insertEquation(editor, { select: true }),
   [KEYS.excalidraw]: (editor) => insertExcalidraw(editor, {}, { select: true }),

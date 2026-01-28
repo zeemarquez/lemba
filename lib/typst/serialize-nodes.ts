@@ -1,5 +1,6 @@
 import type { Descendant, TElement, TText } from 'platejs';
 import { fixTypstUnit } from './client-compiler';
+import { escapeSvgForTypst, colorToHex, DEFAULT_ALERT_ICONS } from './lucide-svg';
 
 interface SerializeContext {
     title?: string;
@@ -53,7 +54,44 @@ interface SerializeContext {
     };
     alerts?: {
         showHeader: boolean;
+        note?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        tip?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        important?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        warning?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        caution?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
     };
+    /** Resolved Lucide icon SVGs (icon name -> SVG string) for custom alert icons */
+    resolvedLucideSvgs?: Record<string, string>;
     /** Internal figure counter - managed during serialization */
     _figureCounter?: { value: number };
 }
@@ -261,7 +299,7 @@ function scaleTypstUnit(value: string | number | undefined, factor: number): str
     return fixTypstUnit(value);
 }
 
-function getAlertIconTypst(type: string): string {
+function getAlertIconTypst(type: string, colorOverride?: string): string {
     let color = "#0070f3";
     let path = "";
     switch (type) {
@@ -287,7 +325,8 @@ function getAlertIconTypst(type: string): string {
             path = "<circle cx='12' cy='12' r='10'></circle><line x1='12' y1='16' x2='12' y2='12'></line><line x1='12' y1='8' x2='12.01' y2='8'></line>";
             break;
     }
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='${color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${path}</svg>`;
+    const stroke = colorOverride && /^#[0-9A-Fa-f]{3,8}$/.test(colorOverride) ? colorOverride : color;
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='${stroke}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${path}</svg>`;
     return svg;
 }
 
@@ -374,53 +413,154 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
         case 'callout': {
             const icon = (element as any).icon;
             let type = 'NOTE';
-            if (icon === '💡') type = 'TIP';
-            else if (icon === '💎') type = 'IMPORTANT';
-            else if (icon === '⚠️') type = 'WARNING';
-            else if (icon === '🚨') type = 'CAUTION';
+            if (typeof icon === 'string' && icon.startsWith('lucide:')) {
+                const name = icon.replace(/^lucide:/, '');
+                if (name === 'info') type = 'NOTE';
+                else if (name === 'lightbulb') type = 'TIP';
+                else if (name === 'circle-alert') type = 'IMPORTANT';
+                else if (name === 'triangle-alert') type = 'WARNING';
+                else if (name === 'siren') type = 'CAUTION';
+            } else {
+                if (icon === '💡') type = 'TIP';
+                else if (icon === '💎') type = 'IMPORTANT';
+                else if (icon === '⚠️') type = 'WARNING';
+                else if (icon === '🚨') type = 'CAUTION';
+            }
 
-            let color = 'rgb("#f0f7ff")';
-            let stroke = 'rgb("#0070f3")';
-            let alertIcon = 'ℹ️';
+            // Get type-specific settings (convert type to lowercase for lookup)
+            const typeKey = type.toLowerCase() as 'note' | 'tip' | 'important' | 'warning' | 'caution';
+            const typeSettings = context.alerts?.[typeKey];
 
+            // Use customization settings for this specific type, otherwise use defaults
+            const customIcon = typeSettings?.icon || icon;
+            const customText = typeSettings?.text || type;
+            // When no override, use default Lucide icon for this type so PDF uses it on first render
+            const iconToUse = customIcon || DEFAULT_ALERT_ICONS[typeKey];
+
+            // Label color applies to border, icon, and label (when set)
+            const labelHex = colorToHex(typeSettings?.labelColor);
+
+            // Resolve icon for PDF: custom (emoji or Lucide) or type-based SVG
+            const defaultSvg = getAlertIconTypst(type, labelHex ?? undefined);
+            let iconTypst: string;
+            if (iconToUse?.startsWith('lucide:')) {
+                const name = iconToUse.replace(/^lucide:/, '').trim();
+                const kebab = name.replace(/([a-z])([A-Z])/g, (_: string, a: string, b: string) => `${a}-${b.toLowerCase()}`).replace(/([A-Z])/g, (c: string) => c.toLowerCase()).replace(/^-/, '');
+                const resolved = context.resolvedLucideSvgs?.[name] ?? context.resolvedLucideSvgs?.[kebab];
+                iconTypst = resolved ? `image.decode("${escapeSvgForTypst(resolved)}")` : `image.decode("${escapeSvgForTypst(defaultSvg)}")`;
+            } else if (iconToUse && !iconToUse.startsWith('lucide:')) {
+                iconTypst = `#text(size: 1.1em)[${iconToUse}]`;
+            } else {
+                iconTypst = `image.decode("${escapeSvgForTypst(defaultSvg)}")`;
+            }
+            
+            // Helper function to convert color to Typst format
+            const convertColorToTypst = (color: string | undefined, defaultColor: string): string => {
+                if (!color) return defaultColor;
+                
+                if (color.startsWith('hsla') || color.startsWith('hsl')) {
+                    const hslMatch = color.match(/hsla?\((\d+),\s*(\d+)%,\s*(\d+)%/);
+                    if (hslMatch) {
+                        const h = parseInt(hslMatch[1]) / 360;
+                        const s = parseInt(hslMatch[2]) / 100;
+                        const l = parseInt(hslMatch[3]) / 100;
+                        
+                        // HSL to RGB conversion
+                        let r, g, b;
+                        if (s === 0) {
+                            r = g = b = l;
+                        } else {
+                            const hue2rgb = (p: number, q: number, t: number) => {
+                                if (t < 0) t += 1;
+                                if (t > 1) t -= 1;
+                                if (t < 1/6) return p + (q - p) * 6 * t;
+                                if (t < 1/2) return q;
+                                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                                return p;
+                            };
+                            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                            const p = 2 * l - q;
+                            r = hue2rgb(p, q, h + 1/3);
+                            g = hue2rgb(p, q, h);
+                            b = hue2rgb(p, q, h - 1/3);
+                        }
+                        const hex = '#' + [r, g, b].map(x => {
+                            const hex = Math.round(x * 255).toString(16);
+                            return hex.length === 1 ? '0' + hex : hex;
+                        }).join('');
+                        return `rgb("${hex}")`;
+                    }
+                    return defaultColor;
+                } else if (color.startsWith('#')) {
+                    return `rgb("${color}")`;
+                } else {
+                    return `rgb("${color}")`;
+                }
+            };
+            
+            // Get background color - use type-specific setting or default
+            let backgroundColor: string;
             switch (type) {
                 case 'TIP':
-                    color = 'rgb("#e6fffa")';
-                    stroke = 'rgb("#38b2ac")';
+                    backgroundColor = convertColorToTypst(typeSettings?.backgroundColor, 'rgb("#e6fffa")');
                     break;
                 case 'IMPORTANT':
-                    color = 'rgb("#faf5ff")';
-                    stroke = 'rgb("#9f7aea")';
+                    backgroundColor = convertColorToTypst(typeSettings?.backgroundColor, 'rgb("#faf5ff")');
                     break;
                 case 'WARNING':
-                    color = 'rgb("#fffaf0")';
-                    stroke = 'rgb("#ed8936")';
+                    backgroundColor = convertColorToTypst(typeSettings?.backgroundColor, 'rgb("#fffaf0")');
                     break;
                 case 'CAUTION':
-                    color = 'rgb("#fff5f5")';
-                    stroke = 'rgb("#f56565")';
+                    backgroundColor = convertColorToTypst(typeSettings?.backgroundColor, 'rgb("#fff5f5")');
                     break;
                 case 'NOTE':
                 default:
-                    color = 'rgb("#f0f7ff")';
-                    stroke = 'rgb("#0070f3")';
+                    backgroundColor = convertColorToTypst(typeSettings?.backgroundColor, 'rgb("#f0f7ff")');
                     break;
             }
+
+            // Stroke (border + label + icon): use labelColor when set, else type defaults
+            let stroke = 'rgb("#0070f3")';
+            if (typeSettings?.labelColor) {
+                stroke = convertColorToTypst(typeSettings.labelColor, stroke);
+            } else {
+                switch (type) {
+                    case 'TIP':
+                        stroke = 'rgb("#38b2ac")';
+                        break;
+                    case 'IMPORTANT':
+                        stroke = 'rgb("#9f7aea")';
+                        break;
+                    case 'WARNING':
+                        stroke = 'rgb("#ed8936")';
+                        break;
+                    case 'CAUTION':
+                        stroke = 'rgb("#f56565")';
+                        break;
+                    case 'NOTE':
+                    default:
+                        stroke = 'rgb("#0070f3")';
+                        break;
+                }
+            }
+
+            // Get text color (body) - use type-specific setting or default to black
+            const textColor = typeSettings?.textColor ? convertColorToTypst(typeSettings.textColor, 'black') : 'black';
 
             const showHeader = context.alerts?.showHeader !== false;
 
             if (showHeader) {
-                return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
-  #text(fill: ${stroke}, weight: "bold")[#box(height: 1.1em, baseline: 15%, image.decode("${getAlertIconTypst(type)}")) ${type}] \\
-  ${children}
+                return `#block(fill: ${backgroundColor}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+  #text(fill: ${stroke}, weight: "bold")[#box(height: 1.1em, baseline: 15%, ${iconTypst}) ${customText}] \\
+  #text(fill: ${textColor})[${children}]
 ]\n`;
             } else {
-                return `#block(fill: ${color}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
+                return `#block(fill: ${backgroundColor}, stroke: (left: 4pt + ${stroke}), inset: 12pt, width: 100%, radius: 4pt)[
   #grid(
     columns: (auto, 1fr),
     column-gutter: 12pt,
-    smallcaps(text(size: 2.2em, image.decode("${getAlertIconTypst(type)}"))),
-    align(horizon + left)[${children}]
+    smallcaps(text(size: 2.2em, ${iconTypst})),
+    align(horizon + left)[#text(fill: ${textColor})[${children}]]
   )
 ]\n`;
             }

@@ -239,11 +239,21 @@ const alertRules = {
   callout: {
     serialize: (node: any, options: any) => {
       let type = 'NOTE';
-      if (node.icon === '💡') type = 'TIP';
-      else if (node.icon === '💎') type = 'IMPORTANT';
-      else if (node.icon === '⚠️') type = 'WARNING';
-      else if (node.icon === '🚨') type = 'CAUTION';
-      else if (node.icon === 'ℹ️') type = 'NOTE';
+      const icon = node.icon;
+      if (typeof icon === 'string' && icon.startsWith('lucide:')) {
+        const name = icon.replace(/^lucide:/, '');
+        if (name === 'info') type = 'NOTE';
+        else if (name === 'lightbulb') type = 'TIP';
+        else if (name === 'circle-alert') type = 'IMPORTANT';
+        else if (name === 'triangle-alert') type = 'WARNING';
+        else if (name === 'siren') type = 'CAUTION';
+      } else {
+        if (icon === '💡') type = 'TIP';
+        else if (icon === '💎') type = 'IMPORTANT';
+        else if (icon === '⚠️') type = 'WARNING';
+        else if (icon === '🚨') type = 'CAUTION';
+        else if (icon === 'ℹ️') type = 'NOTE';
+      }
 
       // Convert Plate children to mdast format
       // node.children contains Plate nodes like { type: 'p', children: [{ text: '...' }] }

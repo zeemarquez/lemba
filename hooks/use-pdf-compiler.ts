@@ -14,6 +14,7 @@ import {
     getEnabledHeadingLevels
 } from '@/lib/typst/client-compiler';
 import { processTypstImages } from '@/lib/typst/client-image-manager';
+import { resolveLucideIconsFromAlerts } from '@/lib/typst/lucide-svg';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import { useStore } from '@/lib/store';
 import { parseVariablesFromFrontmatter } from '@/components/export/ExportSidebar';
@@ -128,6 +129,41 @@ export interface TemplateSettings {
     };
     alerts?: {
         showHeader: boolean;
+        note?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        tip?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        important?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        warning?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
+        caution?: {
+            icon?: string;
+            text?: string;
+            labelColor?: string;
+            backgroundColor?: string;
+            textColor?: string;
+        };
     };
     [key: string]: unknown;
 }
@@ -159,7 +195,8 @@ async function contentToTypst(content: string, context: {
     pageNumberOffset?: number; 
     variables?: Record<string, string>; 
     figures?: { captionEnabled?: boolean; captionFormat?: string }; 
-    alerts?: { showHeader: boolean } 
+    alerts?: { showHeader: boolean; note?: { icon?: string }; tip?: { icon?: string }; important?: { icon?: string }; warning?: { icon?: string }; caution?: { icon?: string } }; 
+    resolvedLucideSvgs?: Record<string, string>;
 }): Promise<string> {
     if (!content) return '';
 
@@ -174,14 +211,15 @@ async function contentToTypst(content: string, context: {
                 pageNumberOffset: context.pageNumberOffset,
                 variables: context.variables,
                 figures: context.figures,
-                alerts: context.alerts
+                alerts: context.alerts,
+                resolvedLucideSvgs: context.resolvedLucideSvgs
             });
         }
     } catch {
         // Not JSON, assume markdown string
     }
 
-    return markdownToTypst(content, { figures: context.figures, alerts: context.alerts }).trim();
+    return markdownToTypst(content, { figures: context.figures, alerts: context.alerts, resolvedLucideSvgs: context.resolvedLucideSvgs }).trim();
 }
 
 /**
@@ -208,10 +246,15 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
     // Pre-process images (needs DOM/IndexedDB)
     const markdownWithImages = await convertIndexedDbImagesToBase64(markdown || '');
     const variables = parseVariablesFromFrontmatter(markdownWithImages);
+
+    // Resolve custom Lucide alert icons to SVG for PDF
+    const resolvedLucideSvgs = await resolveLucideIconsFromAlerts(settings?.alerts);
+
     const typstBody = markdownToTypst(markdownWithImages, {
         tables: settings?.tables,
         figures: settings?.figures,
-        alerts: settings?.alerts
+        alerts: settings?.alerts,
+        resolvedLucideSvgs
     });
 
     // Prepare Header/Footer/Front Page
@@ -224,17 +267,17 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
 
     if (settings?.header?.enabled && settings?.header?.content) {
         const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);
-        headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
+        headerContent = await contentToTypst(headerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts, resolvedLucideSvgs });
     }
 
     if (settings?.footer?.enabled && settings?.footer?.content) {
         const footerWithImages = await convertIndexedDbImagesToBase64(settings.footer.content);
-        footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts });
+        footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts, resolvedLucideSvgs });
     }
 
     if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
         const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
-        frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts });
+        frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts, resolvedLucideSvgs });
     }
 
     // Generate Preamble

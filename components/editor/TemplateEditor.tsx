@@ -2,6 +2,9 @@
 
 import { useStore, TemplateVariable } from "@/lib/store";
 import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle } from "lucide-react";
+import { ColorInput } from "./ColorInput";
+import * as LucideIcons from "lucide-react";
+import { DynamicIcon } from "lucide-react/dynamic";
 import { Input } from "@/components/plate-ui/input";
 import { Button } from "@/components/plate-ui/button";
 import { useState, useEffect, useMemo, Fragment } from "react";
@@ -13,6 +16,12 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/plate-ui/dropdown-menu";
+import { IconPickerDialog } from "./IconPickerDialog";
+
+/** Convert kebab-case to PascalCase for Lucide icon lookup (e.g. "align-horizontal-justify-center" -> "AlignHorizontalJustifyCenter"). */
+function kebabToPascal(s: string): string {
+    return s.replace(/(?:^|-)([a-z])/g, (_, c) => c.toUpperCase());
+}
 
 // Available fonts in Typst WASM compiler (from typst.ts text assets)
 // These are the only built-in fonts that work for PDF export
@@ -58,6 +67,8 @@ export function TemplateEditor() {
 
     const [settings, setSettings] = useState(template?.settings);
     const [activeHeadingLevel, setActiveHeadingLevel] = useState<'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>('h1');
+    const [activeAlertType, setActiveAlertType] = useState<'note' | 'tip' | 'important' | 'warning' | 'caution'>('note');
+    const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
     // Update local settings when template changes or becomes available
     useEffect(() => {
@@ -113,14 +124,14 @@ export function TemplateEditor() {
         { id: 'typography', label: 'Typography', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'figures', label: 'Figures', icon: ImageIcon },
-        { id: 'alerts', label: 'Alert Blocks', icon: AlertCircle },
         { id: 'tables', label: 'Tables', icon: TableIcon },
-        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
         { id: 'front-page', label: 'Front Page', icon: FileText },
         { id: 'outline', label: 'Index', icon: List },
         { id: 'header', label: 'Header', icon: ArrowUpFromLine },
         { id: 'footer', label: 'Footer', icon: ArrowDownToLine },
         { id: 'variables', label: 'Variables', icon: Variable },
+        { id: 'alerts', label: 'Alert Blocks', icon: AlertCircle },
+        { id: 'code-blocks', label: 'Code Blocks', icon: CodeIcon },
     ], []);
 
     const [activeSection, setActiveSection] = useState('page-settings');
@@ -581,25 +592,12 @@ export function TemplateEditor() {
 
                             {/* Background & Watermark */}
                             <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border">
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                    <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                        <div className="h-12 w-12 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" style={{ backgroundColor: settings.backgroundColor }}>
-                                            <input
-                                                type="color"
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                value={settings.backgroundColor}
-                                                onChange={(e) => updateSetting('backgroundColor', e.target.value)}
-                                            />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            className="flex-1 bg-transparent border-none text-sm font-bold text-foreground outline-none uppercase tracking-wider"
-                                            value={settings.backgroundColor}
-                                            onChange={(e) => updateSetting('backgroundColor', e.target.value)}
-                                        />
-                                    </div>
-                                </div>
+                                <ColorInput
+                                    label="Background Color"
+                                    value={settings.backgroundColor || ''}
+                                    onChange={(v) => updateSetting('backgroundColor', v)}
+                                    defaultValue="#ffffff"
+                                />
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Watermark Text</label>
                                     <input
@@ -696,26 +694,12 @@ export function TemplateEditor() {
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Default Text Color</label>
-                                <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                    <div className="h-12 w-12 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" style={{ backgroundColor: settings.textColor }}>
-                                        <input
-                                            type="color"
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                            value={settings.textColor}
-                                            onChange={(e) => updateSetting('textColor', e.target.value)}
-                                        />
-                                    </div>
-                                    <input
-                                        type="text"
-                                        className="flex-1 bg-transparent border-none text-sm font-bold text-foreground outline-none uppercase tracking-wider"
-                                        value={settings.textColor}
-                                        onChange={(e) => updateSetting('textColor', e.target.value)}
-                                    />
-                                    <div className="h-2 w-2 rounded-full bg-muted-foreground/20 mr-4 group-hover:bg-muted-foreground/40 transition-colors" />
-                                </div>
-                            </div>
+                            <ColorInput
+                                label="Default Text Color"
+                                value={settings.textColor || ''}
+                                onChange={(v) => updateSetting('textColor', v)}
+                                defaultValue="#000000"
+                            />
                         </div>
                     </section>
 
@@ -760,25 +744,13 @@ export function TemplateEditor() {
                                         placeholder="e.g. 32"
                                     />
                                 </div>
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
-                                    <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                        <div className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative" style={{ backgroundColor: (settings as any)[activeHeadingLevel].color }}>
-                                            <input
-                                                type="color"
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                value={(settings as any)[activeHeadingLevel].color}
-                                                onChange={(e) => updateSetting(`${activeHeadingLevel}.color`, e.target.value)}
-                                            />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                            value={(settings as any)[activeHeadingLevel].color}
-                                            onChange={(e) => updateSetting(`${activeHeadingLevel}.color`, e.target.value)}
-                                        />
-                                    </div>
-                                </div>
+                                <ColorInput
+                                    label="Color"
+                                    size="sm"
+                                    value={(settings as any)[activeHeadingLevel].color || ''}
+                                    onChange={(v) => updateSetting(`${activeHeadingLevel}.color`, v)}
+                                    defaultValue="#000000"
+                                />
                             </div>
 
                             <div className="grid grid-cols-2 gap-6">
@@ -1136,40 +1108,6 @@ export function TemplateEditor() {
                         </div>
                     </section>
 
-                    {/* Alerts Section */}
-                    <section id="section-alerts" className="space-y-8 scroll-mt-16">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <AlertCircle size={22} className="text-foreground" />
-                            </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Alert blocks</h2>
-                        </div>
-
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
-                            {/* Show Header Toggle */}
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <label className="text-base font-semibold text-foreground">Show alert label</label>
-                                    <p className="text-sm text-muted-foreground">
-                                        When enabled, alerts show a bold header (e.g. NOTE, TIP) and an icon. When disabled, only a larger icon is shown on the left.
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => updateSetting('alerts.showHeader', !settings.alerts?.showHeader)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
-                                        settings.alerts?.showHeader !== false ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.alerts?.showHeader !== false ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-                        </div>
-                    </section>
-
                     {/* Tables Section */}
                     <section id="section-tables" className="space-y-8 scroll-mt-16">
                         <div className="flex items-center gap-4">
@@ -1312,38 +1250,14 @@ export function TemplateEditor() {
                                         />
                                     </div>
 
-                                    {/* Border Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.tables?.border?.color || '#000000' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.border?.color || '#000000'}
-                                                    onChange={(e) => updateSetting('tables.border.color', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.border?.color || ''}
-                                                onChange={(e) => updateSetting('tables.border.color', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.border?.color && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.border.color', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
+                                    <ColorInput
+                                        label="Color"
+                                        size="sm"
+                                        value={settings.tables?.border?.color || ''}
+                                        onChange={(v) => updateSetting('tables.border.color', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
                                 </div>
                             </div>
 
@@ -1391,73 +1305,24 @@ export function TemplateEditor() {
                                     </div>
                                 </div>
 
-                                {/* Header Colors - Background and Text */}
+                                {/* Header Colors - Background and Text (inline) */}
                                 <div className="grid grid-cols-2 gap-6">
-                                    {/* Header Background Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.tables?.headerStyle?.backgroundColor || '#f4f4f4' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.headerStyle?.backgroundColor || '#f4f4f4'}
-                                                    onChange={(e) => updateSetting('tables.headerStyle.backgroundColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.headerStyle?.backgroundColor || ''}
-                                                onChange={(e) => updateSetting('tables.headerStyle.backgroundColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.headerStyle?.backgroundColor && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.headerStyle.backgroundColor', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Header Text Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.tables?.headerStyle?.textColor || '#000000' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.headerStyle?.textColor || '#000000'}
-                                                    onChange={(e) => updateSetting('tables.headerStyle.textColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.headerStyle?.textColor || ''}
-                                                onChange={(e) => updateSetting('tables.headerStyle.textColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.headerStyle?.textColor && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.headerStyle.textColor', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
+                                    <ColorInput
+                                        label="Background Color"
+                                        size="sm"
+                                        value={settings.tables?.headerStyle?.backgroundColor || ''}
+                                        onChange={(v) => updateSetting('tables.headerStyle.backgroundColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
+                                    <ColorInput
+                                        label="Text Color"
+                                        size="sm"
+                                        value={settings.tables?.headerStyle?.textColor || ''}
+                                        onChange={(v) => updateSetting('tables.headerStyle.textColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
                                 </div>
 
                                 {/* Header Text Alignment */}
@@ -1548,73 +1413,24 @@ export function TemplateEditor() {
                                     </div>
                                 </div>
 
-                                {/* Cells Colors - Background and Text */}
+                                {/* Cells Colors - Background and Text (inline) */}
                                 <div className="grid grid-cols-2 gap-6">
-                                    {/* Cells Background Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.tables?.cellStyle?.backgroundColor || '#ffffff' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.cellStyle?.backgroundColor || '#ffffff'}
-                                                    onChange={(e) => updateSetting('tables.cellStyle.backgroundColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.cellStyle?.backgroundColor || ''}
-                                                onChange={(e) => updateSetting('tables.cellStyle.backgroundColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.cellStyle?.backgroundColor && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.cellStyle.backgroundColor', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Cells Text Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Color</label>
-                                        <div className="flex items-center gap-4 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.tables?.cellStyle?.textColor || '#000000' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.tables?.cellStyle?.textColor || '#000000'}
-                                                    onChange={(e) => updateSetting('tables.cellStyle.textColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.tables?.cellStyle?.textColor || ''}
-                                                onChange={(e) => updateSetting('tables.cellStyle.textColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.tables?.cellStyle?.textColor && (
-                                                <button
-                                                    onClick={() => updateSetting('tables.cellStyle.textColor', '')}
-                                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
+                                    <ColorInput
+                                        label="Background Color"
+                                        size="sm"
+                                        value={settings.tables?.cellStyle?.backgroundColor || ''}
+                                        onChange={(v) => updateSetting('tables.cellStyle.backgroundColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
+                                    <ColorInput
+                                        label="Text Color"
+                                        size="sm"
+                                        value={settings.tables?.cellStyle?.textColor || ''}
+                                        onChange={(v) => updateSetting('tables.cellStyle.textColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
                                 </div>
 
                                 {/* Cell Text Alignment */}
@@ -1658,289 +1474,6 @@ export function TemplateEditor() {
                                             <AlignRight size={16} />
                                         </button>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Code Blocks Section */}
-                    <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
-                                <CodeIcon size={22} className="text-foreground" />
-                            </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Code Blocks</h2>
-                        </div>
-
-                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
-                            {/* Theme Preset Dropdown */}
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div
-                                                    className="w-5 h-5 rounded border border-border"
-                                                    style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
-                                                />
-                                                <span>{(() => {
-                                                    const bg = settings.codeBlocks?.backgroundColor || '#f6f8fa';
-                                                    const presets: Record<string, string> = {
-                                                        '#f6f8fa': 'GitHub Light',
-                                                        '#fafafa': 'One Light',
-                                                        '#fdf6e3': 'Solarized Light',
-                                                        '#f5f5f5': 'Light Gray',
-                                                        '#fffffe': 'Nord Light',
-                                                        '#1e1e1e': 'VS Code Dark',
-                                                        '#282c34': 'One Dark',
-                                                        '#282a36': 'Dracula',
-                                                        '#24292e': 'GitHub Dark',
-                                                        '#272822': 'Monokai',
-                                                        '#002b36': 'Solarized Dark',
-                                                    };
-                                                    return presets[bg] || 'Custom';
-                                                })()}</span>
-                                            </div>
-                                            <ChevronDown size={16} className="text-muted-foreground" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[200px]">
-                                        {/* Light Themes */}
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#f6f8fa');
-                                            updateSetting('codeBlocks.borderColor', '#d0d7de');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f6f8fa' }} />
-                                                <span>GitHub Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fafafa');
-                                            updateSetting('codeBlocks.borderColor', '#e5e5e5');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fafafa' }} />
-                                                <span>One Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fdf6e3');
-                                            updateSetting('codeBlocks.borderColor', '#eee8d5');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fdf6e3' }} />
-                                                <span>Solarized Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#f5f5f5');
-                                            updateSetting('codeBlocks.borderColor', '#e0e0e0');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f5f5f5' }} />
-                                                <span>Light Gray</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#fffffe');
-                                            updateSetting('codeBlocks.borderColor', '#e5e9f0');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fffffe' }} />
-                                                <span>Nord Light</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        {/* Dark Themes */}
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#1e1e1e');
-                                            updateSetting('codeBlocks.borderColor', '#3c3c3c');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#1e1e1e' }} />
-                                                <span>VS Code Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#282c34');
-                                            updateSetting('codeBlocks.borderColor', '#3e4451');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282c34' }} />
-                                                <span>One Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#282a36');
-                                            updateSetting('codeBlocks.borderColor', '#44475a');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282a36' }} />
-                                                <span>Dracula</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#24292e');
-                                            updateSetting('codeBlocks.borderColor', '#444d56');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#24292e' }} />
-                                                <span>GitHub Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#272822');
-                                            updateSetting('codeBlocks.borderColor', '#3e3d32');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#272822' }} />
-                                                <span>Monokai</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            updateSetting('codeBlocks.backgroundColor', '#002b36');
-                                            updateSetting('codeBlocks.borderColor', '#073642');
-                                        }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#002b36' }} />
-                                                <span>Solarized Dark</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            </div>
-
-                            {/* Show Language Toggle */}
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <label className="text-base font-semibold text-foreground">Show language</label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Display a language identifier tab in the top-right corner
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => updateSetting('codeBlocks.showLanguage', !settings.codeBlocks?.showLanguage)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
-                                        settings.codeBlocks?.showLanguage ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.codeBlocks?.showLanguage ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-
-                            {/* Show Line Numbers Toggle */}
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-1">
-                                    <label className="text-base font-semibold text-foreground">Show line numbers</label>
-                                    <p className="text-sm text-muted-foreground">
-                                        Display line numbers on the left side of code blocks
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => updateSetting('codeBlocks.showLineNumbers', settings.codeBlocks?.showLineNumbers === false ? true : false)}
-                                    className={cn(
-                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
-                                        settings.codeBlocks?.showLineNumbers !== false ? "bg-primary" : "bg-muted-foreground/30"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
-                                        settings.codeBlocks?.showLineNumbers !== false ? "left-7" : "left-1"
-                                    )} />
-                                </button>
-                            </div>
-
-                            {/* Background and Border Colors */}
-                            <div className="pt-6 border-t border-border space-y-6">
-                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Appearance</h3>
-
-                                <div className="grid grid-cols-2 gap-6">
-                                    {/* Background Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Background Color</label>
-                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.codeBlocks?.backgroundColor || '#f6f8fa'}
-                                                    onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.codeBlocks?.backgroundColor || ''}
-                                                onChange={(e) => updateSetting('codeBlocks.backgroundColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.codeBlocks?.backgroundColor && (
-                                                <button
-                                                    onClick={() => updateSetting('codeBlocks.backgroundColor', '')}
-                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Border Color */}
-                                    <div className="space-y-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Color</label>
-                                        <div className="flex items-center gap-3 p-2 bg-muted/50 border border-border rounded-2xl group transition-all hover:bg-muted">
-                                            <div
-                                                className="h-10 w-10 shrink-0 rounded-xl border-2 border-background shadow-sm overflow-hidden p-0 relative"
-                                                style={{ backgroundColor: settings.codeBlocks?.borderColor || '#e0e0e0' }}
-                                            >
-                                                <input
-                                                    type="color"
-                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                    value={settings.codeBlocks?.borderColor || '#e0e0e0'}
-                                                    onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                className="flex-1 min-w-0 bg-transparent border-none text-xs font-bold text-foreground outline-none uppercase tracking-wider"
-                                                value={settings.codeBlocks?.borderColor || ''}
-                                                onChange={(e) => updateSetting('codeBlocks.borderColor', e.target.value)}
-                                                placeholder="None"
-                                            />
-                                            {settings.codeBlocks?.borderColor && (
-                                                <button
-                                                    onClick={() => updateSetting('codeBlocks.borderColor', '')}
-                                                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Border Width */}
-                                <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Width</label>
-                                    <select
-                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
-                                        value={settings.codeBlocks?.borderWidth || '1'}
-                                        onChange={(e) => updateSetting('codeBlocks.borderWidth', e.target.value)}
-                                    >
-                                        <option value="0">None</option>
-                                        <option value="0.5">0.5pt</option>
-                                        <option value="1">1pt</option>
-                                        <option value="1.5">1.5pt</option>
-                                        <option value="2">2pt</option>
-                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -2361,6 +1894,402 @@ export function TemplateEditor() {
                                     <Plus size={16} className="mr-2" />
                                     Add Variable
                                 </Button>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Alerts Section */}
+                    <section id="section-alerts" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <AlertCircle size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Alert blocks</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Show Header Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show alert label</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        When enabled, alerts show a bold header (e.g. NOTE, TIP) and an icon. When disabled, only a larger icon is shown on the left.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('alerts.showHeader', !settings.alerts?.showHeader)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.alerts?.showHeader !== false ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.alerts?.showHeader !== false ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Alert Customization */}
+                            <div className="pt-6 border-t border-border space-y-8">
+                                
+                                {/* Alert Type Selector */}
+                                <div className="flex items-center gap-4 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                    {(['note', 'tip', 'important', 'warning', 'caution'] as const).map((alertType) => {
+                                        const typeLabel = alertType.charAt(0).toUpperCase() + alertType.slice(1);
+                                        return (
+                                            <button
+                                                key={alertType}
+                                                onClick={() => setActiveAlertType(alertType)}
+                                                className={cn(
+                                                    "px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                                                    activeAlertType === alertType
+                                                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                        : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                            >
+                                                {typeLabel}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Customization Options for Selected Alert Type */}
+                                {(() => {
+                                    /* Match actual alert block defaults: label = uppercase type, icon = Lucide. All colors hex. */
+                                    const defaults: Record<string, { icon: string; text: string; labelColor: string; backgroundColor: string }> = {
+                                        'note': { icon: 'lucide:info', text: 'NOTE', labelColor: '#0070f3', backgroundColor: '#e6f2ff' },
+                                        'tip': { icon: 'lucide:lightbulb', text: 'TIP', labelColor: '#38b2ac', backgroundColor: '#e6f7f5' },
+                                        'important': { icon: 'lucide:circle-alert', text: 'IMPORTANT', labelColor: '#9f7aea', backgroundColor: '#f3e8ff' },
+                                        'warning': { icon: 'lucide:triangle-alert', text: 'WARNING', labelColor: '#ed8936', backgroundColor: '#fff4e6' },
+                                        'caution': { icon: 'lucide:siren', text: 'CAUTION', labelColor: '#f56565', backgroundColor: '#ffebee' },
+                                    };
+                                    const defaultValues = defaults[activeAlertType];
+                                    const typeSettings = settings.alerts?.[activeAlertType];
+
+                                    return (
+                                        <div className="grid grid-cols-2 gap-6">
+                                            {/* Label Color | Label | Icon — inline */}
+                                            <div className="space-y-3 col-span-2">
+                                                <div className="flex flex-wrap items-end gap-3">
+                                                    <ColorInput
+                                                        inline
+                                                        size="sm"
+                                                        value={typeSettings?.labelColor || ''}
+                                                        onChange={(v) => updateSetting(`alerts.${activeAlertType}.labelColor`, v)}
+                                                        defaultValue={defaultValues.labelColor}
+                                                        className="shrink-0"
+                                                    />
+                                                    {/* Label — defaults to alert type (Note, Tip, etc.) */}
+                                                    <div className="flex-1 min-w-[120px]">
+                                                        <input
+                                                            type="text"
+                                                            className="w-full h-[54px] bg-muted/50 border border-border rounded-2xl px-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                            value={typeSettings?.text ?? defaultValues.text}
+                                                            onChange={(e) => updateSetting(`alerts.${activeAlertType}.text`, e.target.value)}
+                                                            placeholder={defaultValues.text}
+                                                        />
+                                                    </div>
+                                                    {/* Icon */}
+                                                    <IconPickerDialog
+                                                        open={iconPickerOpen}
+                                                        onOpenChange={setIconPickerOpen}
+                                                        onSelect={(icon) => {
+                                                            updateSetting(`alerts.${activeAlertType}.icon`, icon);
+                                                        }}
+                                                        currentIcon={typeSettings?.icon}
+                                                    >
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="h-[54px] w-[54px] bg-muted/50 border border-border rounded-2xl text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-center shrink-0"
+                                                            onClick={() => setIconPickerOpen(true)}
+                                                        >
+                                                            {(() => {
+                                                                const iconValue = typeSettings?.icon || defaultValues.icon;
+                                                                if (iconValue.includes(':')) {
+                                                                    const [, iconName] = iconValue.split(':');
+                                                                    const pascal = kebabToPascal(iconName);
+                                                                    const IconComponent = (LucideIcons as any)[iconName] ?? (LucideIcons as any)[pascal];
+                                                                    if (IconComponent) {
+                                                                        return <IconComponent className="size-5" />;
+                                                                    }
+                                                                    try {
+                                                                        return <DynamicIcon name={pascal as any} className="size-5" />;
+                                                                    } catch {
+                                                                        return null;
+                                                                    }
+                                                                }
+                                                                return <span className="text-lg">{iconValue}</span>;
+                                                            })()}
+                                                        </Button>
+                                                    </IconPickerDialog>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground ml-1">
+                                                    Label defaults to {defaultValues.text}. Applied to label, icon, and border.
+                                                </p>
+                                            </div>
+
+                                            {/* Background Color | Text Color — inline */}
+                                            <div className="flex flex-wrap items-end gap-4 col-span-2">
+                                                <ColorInput
+                                                    label="Background Color"
+                                                    size="sm"
+                                                    value={typeSettings?.backgroundColor || ''}
+                                                    onChange={(v) => updateSetting(`alerts.${activeAlertType}.backgroundColor`, v)}
+                                                    defaultValue={defaultValues.backgroundColor}
+                                                    className="min-w-[200px]"
+                                                />
+                                                <ColorInput
+                                                    label="Text Color"
+                                                    size="sm"
+                                                    value={typeSettings?.textColor || ''}
+                                                    onChange={(v) => updateSetting(`alerts.${activeAlertType}.textColor`, v)}
+                                                    defaultValue=""
+                                                    placeholder="Default text color"
+                                                    className="min-w-[200px]"
+                                                />
+                                            </div>
+                                            <p className="text-xs text-muted-foreground ml-1 col-span-2">
+                                                Body text only. If not set, uses the default typography text color.
+                                            </p>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Code Blocks Section */}
+                    <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
+                                <CodeIcon size={22} className="text-foreground" />
+                            </div>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Code Blocks</h2>
+                        </div>
+
+                        <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
+                            {/* Theme Preset Dropdown */}
+                            <div className="space-y-3">
+                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Theme</label>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div
+                                                    className="w-5 h-5 rounded border border-border"
+                                                    style={{ backgroundColor: settings.codeBlocks?.backgroundColor || '#f6f8fa' }}
+                                                />
+                                                <span>{(() => {
+                                                    const bg = settings.codeBlocks?.backgroundColor || '#f6f8fa';
+                                                    const presets: Record<string, string> = {
+                                                        '#f6f8fa': 'GitHub Light',
+                                                        '#fafafa': 'One Light',
+                                                        '#fdf6e3': 'Solarized Light',
+                                                        '#f5f5f5': 'Light Gray',
+                                                        '#fffffe': 'Nord Light',
+                                                        '#1e1e1e': 'VS Code Dark',
+                                                        '#282c34': 'One Dark',
+                                                        '#282a36': 'Dracula',
+                                                        '#24292e': 'GitHub Dark',
+                                                        '#272822': 'Monokai',
+                                                        '#002b36': 'Solarized Dark',
+                                                    };
+                                                    return presets[bg] || 'Custom';
+                                                })()}</span>
+                                            </div>
+                                            <ChevronDown size={16} className="text-muted-foreground" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[200px]">
+                                        {/* Light Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f6f8fa');
+                                            updateSetting('codeBlocks.borderColor', '#d0d7de');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f6f8fa' }} />
+                                                <span>GitHub Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fafafa');
+                                            updateSetting('codeBlocks.borderColor', '#e5e5e5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fafafa' }} />
+                                                <span>One Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fdf6e3');
+                                            updateSetting('codeBlocks.borderColor', '#eee8d5');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fdf6e3' }} />
+                                                <span>Solarized Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#f5f5f5');
+                                            updateSetting('codeBlocks.borderColor', '#e0e0e0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#f5f5f5' }} />
+                                                <span>Light Gray</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#fffffe');
+                                            updateSetting('codeBlocks.borderColor', '#e5e9f0');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#fffffe' }} />
+                                                <span>Nord Light</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        {/* Dark Themes */}
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#1e1e1e');
+                                            updateSetting('codeBlocks.borderColor', '#3c3c3c');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#1e1e1e' }} />
+                                                <span>VS Code Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282c34');
+                                            updateSetting('codeBlocks.borderColor', '#3e4451');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282c34' }} />
+                                                <span>One Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#282a36');
+                                            updateSetting('codeBlocks.borderColor', '#44475a');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#282a36' }} />
+                                                <span>Dracula</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#24292e');
+                                            updateSetting('codeBlocks.borderColor', '#444d56');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#24292e' }} />
+                                                <span>GitHub Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#272822');
+                                            updateSetting('codeBlocks.borderColor', '#3e3d32');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#272822' }} />
+                                                <span>Monokai</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            updateSetting('codeBlocks.backgroundColor', '#002b36');
+                                            updateSetting('codeBlocks.borderColor', '#073642');
+                                        }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded border border-border" style={{ backgroundColor: '#002b36' }} />
+                                                <span>Solarized Dark</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
+
+                            {/* Show Language Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show language</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display a language identifier tab in the top-right corner
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLanguage', !settings.codeBlocks?.showLanguage)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLanguage ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLanguage ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Show Line Numbers Toggle */}
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <label className="text-base font-semibold text-foreground">Show line numbers</label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Display line numbers on the left side of code blocks
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => updateSetting('codeBlocks.showLineNumbers', settings.codeBlocks?.showLineNumbers === false ? true : false)}
+                                    className={cn(
+                                        "w-14 h-8 rounded-full transition-all duration-300 relative shrink-0 ml-4",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "bg-primary" : "bg-muted-foreground/30"
+                                    )}
+                                >
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                        settings.codeBlocks?.showLineNumbers !== false ? "left-7" : "left-1"
+                                    )} />
+                                </button>
+                            </div>
+
+                            {/* Background and Border Colors */}
+                            <div className="pt-6 border-t border-border space-y-6">
+                                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Appearance</h3>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    <ColorInput
+                                        label="Background Color"
+                                        size="sm"
+                                        value={settings.codeBlocks?.backgroundColor || ''}
+                                        onChange={(v) => updateSetting('codeBlocks.backgroundColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
+                                    <ColorInput
+                                        label="Border Color"
+                                        size="sm"
+                                        value={settings.codeBlocks?.borderColor || ''}
+                                        onChange={(v) => updateSetting('codeBlocks.borderColor', v)}
+                                        defaultValue=""
+                                        placeholder="None"
+                                    />
+                                </div>
+
+                                {/* Border Width */}
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Border Width</label>
+                                    <select
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border appearance-none cursor-pointer"
+                                        value={settings.codeBlocks?.borderWidth || '1'}
+                                        onChange={(e) => updateSetting('codeBlocks.borderWidth', e.target.value)}
+                                    >
+                                        <option value="0">None</option>
+                                        <option value="0.5">0.5pt</option>
+                                        <option value="1">1pt</option>
+                                        <option value="1.5">1.5pt</option>
+                                        <option value="2">2pt</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </section>
