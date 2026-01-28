@@ -8,7 +8,7 @@
  * Manages user access levels (basic/premium) for feature gating.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import {
     onAuthStateChanged,
     signInWithGoogle,
@@ -78,9 +78,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [isConfigured] = useState(() => isFirebaseConfigured());
     const [accessLevel, setAccessLevel] = useState<UserAccessLevel | null>(null);
     const [showBasicUserPopup, setShowBasicUserPopup] = useState(false);
+    const previousUserRef = useRef<User | null>(null);
+    const isInitialMountRef = useRef(true);
 
     // Compute if user has sync access (premium only)
     const hasSyncAccess = accessLevel === 'premium';
+
+    // Helper function to check if user has seen the popup
+    const hasSeenPopup = (userId: string): boolean => {
+        const key = `basic-account-popup-seen-${userId}`;
+        return localStorage.getItem(key) === 'true';
+    };
+
+    // Helper function to mark popup as seen
+    const markPopupAsSeen = (userId: string): void => {
+        const key = `basic-account-popup-seen-${userId}`;
+        localStorage.setItem(key, 'true');
+    };
 
     // Listen for auth state changes
     useEffect(() => {
@@ -90,7 +104,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const unsubscribe = onAuthStateChanged(async (user) => {
+            // Check if this is a fresh sign-in (transition from no user to user)
+            // Only consider it fresh if it's not the initial mount
+            const isFreshSignIn = !isInitialMountRef.current && !previousUserRef.current && user !== null;
+            
             setUser(user);
+            previousUserRef.current = user;
+            
+            // Mark that initial mount is complete after first auth state check
+            if (isInitialMountRef.current) {
+                isInitialMountRef.current = false;
+            }
 
             // Initialize or stop sync service based on auth state and access level
             if (user) {
@@ -143,10 +167,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             });
                     }
                 } else {
-                    // Basic user - show popup and don't start sync
+                    // Basic user - show popup only on fresh sign-in and if not seen before
                     console.log('[Auth] Basic user - sync disabled');
-                    setShowBasicUserPopup(true);
                     syncService.stop();
+                    
+                    if (isFreshSignIn && !hasSeenPopup(user.uid)) {
+                        setShowBasicUserPopup(true);
+                    }
                 }
             } else {
                 setAccessLevel(null);
@@ -205,7 +232,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             {children}
             
             {/* Basic User Popup - shown when a basic user signs in */}
-            <AlertDialog open={showBasicUserPopup} onOpenChange={setShowBasicUserPopup}>
+            <AlertDialog open={showBasicUserPopup} onOpenChange={(open) => {
+                setShowBasicUserPopup(open);
+                if (!open && user) {
+                    // Mark popup as seen when closed
+                    markPopupAsSeen(user.uid);
+                }
+            }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Basic Account</AlertDialogTitle>
@@ -218,7 +251,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogAction onClick={() => setShowBasicUserPopup(false)}>
+                        <AlertDialogAction onClick={() => {
+                            setShowBasicUserPopup(false);
+                            if (user) {
+                                markPopupAsSeen(user.uid);
+                            }
+                        }}>
                             Got it
                         </AlertDialogAction>
                     </AlertDialogFooter>
