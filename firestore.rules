@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User data: only the owner can read/write their own data
+    match /artifacts/{appId}/users/{userId}/{collection}/{docId} {
+      allow read, write: if request.auth != null 
+                         && request.auth.uid == userId;
+    }
+    
+    // User access management: read-only for authenticated users, no write access
+    // Write access must be done via Admin SDK (bypasses security rules)
+    // Note: If user document doesn't exist, read returns null (not an error)
+    // The application will fallback to 'basic' access level for users not in collection
+    match /artifacts/{appId}/users_access/{userId} {
+      // Allow any authenticated user to read their own access level
+      // Reading non-existent document returns null (handled in application code)
+      allow read: if request.auth != null 
+                  && request.auth.uid == userId;
+      
+      // Deny all write access from client SDK
+      // Only Admin SDK can write to this collection
+      allow write: if false;
+    }
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

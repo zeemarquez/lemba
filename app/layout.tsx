@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DisableBrowserZoom } from "@/components/disable-browser-zoom";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
+import { AuthProvider } from "@/components/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,15 +45,17 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <DisableBrowserZoom />
-          <div className="flex flex-col h-screen overflow-hidden">
-            <ElectronTitleBar />
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {children}
+          <AuthProvider>
+            <DisableBrowserZoom />
+            <div className="flex flex-col h-screen overflow-hidden">
+              <ElectronTitleBar />
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {children}
+              </div>
             </div>
-          </div>
-          {/* Global KaTeX styles for math rendering in editors */}
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" crossOrigin="anonymous" />
+            {/* Global KaTeX styles for math rendering in editors */}
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" crossOrigin="anonymous" />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

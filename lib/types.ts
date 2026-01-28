@@ -1,3 +1,24 @@
+// ==================== Sync Metadata ====================
+
+/**
+ * Base sync metadata for all syncable entities.
+ * Used for cloud sync with Firebase.
+ */
+export interface SyncMetadata {
+    syncId: string;        // UUID for cloud sync (separate from path/id)
+    updatedAt: number;     // Timestamp for Last-Write-Wins (LWW)
+    isDeleted: boolean;    // Soft delete flag for sync
+    userId: string | null; // Owner's Firebase UID (null if local-only)
+}
+
+/**
+ * Generates a new sync ID (UUID v4)
+ */
+export function generateSyncId(): string {
+    return crypto.randomUUID();
+}
+
+// ==================== File System Types ====================
 
 export interface FileNode {
     id: string; // relative path
@@ -161,7 +182,23 @@ export interface Template {
     }
 }
 
-export interface ImageEntry {
+// ==================== Storage Entry Types ====================
+
+/**
+ * File entry stored in IndexedDB (files store).
+ * Extends SyncMetadata for cloud sync support.
+ */
+export interface FileEntry extends SyncMetadata {
+    path: string;         // Relative path (also the IndexedDB key)
+    content: string;      // File content
+    type: 'file' | 'folder';
+}
+
+/**
+ * Image entry stored in IndexedDB (images store).
+ * Extends SyncMetadata for cloud sync support.
+ */
+export interface ImageEntry extends SyncMetadata {
     id: string;           // Unique ID for the image
     blob: Blob;           // The actual image data
     name: string;         // Original filename
@@ -170,7 +207,11 @@ export interface ImageEntry {
     createdAt: number;    // Timestamp when stored
 }
 
-export interface FontEntry {
+/**
+ * Font entry stored in IndexedDB (fonts store).
+ * Extends SyncMetadata for cloud sync support.
+ */
+export interface FontEntry extends SyncMetadata {
     id: string;           // Unique ID (family name usually)
     family: string;       // Font family name
     blob: Blob;           // The actual font file data

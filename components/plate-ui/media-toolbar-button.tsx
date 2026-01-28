@@ -88,12 +88,38 @@ export function MediaToolbarButton({
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [imageDialogOpen, setImageDialogOpen] = React.useState(false);
 
-  const { openFilePicker } = useFilePicker({
+  const { openFilePicker, errors: filePickerErrors } = useFilePicker({
     accept: currentConfig.accept,
     multiple: true,
     onFilesSelected: (data: any) => {
-      if (data.plainFiles) {
+      console.log('MediaToolbarButton files selected:', data);
+      
+      // Check for errors from file picker
+      if (filePickerErrors && filePickerErrors.length > 0) {
+        console.error('File picker errors:', filePickerErrors);
+        const errorMessages = filePickerErrors.map((err: any) => {
+          if (err.fileSizeTooSmall) return `File ${err.fileName} is too small`;
+          if (err.fileSizeTooBig) return `File ${err.fileName} is too large (${(err.fileSize / 1024 / 1024).toFixed(2)}MB)`;
+          if (err.readerError) return `Error reading ${err.fileName}: ${err.readerError.message}`;
+          return `Error with ${err.fileName || 'file'}`;
+        });
+        toast.error(`File upload errors: ${errorMessages.join(', ')}`);
+        return;
+      }
+      
+      if (!data || !data.plainFiles || data.plainFiles.length === 0) {
+        console.warn('No files selected or files were rejected');
+        if (filePickerErrors && filePickerErrors.length > 0) {
+          toast.error('Files were rejected. Please check file size and type.');
+        }
+        return;
+      }
+      
+      try {
         editor.getTransforms(PlaceholderPlugin).insert.media(data.plainFiles);
+      } catch (error) {
+        console.error('Error processing files in MediaToolbarButton:', error);
+        toast.error(`Failed to process files: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
   });
