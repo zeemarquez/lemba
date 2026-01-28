@@ -6,8 +6,6 @@ import {
   ChevronRightIcon,
   Columns3Icon,
   FileCodeIcon,
-  FileIcon,
-  FilmIcon,
   Heading1Icon,
   Heading2Icon,
   Heading3Icon,
@@ -16,8 +14,6 @@ import {
   ListIcon,
   ListOrderedIcon,
   MinusIcon,
-  PenToolIcon,
-  AudioLinesIcon,
   PilcrowIcon,
   PlusIcon,
   QuoteIcon,
@@ -153,26 +149,6 @@ const groups: Group[] = [
         label: 'Image',
         value: KEYS.img,
       },
-      {
-        icon: <FilmIcon />,
-        label: 'Video',
-        value: KEYS.video,
-      },
-      {
-        icon: <PenToolIcon />,
-        label: 'Audio',
-        value: KEYS.audio,
-      },
-      {
-        icon: <FileIcon />,
-        label: 'File',
-        value: KEYS.file,
-      },
-      {
-        icon: <FilmIcon />,
-        label: 'Embed',
-        value: KEYS.mediaEmbed,
-      },
     ].map((item) => ({
       ...item,
       onSelect: (editor, value) => {
@@ -198,11 +174,6 @@ const groups: Group[] = [
         icon: <RadicalIcon />,
         label: 'Equation',
         value: KEYS.equation,
-      },
-      {
-        icon: <PenToolIcon />,
-        label: 'Excalidraw',
-        value: KEYS.excalidraw,
       },
     ].map((item) => ({
       ...item,

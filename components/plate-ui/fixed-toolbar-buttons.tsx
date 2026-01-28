@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  ArrowUpToLineIcon,
   BaselineIcon,
   BoldIcon,
   HighlighterIcon,
@@ -14,7 +13,6 @@ import { useEditorReadOnly } from 'platejs/react';
 
 import { AlignToolbarButton } from './align-toolbar-button';
 import { CommentToolbarButton } from './comment-toolbar-button';
-import { ExportToolbarButton } from './export-toolbar-button';
 import { FontColorToolbarButton } from './font-color-toolbar-button';
 import { FontSizeToolbarButton } from './font-size-toolbar-button';
 import { RedoToolbarButton, UndoToolbarButton } from './history-toolbar-button';
@@ -64,12 +62,6 @@ export function FixedToolbarButtons() {
             <BulletedListToolbarButton />
             <LinkToolbarButton />
             <AlignToolbarButton />
-          </ToolbarGroup>
-
-          <ToolbarGroup>
-            <ExportToolbarButton>
-              <ArrowUpToLineIcon size={18} />
-            </ExportToolbarButton>
           </ToolbarGroup>
         </>
       )}
