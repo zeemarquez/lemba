@@ -2,6 +2,29 @@ const { app, BrowserWindow, shell, protocol, net, session, nativeTheme, ipcMain 
 const path = require('path');
 const fs = require('fs');
 
+// Try to load environment variables from .env file
+try {
+  const possiblePaths = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+    path.join(app.getAppPath(), '.env'),
+    path.join(app.getAppPath(), '.env.local'),
+    path.join(path.dirname(app.getPath('exe')), '.env'),
+    path.join(path.dirname(app.getPath('exe')), '.env.local'),
+  ];
+
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      console.log('[Electron] Loading env from:', envPath);
+      require('dotenv').config({ path: envPath });
+      // Break after first found to prefer more specific/closer ones
+      // although they usually won't exist in all places
+    }
+  }
+} catch (e) {
+  console.log('[Electron] Error loading .env file:', e.message);
+}
+
 // Theme colors for title bar
 const THEME_COLORS = {
   dark: '#0a0a0a',
@@ -79,12 +102,18 @@ function createWindow() {
   const isDarkMode = nativeTheme.shouldUseDarkColors;
   const backgroundColor = isDarkMode ? THEME_COLORS.dark : THEME_COLORS.light;
 
+  // Determine icon path
+  const iconPath = process.env.NODE_ENV === 'development'
+    ? path.join(__dirname, '..', 'public', 'favicon.png')
+    : path.join(getStaticPath(), 'favicon.png');
+
   // Create the browser window - frameless for custom title bar
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -130,7 +159,7 @@ function createWindow() {
 
   // Load the app
   const isDev = process.env.NODE_ENV === 'development';
-  
+
   if (isDev) {
     // Development: load from Next.js dev server
     mainWindow.loadURL('http://localhost:3000');
@@ -195,18 +224,18 @@ function registerProtocol() {
   protocol.handle('app', (request) => {
     const staticPath = getStaticPath();
     let urlPath = request.url.replace('app://.', '');
-    
+
     // Remove query string and hash
     urlPath = urlPath.split('?')[0].split('#')[0];
-    
+
     // Decode URI components
     urlPath = decodeURIComponent(urlPath);
-    
+
     // Default to index.html for root
     if (urlPath === '/' || urlPath === '') {
       urlPath = '/index.html';
     }
-    
+
     // Handle Next.js routing - if no extension, try .html
     if (!path.extname(urlPath) && !urlPath.endsWith('/')) {
       // Try with .html extension first
@@ -221,15 +250,15 @@ function registerProtocol() {
         }
       }
     }
-    
+
     const filePath = path.join(staticPath, urlPath);
-    
+
     // Security: ensure we don't serve files outside the static directory
     const normalizedPath = path.normalize(filePath);
     if (!normalizedPath.startsWith(path.normalize(staticPath))) {
       return new Response('Forbidden', { status: 403 });
     }
-    
+
     // Check if file exists
     if (!fs.existsSync(filePath)) {
       console.log('[Electron] File not found:', filePath);
@@ -240,7 +269,7 @@ function registerProtocol() {
       }
       return new Response('Not Found', { status: 404 });
     }
-    
+
     // Serve the file using net.fetch for proper handling
     return net.fetch('file://' + filePath);
   });
@@ -250,7 +279,7 @@ function registerProtocol() {
 app.whenReady().then(() => {
   // Register custom protocol before creating window
   registerProtocol();
-  
+
   createWindow();
 
   // On macOS, re-create window when dock icon is clicked
@@ -272,17 +301,17 @@ app.on('window-all-closed', () => {
 app.on('web-contents-created', (event, contents) => {
   contents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
-    
+
     // Allow app:// protocol for static export navigation
     if (parsedUrl.protocol === 'app:') {
       return;
     }
-    
+
     // Allow localhost for development
     if (parsedUrl.hostname === 'localhost') {
       return;
     }
-    
+
     // Block other navigations and open externally
     event.preventDefault();
     shell.openExternal(navigationUrl);

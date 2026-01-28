@@ -14,18 +14,31 @@ import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
+// Helper to get environment variable from either process.env or electronAPI
+const getEnvVar = (key: string): string | undefined => {
+    // 1. Try process.env (Next.js build-time inlining)
+    if (process.env[key]) return process.env[key];
+
+    // 2. Try window.electronAPI.env (Electron runtime)
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.env?.[key]) {
+        return (window as any).electronAPI.env[key];
+    }
+
+    return undefined;
+};
+
 // Firebase configuration from environment variables
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    apiKey: getEnvVar('NEXT_PUBLIC_FIREBASE_API_KEY'),
+    authDomain: getEnvVar('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN'),
+    projectId: getEnvVar('NEXT_PUBLIC_FIREBASE_PROJECT_ID'),
+    storageBucket: getEnvVar('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: getEnvVar('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: getEnvVar('NEXT_PUBLIC_FIREBASE_APP_ID'),
 };
 
 // App ID for Firestore document structure (can be customized per deployment)
-export const FIREBASE_APP_ID = process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID || 'modern-markdown-editor';
+export const FIREBASE_APP_ID = getEnvVar('NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID') || 'modern-markdown-editor';
 
 // Initialize Firebase (singleton pattern)
 let app: FirebaseApp;
@@ -38,10 +51,10 @@ function initializeFirebase() {
     } else {
         app = getApp();
     }
-    
+
     auth = getAuth(app);
     db = getFirestore(app);
-    
+
     return { app, auth, db };
 }
 
