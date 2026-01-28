@@ -283,7 +283,7 @@ class BrowserStorage {
         return entry.content;
     }
 
-    async createFile(path: string, content: string = ''): Promise<void> {
+    async createFile(path: string, content: string = ''): Promise<FileEntry> {
         // Check if exists
         try {
             await this.readFile(path);
