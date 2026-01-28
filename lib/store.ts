@@ -212,11 +212,16 @@ export const useStore = create<AppState>()(
                                 }
                             }
 
-                            // Sync other persisted fields
+                            // Sync other persisted fields - only if actually different
                             if (newState.state.openTabs !== undefined) {
-                                updates.openTabs = newState.state.openTabs;
+                                // Deep compare openTabs to avoid unnecessary updates that could cause loops
+                                const currentTabs = JSON.stringify(currentState.openTabs);
+                                const newTabs = JSON.stringify(newState.state.openTabs);
+                                if (currentTabs !== newTabs) {
+                                    updates.openTabs = newState.state.openTabs;
+                                }
                             }
-                            if (newState.state.currentView !== undefined) {
+                            if (newState.state.currentView !== undefined && newState.state.currentView !== currentState.currentView) {
                                 updates.currentView = newState.state.currentView;
                             }
 
@@ -728,7 +733,16 @@ export const useStore = create<AppState>()(
                         }
                     }
 
-                    if (!openTabs.some(tab => tab.id === path && tab.type === 'file')) {
+                    const currentState = get();
+                    const isAlreadyActive = currentState.activeFileId === path && currentState.currentView === 'file';
+                    const isInTabs = openTabs.some(tab => tab.id === path && tab.type === 'file');
+                    
+                    // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
+                    if (isAlreadyActive && isInTabs) {
+                        return;
+                    }
+                    
+                    if (!isInTabs) {
                         set(state => ({
                             activeFileId: path,
                             currentView: 'file',
@@ -860,22 +874,32 @@ export const useStore = create<AppState>()(
                 }),
                 setActiveTemplateCss: (css: string) => set({ activeTemplateCss: css }),
                 setEditorViewMode: (editorViewMode) => set({ editorViewMode }),
-                openTemplate: (id) => set((state) => {
+                openTemplate: (id) => {
+                    const state = get();
                     const template = state.templates.find(t => t.id === id);
-                    if (!state.openTabs.some(tab => tab.id === id && tab.type === 'template')) {
-                        return {
+                    const isAlreadyActive = state.activeTemplateId === id && state.currentView === 'template';
+                    const isInTabs = state.openTabs.some(tab => tab.id === id && tab.type === 'template');
+                    
+                    // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
+                    if (isAlreadyActive && isInTabs) {
+                        return;
+                    }
+                    
+                    if (!isInTabs) {
+                        set({
                             activeTemplateId: id,
                             activeTemplateCss: template ? template.css : state.activeTemplateCss,
                             currentView: 'template',
                             openTabs: [...state.openTabs, { id, type: 'template' }],
-                        };
+                        });
+                    } else {
+                        set({
+                            activeTemplateId: id,
+                            activeTemplateCss: template ? template.css : state.activeTemplateCss,
+                            currentView: 'template'
+                        });
                     }
-                    return {
-                        activeTemplateId: id,
-                        activeTemplateCss: template ? template.css : state.activeTemplateCss,
-                        currentView: 'template'
-                    };
-                }),
+                },
             };
         },
         {
