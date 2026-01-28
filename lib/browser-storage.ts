@@ -1,4 +1,5 @@
 import { FileNode, Template, ImageEntry, FontEntry, FileEntry, generateSyncId } from './types';
+import { compressImage } from './image-compression';
 
 const DB_NAME = 'markdown-editor-db';
 const DB_VERSION = 12; // Bumped for sync metadata migration
@@ -482,18 +483,34 @@ class BrowserStorage {
 
     /**
      * Store an image in IndexedDB
-     * @param file The image file to store
+     * @param file The image file to store (will be compressed if over 500KB)
      * @returns The stored image entry with its ID
      */
     async storeImage(file: File): Promise<ImageEntry> {
+        console.log(`[BrowserStorage] storeImage called for: ${file.name}, size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+        
+        // Try to compress image if it's over 500KB
+        // If compression fails, use original file
+        let fileToStore: File;
+        try {
+            console.log(`[BrowserStorage] Starting compression...`);
+            const compressionStart = Date.now();
+            fileToStore = await compressImage(file, 500 * 1024);
+            const compressionTime = Date.now() - compressionStart;
+            console.log(`[BrowserStorage] Compression completed in ${compressionTime}ms, final size: ${(fileToStore.size / 1024 / 1024).toFixed(2)}MB`);
+        } catch (compressionError) {
+            console.warn('[BrowserStorage] Image compression failed, storing original file:', compressionError);
+            fileToStore = file;
+        }
+        
         const id = this.generateImageId();
         const now = Date.now();
         const entry: ImageEntry = {
             id,
-            blob: file,
-            name: file.name,
-            type: file.type,
-            size: file.size,
+            blob: fileToStore,
+            name: fileToStore.name,
+            type: fileToStore.type,
+            size: fileToStore.size,
             createdAt: now,
             // Sync metadata
             syncId: generateSyncId(),
@@ -502,9 +519,16 @@ class BrowserStorage {
             userId: null
         };
 
-        await this.transaction(STORE_IMAGES, 'readwrite', store => {
-            store.put(entry);
-        });
+        console.log(`[BrowserStorage] Storing image entry with ID: ${id}`);
+        try {
+            await this.transaction(STORE_IMAGES, 'readwrite', store => {
+                store.put(entry);
+            });
+            console.log(`[BrowserStorage] Image stored successfully in IndexedDB`);
+        } catch (storageError) {
+            console.error('[BrowserStorage] Failed to store in IndexedDB:', storageError);
+            throw storageError;
+        }
 
         return entry;
     }

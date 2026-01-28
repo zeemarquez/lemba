@@ -8,6 +8,7 @@ import type {
 import { z } from 'zod';
 import type { OurFileRouter } from '@/lib/plate/uploadthing';
 import { browserStorage } from '@/lib/browser-storage';
+import { compressImage } from '@/lib/image-compression';
 
 export type UploadedFile<T = unknown> = ClientUploadedFileData<T>;
 
@@ -35,9 +36,19 @@ export function useUploadFile({
     setUploadingFile(file);
 
     try {
+      // Compress image if it's over 500KB before uploading
+      // Compression will return original file if it fails, so this is safe
+      let compressedFile: File;
+      try {
+        compressedFile = await compressImage(file, 500 * 1024);
+      } catch (compressionError) {
+        console.warn('Compression failed, using original file:', compressionError);
+        compressedFile = file;
+      }
+      
       const res = await uploadFiles('editorUploader', {
         ...props,
-        files: [file],
+        files: [compressedFile],
         onUploadProgress: ({ progress }) => {
           setProgress(Math.min(progress, 100));
         },
@@ -62,6 +73,15 @@ export function useUploadFile({
 
       // Store image locally in IndexedDB for persistence
       // This ensures images survive page refreshes and browser restarts
+      // Try to compress, but use original if compression fails
+      let compressedFile: File;
+      try {
+        compressedFile = await compressImage(file, 500 * 1024);
+      } catch (compressionError) {
+        console.warn('Compression failed in fallback, using original file:', compressionError);
+        compressedFile = file;
+      }
+      
       let progress = 0;
 
       const simulateProgress = async () => {
@@ -75,28 +95,34 @@ export function useUploadFile({
       // Start progress simulation
       const progressPromise = simulateProgress();
 
-      // Store image in IndexedDB
-      const imageEntry = await browserStorage.storeImage(file);
-      
-      // Wait for progress to complete for smooth UX
-      await progressPromise;
+      // Store image in IndexedDB (will try to compress again, but storeImage handles failures)
+      try {
+        const imageEntry = await browserStorage.storeImage(compressedFile);
+        
+        // Wait for progress to complete for smooth UX
+        await progressPromise;
 
-      // Create URL using our custom protocol that will be resolved later
-      // Format: indexeddb://images/{id}
-      const persistentUrl = `indexeddb://images/${imageEntry.id}`;
+        // Create URL using our custom protocol that will be resolved later
+        // Format: indexeddb://images/{id}
+        const persistentUrl = `indexeddb://images/${imageEntry.id}`;
 
-      const localUploadedFile = {
-        key: imageEntry.id,
-        appUrl: persistentUrl,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: persistentUrl,
-      } as UploadedFile;
+        const localUploadedFile = {
+          key: imageEntry.id,
+          appUrl: persistentUrl,
+          name: compressedFile.name,
+          size: compressedFile.size,
+          type: compressedFile.type,
+          url: persistentUrl,
+        } as UploadedFile;
 
-      setUploadedFile(localUploadedFile);
+        setUploadedFile(localUploadedFile);
 
-      return localUploadedFile;
+        return localUploadedFile;
+      } catch (storageError) {
+        console.error('Failed to store image in IndexedDB:', storageError);
+        toast.error('Failed to store image locally');
+        throw storageError;
+      }
     } finally {
       setProgress(0);
       setIsUploading(false);
