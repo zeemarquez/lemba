@@ -56,7 +56,3 @@ next-env.d.ts
 # Build metadata (local build tracking)
 build-metadata.json
 
-# Batch files (except build.bat which should be tracked)
-*.bat
-# PowerShell scripts (except copy-release-to-public.ps1 which should be tracked)
-*.ps1
