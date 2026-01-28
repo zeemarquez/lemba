@@ -7,6 +7,7 @@
 import {
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithCustomToken,
     signOut as firebaseSignOut,
     onAuthStateChanged as firebaseOnAuthStateChanged,
     User,
@@ -19,6 +20,25 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
+// Handle Deep Links for Auth (Electron only)
+if (typeof window !== 'undefined' && (window as any).electronAPI?.onDeepLink) {
+    (window as any).electronAPI.onDeepLink(async (url: string) => {
+        console.log('[Auth] Received deep link:', url);
+        try {
+            const urlObj = new URL(url);
+            const token = urlObj.searchParams.get('token');
+            if (token) {
+                console.log('[Auth] Found token in deep link, signing in...');
+                const auth = getFirebaseAuth();
+                await signInWithCustomToken(auth, token);
+                console.log('[Auth] Signed in with custom token');
+            }
+        } catch (error) {
+            console.error('[Auth] Error handling deep link:', error);
+        }
+    });
+}
+
 /**
  * Sign in with Google OAuth
  * @returns The authenticated user or null if failed
@@ -26,11 +46,14 @@ googleProvider.addScope('profile');
 export async function signInWithGoogle(): Promise<User | null> {
     if (!isFirebaseConfigured()) {
         console.error('Firebase is not configured. Please set environment variables.');
-        return null;
+        throw new Error('Firebase is not configured. Check your environment variables.');
     }
+
+    const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
 
     try {
         const auth = getFirebaseAuth();
+        console.log('[Auth] Starting sign in with popup...');
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
     } catch (error: any) {
@@ -40,10 +63,20 @@ export async function signInWithGoogle(): Promise<User | null> {
             return null;
         }
         if (error.code === 'auth/popup-blocked') {
-            console.error('Sign-in popup was blocked. Please allow popups for this site.');
+            console.error('Sign-in popup was blocked.');
             throw new Error('Popup blocked. Please allow popups and try again.');
         }
+
         console.error('Error signing in with Google:', error);
+
+        // If in Electron and popup fails, suggest alternative
+        if (isElectron) {
+            console.warn('[Auth] Popup sign-in failed in Electron. This may be due to browser restrictions.');
+            // We could potentially open an external browser here as a fallback
+            // but for now, we'll just throw the original error with a more helpful message
+            throw new Error(`Sign-in failed: ${error.message}. If you are on Desktop, please ensure you have allowed the login window.`);
+        }
+
         throw error;
     }
 }
@@ -99,7 +132,7 @@ export function onAuthStateChanged(
     if (!isFirebaseConfigured()) {
         // Call callback immediately with null if not configured
         callback(null);
-        return () => {}; // Return no-op unsubscribe
+        return () => { }; // Return no-op unsubscribe
     }
 
     const auth = getFirebaseAuth();

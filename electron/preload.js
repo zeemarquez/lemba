@@ -38,7 +38,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
     NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID,
-  }
+  },
+
+  // Listen for deep links (e.g. for auth callbacks)
+  onDeepLink: (callback) => {
+    ipcRenderer.on('deep-link', (event, url) => callback(url));
+  },
 });
 
 // Log that we're running in Electron

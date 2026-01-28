@@ -1,6 +1,6 @@
 {
     "name": "modern-markdown-editor",
-    "version": "0.1.10",
+    "version": "0.1.12",
     "private": true,
     "description": "A modern markdown editor with PDF export capabilities",
     "author": "zeemarquez",
@@ -147,6 +147,7 @@
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "cross-env": "^10.1.0",
+        "dotenv": "^17.2.3",
         "electron": "^40.0.0",
         "electron-builder": "^26.4.0",
         "eslint": "^9",
@@ -161,6 +162,12 @@
         "appId": "com.zeemarquez.modern-markdown-editor",
         "productName": "Modern Markdown Editor",
         "copyright": "Copyright © 2024-2026 zeemarquez",
+        "protocols": {
+            "name": "modern-markdown-editor",
+            "schemes": [
+                "modern-markdown-editor"
+            ]
+        },
         "directories": {
             "output": "dist",
             "buildResources": "build-resources"
