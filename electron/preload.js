@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDeepLink: (callback) => {
     ipcRenderer.on('deep-link', (event, url) => callback(url));
   },
+
+  // Open external links in default browser
+  openExternal: (url) => ipcRenderer.send('open-external', url),
 });
 
 // Log that we're running in Electron

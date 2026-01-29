@@ -142,10 +142,23 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
+
+  ipcMain.on('open-external', async (event, url) => {
+    console.log('[Main] Opening external URL:', url);
+    await require('electron').shell.openExternal(url);
+  });
+
   // Handle Auth Popups and External Links
   mainWindow.webContents.setWindowOpenHandler(({ url, features }) => {
-    // 1. Internal Pages
-    if (url.startsWith('app://') || url.includes('localhost')) {
+    // 1. Internal Application Pages (e.g., Export Panel)
+    // These need to open in a new Electron window with our preload script
+    const isInternal = url.startsWith('app://') ||
+      url.includes('localhost') ||
+      url.startsWith('file://') ||
+      url.includes('index.html');
+
+    if (isInternal) {
+      console.log('[Main] Opening internal window:', url);
       const parseFeature = (name) => {
         const match = features.match(new RegExp(`${name}=(\\d+)`));
         return match ? parseInt(match[1], 10) : undefined;
@@ -167,24 +180,9 @@ function createWindow() {
       };
     }
 
-    // 2. Firebase Auth Popups - ALLOW them to open in Electron for cross-origin communication
-    if (url.includes('firebaseapp.com') || url.includes('google.com/auth') || url.includes('accounts.google.com')) {
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: {
-          width: 600,
-          height: 800,
-          autoHideMenuBar: true,
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            // Don't use preload for external auth pages to avoid security issues
-          }
-        }
-      };
-    }
-
-    // 3. External links
+    // 2. Everything else (External Links, Auth Popups)
+    // Open in the system's default browser
+    console.log('[Main] Opening external URL via deep link interception:', url);
     shell.openExternal(url);
     return { action: 'deny' };
   });

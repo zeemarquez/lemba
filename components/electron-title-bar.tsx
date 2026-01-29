@@ -8,30 +8,33 @@ const isElectron = typeof window !== 'undefined' && !!(window as any).electronAP
 
 export function ElectronTitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+
     if (!isElectron) return;
 
     const api = (window as any).electronAPI;
-    
+
     // Listen for maximize state changes
     api.onWindowMaximized?.((maximized: boolean) => {
       setIsMaximized(maximized);
     });
   }, []);
 
-  // Don't render anything if not in Electron
-  if (!isElectron) return null;
+  // Don't render anything if not mounted or not in Electron
+  if (!mounted || !isElectron) return null;
 
   const api = (window as any).electronAPI;
 
   return (
-    <div 
+    <div
       data-electron-titlebar
       className="flex items-center justify-between h-8 bg-background border-b border-border select-none shrink-0"
-      style={{ 
+      style={{
         // Make the title bar draggable (moves window)
-        WebkitAppRegion: 'drag' 
+        WebkitAppRegion: 'drag'
       } as React.CSSProperties}
     >
       {/* App title / left side */}
@@ -42,11 +45,11 @@ export function ElectronTitleBar() {
       </div>
 
       {/* Window controls - right side */}
-      <div 
+      <div
         className="flex items-center h-full"
-        style={{ 
+        style={{
           // Make buttons clickable (not draggable)
-          WebkitAppRegion: 'no-drag' 
+          WebkitAppRegion: 'no-drag'
         } as React.CSSProperties}
       >
         {/* Minimize */}

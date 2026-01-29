@@ -7,6 +7,7 @@
 import {
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithCredential, // Add this import
     signInWithCustomToken,
     signOut as firebaseSignOut,
     onAuthStateChanged as firebaseOnAuthStateChanged,
@@ -29,12 +30,20 @@ if (typeof window !== 'undefined' && (window as any).electronAPI?.onDeepLink) {
             const actualUrl = url.replace('/#', '');
             const urlObj = new URL(actualUrl);
             const token = urlObj.searchParams.get('token');
+            const googleIdToken = urlObj.searchParams.get('id_token');
+            const googleAccessToken = urlObj.searchParams.get('access_token');
+
+            const auth = getFirebaseAuth();
 
             if (token) {
-                console.log('[Auth] Found token in deep link, signing in...');
-                const auth = getFirebaseAuth();
+                console.log('[Auth] Found custom token in deep link, signing in...');
                 await signInWithCustomToken(auth, token);
                 console.log('[Auth] Signed in with custom token');
+            } else if (googleIdToken) {
+                console.log('[Auth] Found Google credentials in deep link, signing in...');
+                const credential = GoogleAuthProvider.credential(googleIdToken, googleAccessToken);
+                await signInWithCredential(auth, credential);
+                console.log('[Auth] Signed in with Google credential');
             } else {
                 console.warn('[Auth] No token found in deep link URL');
             }
@@ -56,57 +65,42 @@ export async function signInWithGoogle(): Promise<User | null> {
 
     const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
 
+    // In Electron, we prefer the external browser flow for a better UX on macOS
+    if (isElectron) {
+        console.log('[Auth] Electron detected, using external browser flow...');
+        try {
+            await signInWithBrowser();
+            // User will arrive via deep link
+            throw new Error('Please complete sign in in your browser.');
+        } catch (error: any) {
+            if (error.message === 'No auth redirect URL configured') {
+                // Fallback to popup if browser flow isn't configured, though not ideal
+                console.warn('[Auth] Browser flow not configured, falling back to popup.');
+            } else {
+                throw error;
+            }
+        }
+    }
+
     try {
         const auth = getFirebaseAuth();
         console.log('[Auth] Starting sign in with popup...');
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
     } catch (error: any) {
-        // Handle specific error codes
+        // ... rest of the existing error handling
         if (error.code === 'auth/popup-closed-by-user') {
             console.log('Sign-in popup was closed by user');
             return null;
         }
         if (error.code === 'auth/popup-blocked') {
             console.error('Sign-in popup was blocked.');
-
             if (isElectron) {
-                // Try to fallback to external browser if configured
-                try {
-                    await signInWithBrowser();
-                    // If we get here, it means the browser opened successfully.
-                    // However, we don't have the user yet. The user will arrive via deep link.
-                    // We throw a specific error to let the UI know we are waiting.
-                    throw new Error('Please complete sign in in your browser.');
-                } catch (browserError: any) {
-                    if (browserError.message === 'No auth redirect URL configured') {
-                        throw new Error('Popup blocked. Please allow popups and try again.');
-                    }
-                    throw browserError;
-                }
+                await signInWithBrowser();
+                throw new Error('Please complete sign in in your browser.');
             }
             throw new Error('Popup blocked. Please allow popups and try again.');
         }
-
-        console.error('Error signing in with Google:', error);
-
-        // If in Electron and popup fails, suggest alternative
-        if (isElectron) {
-            console.warn('[Auth] Popup sign-in failed in Electron. This may be due to browser restrictions.');
-
-            // If it's a network error or similar, maybe the external browser is better
-            if (error.code === 'auth/network-request-failed') {
-                try {
-                    await signInWithBrowser();
-                    throw new Error('Network error. Opening system browser to sign in...');
-                } catch (browserErr) {
-                    // Ignore fallback error if not configured
-                }
-            }
-
-            throw new Error(`Sign-in failed: ${error.message}. If you are on Desktop, please ensure you have allowed the login window.`);
-        }
-
         throw error;
     }
 }
@@ -136,7 +130,12 @@ export async function signInWithBrowser(): Promise<void> {
     // In Electron, _blank with a URL triggers the setWindowOpenHandler or will-navigate
     // We want to force it to open in default browser
     if (typeof window !== 'undefined') {
-        window.open(targetUrl.toString(), '_blank');
+        const electronAPI = (window as any).electronAPI;
+        if (electronAPI?.openExternal) {
+            electronAPI.openExternal(targetUrl.toString());
+        } else {
+            window.open(targetUrl.toString(), '_blank');
+        }
     }
 }
 
