@@ -6,7 +6,7 @@ import { Minus, Square, X, Maximize2 } from "lucide-react";
 // Check if we're in Electron
 const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI?.isElectron;
 
-export function ElectronTitleBar() {
+export function ElectronTitleBar({ title }: { title?: string }) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -38,51 +38,52 @@ export function ElectronTitleBar() {
       } as React.CSSProperties}
     >
       {/* App title / left side */}
-      <div className="flex items-center px-3 h-full">
-        <span className="text-xs font-medium text-muted-foreground">
-          Modern Markdown Editor
-        </span>
+      <div className={`flex items-center px-3 h-full ${api?.platform === 'darwin' ? 'pl-20' : ''}`}>
+        {title && <span className="text-xs font-medium text-foreground/70">{title}</span>}
       </div>
 
       {/* Window controls - right side */}
-      <div
-        className="flex items-center h-full"
-        style={{
-          // Make buttons clickable (not draggable)
-          WebkitAppRegion: 'no-drag'
-        } as React.CSSProperties}
-      >
-        {/* Minimize */}
-        <button
-          onClick={() => api.windowMinimize()}
-          className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
-          title="Minimize"
+      {/* On macOS, we use native traffic lights, so hide these controls */}
+      {api?.platform !== 'darwin' && (
+        <div
+          className="flex items-center h-full"
+          style={{
+            // Make buttons clickable (not draggable)
+            WebkitAppRegion: 'no-drag'
+          } as React.CSSProperties}
         >
-          <Minus size={14} className="text-foreground/70" />
-        </button>
+          {/* Minimize */}
+          <button
+            onClick={() => api.windowMinimize()}
+            className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+            title="Minimize"
+          >
+            <Minus size={14} className="text-foreground/70" />
+          </button>
 
-        {/* Maximize/Restore */}
-        <button
-          onClick={() => api.windowMaximize()}
-          className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
-          title={isMaximized ? "Restore" : "Maximize"}
-        >
-          {isMaximized ? (
-            <Maximize2 size={12} className="text-foreground/70" />
-          ) : (
-            <Square size={12} className="text-foreground/70" />
-          )}
-        </button>
+          {/* Maximize/Restore */}
+          <button
+            onClick={() => api.windowMaximize()}
+            className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+            title={isMaximized ? "Restore" : "Maximize"}
+          >
+            {isMaximized ? (
+              <Maximize2 size={12} className="text-foreground/70" />
+            ) : (
+              <Square size={12} className="text-foreground/70" />
+            )}
+          </button>
 
-        {/* Close */}
-        <button
-          onClick={() => api.windowClose()}
-          className="h-full px-4 hover:bg-red-500 hover:text-white transition-colors flex items-center justify-center"
-          title="Close"
-        >
-          <X size={14} className="text-foreground/70 hover:text-white" />
-        </button>
-      </div>
+          {/* Close */}
+          <button
+            onClick={() => api.windowClose()}
+            className="h-full px-4 hover:bg-red-500 hover:text-white transition-colors flex items-center justify-center"
+            title="Close"
+          >
+            <X size={14} className="text-foreground/70 hover:text-white" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

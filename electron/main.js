@@ -105,7 +105,15 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    frame: false,
+    // macOS: Hide title bar but keep traffic lights
+    // Windows/Linux: Completely frameless
+    ...(process.platform === 'darwin'
+      ? {
+        titleBarStyle: 'hidden',
+        trafficLightPosition: { x: 12, y: 10 }, // Adjust traffic light position
+      }
+      : { frame: false }
+    ),
     backgroundColor: backgroundColor,
     show: false,
   });
@@ -169,13 +177,19 @@ function createWindow() {
         overrideBrowserWindowOptions: {
           width: parseFeature('width') || 400,
           height: parseFeature('height') || 700,
-          frame: false,
           backgroundColor: nativeTheme.shouldUseDarkColors ? THEME_COLORS.dark : THEME_COLORS.light,
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
           },
+          ...(process.platform === 'darwin'
+            ? {
+              titleBarStyle: 'hidden',
+              trafficLightPosition: { x: 12, y: 10 },
+            }
+            : { frame: false }
+          ),
         }
       };
     }

@@ -138,9 +138,9 @@ export default function ExportPage() {
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
     const templateVariables = activeTemplate?.settings?.variables || [];
-    
+
     const activeFile = files.find(f => f.id === activeFileId);
-    
+
     // Initialize store data on mount (same as main app does in Sidebar)
     useEffect(() => {
         const init = async () => {
@@ -161,13 +161,13 @@ export default function ExportPage() {
         const handleBeforeUnload = () => {
             setExportWindowOpen(false);
         };
-        
+
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => {
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
     }, [setExportWindowOpen]);
-    
+
     useEffect(() => {
         if (activeFile?.content) {
             const parsed = parseVariablesFromFrontmatter(activeFile.content);
@@ -176,16 +176,16 @@ export default function ExportPage() {
             setVariableValues({});
         }
     }, [activeFile?.content, activeFileId]);
-    
+
     const handleSaveVariables = async () => {
         if (!activeFile || !activeFileId) return;
-        
+
         const updatedContent = updateFrontmatterVariables(activeFile.content, variableValues);
         updateFileContent(activeFileId, updatedContent);
         await saveFile(activeFileId, updatedContent);
         setIsVariablesDialogOpen(false);
     };
-    
+
     const filledVariablesCount = templateVariables.filter(
         (v: TemplateVariable) => v.name && variableValues[v.name]?.trim()
     ).length;
@@ -242,182 +242,173 @@ export default function ExportPage() {
         }
     };
 
-    // Show loading state while initializing
-    if (isInitializing) {
-        return (
-            <div className="h-full flex flex-col bg-background items-center justify-center">
-                <div className="flex flex-col items-center gap-3">
-                    <Loader2 size={24} className="animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Loading...</p>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <div className="h-full flex flex-col bg-background">
-            {/* Export Header */}
-            <div className="p-2 flex items-center justify-between shrink-0 border-b">
-                <span className="font-semibold text-sm px-2">Export</span>
-            </div>
+            {isInitializing ? (
+                <div className="flex-1 flex flex-col items-center justify-center">
+                    <div className="flex flex-col items-center gap-3">
+                        <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Loading...</p>
+                    </div>
+                </div>
+            ) : (
+                <>
+                    <div className="flex-1 flex flex-col p-4 min-h-0 h-full">
+                        <div className="flex-1 flex flex-col min-h-0 h-full">
+                            {/* Controls */}
+                            <div className="flex items-center gap-2 shrink-0 mb-3">
+                                {/* File Selector */}
+                                <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
+                                            title={activeFileName || 'Select File'}
+                                        >
+                                            <FileText size={14} className="mr-2 opacity-50 shrink-0" />
+                                            <span className="truncate">{activeFileName || 'Select File'}</span>
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="p-0 gap-0 max-w-sm">
+                                        <DialogHeader className="p-4 pb-2">
+                                            <DialogTitle className="text-sm font-medium">Select File</DialogTitle>
+                                        </DialogHeader>
+                                        <ScrollArea className="h-[300px] p-2">
+                                            <div className="flex flex-col">
+                                                {mdFilesTree.map(node => (
+                                                    <TreeItem
+                                                        key={node.id}
+                                                        node={node}
+                                                        activeId={activeFileId}
+                                                        onSelect={(id) => {
+                                                            openFile(id);
+                                                            setIsFileDialogOpen(false);
+                                                        }}
+                                                    />
+                                                ))}
+                                                {mdFilesTree.length === 0 && (
+                                                    <div className="text-xs text-muted-foreground text-center py-4">No markdown files found</div>
+                                                )}
+                                            </div>
+                                        </ScrollArea>
+                                    </DialogContent>
+                                </Dialog>
 
-            <div className="flex-1 flex flex-col p-4 min-h-0 h-full">
-                <div className="flex-1 flex flex-col min-h-0 h-full">
-                    {/* Controls */}
-                    <div className="flex items-center gap-2 shrink-0 mb-3">
-                        {/* File Selector */}
-                        <Dialog open={isFileDialogOpen} onOpenChange={setIsFileDialogOpen}>
-                            <DialogTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
-                                    title={activeFileName || 'Select File'}
-                                >
-                                    <FileText size={14} className="mr-2 opacity-50 shrink-0" />
-                                    <span className="truncate">{activeFileName || 'Select File'}</span>
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent className="p-0 gap-0 max-w-sm">
-                                <DialogHeader className="p-4 pb-2">
-                                    <DialogTitle className="text-sm font-medium">Select File</DialogTitle>
-                                </DialogHeader>
-                                <ScrollArea className="h-[300px] p-2">
-                                    <div className="flex flex-col">
-                                        {mdFilesTree.map(node => (
-                                            <TreeItem
-                                                key={node.id}
-                                                node={node}
-                                                activeId={activeFileId}
-                                                onSelect={(id) => {
-                                                    openFile(id);
-                                                    setIsFileDialogOpen(false);
-                                                }}
-                                            />
-                                        ))}
-                                        {mdFilesTree.length === 0 && (
-                                            <div className="text-xs text-muted-foreground text-center py-4">No markdown files found</div>
-                                        )}
-                                    </div>
-                                </ScrollArea>
-                            </DialogContent>
-                        </Dialog>
+                                {/* Template Selector */}
+                                <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
+                                            title={activeTemplateFileName || 'Select Template'}
+                                        >
+                                            <LayoutTemplate size={14} className="mr-2 opacity-50 shrink-0" />
+                                            <span className="truncate">{activeTemplateFileName || 'Select'}</span>
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="p-0 gap-0 max-w-sm">
+                                        <DialogHeader className="p-4 pb-2">
+                                            <DialogTitle className="text-sm font-medium">Select Template</DialogTitle>
+                                        </DialogHeader>
+                                        <ScrollArea className="h-[300px] p-2">
+                                            <div className="flex flex-col">
+                                                {templateFilesTree.map(node => (
+                                                    <TreeItem
+                                                        key={node.id}
+                                                        node={node}
+                                                        activeId={activeTemplateId}
+                                                        onSelect={(id) => {
+                                                            setActiveTemplate(id);
+                                                            setIsTemplateDialogOpen(false);
+                                                        }}
+                                                    />
+                                                ))}
+                                                {templateFilesTree.length === 0 && (
+                                                    <div className="text-xs text-muted-foreground text-center py-4">No templates found</div>
+                                                )}
+                                            </div>
+                                        </ScrollArea>
+                                    </DialogContent>
+                                </Dialog>
 
-                        {/* Template Selector */}
-                        <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
-                            <DialogTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    className="flex-1 h-8 text-xs justify-start px-2 font-normal truncate bg-background"
-                                    title={activeTemplateFileName || 'Select Template'}
-                                >
-                                    <LayoutTemplate size={14} className="mr-2 opacity-50 shrink-0" />
-                                    <span className="truncate">{activeTemplateFileName || 'Select'}</span>
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent className="p-0 gap-0 max-w-sm">
-                                <DialogHeader className="p-4 pb-2">
-                                    <DialogTitle className="text-sm font-medium">Select Template</DialogTitle>
-                                </DialogHeader>
-                                <ScrollArea className="h-[300px] p-2">
-                                    <div className="flex flex-col">
-                                        {templateFilesTree.map(node => (
-                                            <TreeItem
-                                                key={node.id}
-                                                node={node}
-                                                activeId={activeTemplateId}
-                                                onSelect={(id) => {
-                                                    setActiveTemplate(id);
-                                                    setIsTemplateDialogOpen(false);
-                                                }}
-                                            />
-                                        ))}
-                                        {templateFilesTree.length === 0 && (
-                                            <div className="text-xs text-muted-foreground text-center py-4">No templates found</div>
-                                        )}
-                                    </div>
-                                </ScrollArea>
-                            </DialogContent>
-                        </Dialog>
+                                {/* Variables Button - only show if template has variables */}
+                                {templateVariables.length > 0 && (
+                                    <Dialog open={isVariablesDialogOpen} onOpenChange={setIsVariablesDialogOpen}>
+                                        <DialogTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                className="h-8 px-2 aspect-square font-normal bg-background"
+                                                title="Set variable values"
+                                            >
+                                                <Variable size={14} className="opacity-50" />
+                                            </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="p-0 gap-0 w-[300px]">
+                                            <DialogHeader className="p-3 pb-0">
+                                                <DialogTitle className="text-sm font-medium">Variables</DialogTitle>
+                                                <p className="text-[10px] text-muted-foreground pt-1">
+                                                    Values stored in document.
+                                                </p>
+                                            </DialogHeader>
+                                            <div className="px-3 pb-3 pt-4 space-y-3">
+                                                {templateVariables.filter((v: TemplateVariable) => v.name.trim()).map((variable: TemplateVariable) => (
+                                                    <div key={variable.id} className="flex items-center gap-2">
+                                                        <span className="text-xs font-medium text-muted-foreground w-20 shrink-0 truncate">
+                                                            {variable.name}
+                                                        </span>
+                                                        <Input
+                                                            type="text"
+                                                            placeholder="Value"
+                                                            className="h-8 text-sm flex-1"
+                                                            value={variableValues[variable.name] || ''}
+                                                            onChange={(e) => setVariableValues(prev => ({
+                                                                ...prev,
+                                                                [variable.name]: e.target.value
+                                                            }))}
+                                                        />
+                                                    </div>
+                                                ))}
+                                                <div className="flex justify-end pt-2">
+                                                    <Button
+                                                        size="sm"
+                                                        className="h-7 text-xs"
+                                                        onClick={handleSaveVariables}
+                                                        disabled={!activeFile}
+                                                    >
+                                                        Save
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </DialogContent>
+                                    </Dialog>
+                                )}
+                            </div>
+
+                            <PdfPreview isStandaloneWindow />
+                        </div>
                     </div>
 
-                    {/* Variables Button - only show if template has variables */}
-                    {templateVariables.length > 0 && (
-                        <div className="shrink-0 mb-3">
-                            <Dialog open={isVariablesDialogOpen} onOpenChange={setIsVariablesDialogOpen}>
-                                <DialogTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        className="w-full h-8 text-xs justify-start px-2 font-normal bg-background"
-                                        title="Set variable values"
-                                    >
-                                        <Variable size={14} className="mr-2 opacity-50 shrink-0" />
-                                        <span className="truncate">Variables</span>
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="p-0 gap-0 w-[300px]">
-                                    <DialogHeader className="p-3 pb-0">
-                                        <DialogTitle className="text-sm font-medium">Variables</DialogTitle>
-                                        <p className="text-[10px] text-muted-foreground pt-1">
-                                            Values stored in document.
-                                        </p>
-                                    </DialogHeader>
-                                    <div className="px-3 pb-3 pt-4 space-y-3">
-                                        {templateVariables.filter((v: TemplateVariable) => v.name.trim()).map((variable: TemplateVariable) => (
-                                            <div key={variable.id} className="flex items-center gap-2">
-                                                <span className="text-xs font-medium text-muted-foreground w-20 shrink-0 truncate">
-                                                    {variable.name}
-                                                </span>
-                                                <Input
-                                                    type="text"
-                                                    placeholder="Value"
-                                                    className="h-8 text-sm flex-1"
-                                                    value={variableValues[variable.name] || ''}
-                                                    onChange={(e) => setVariableValues(prev => ({
-                                                        ...prev,
-                                                        [variable.name]: e.target.value
-                                                    }))}
-                                                />
-                                            </div>
-                                        ))}
-                                        <div className="flex justify-end pt-2">
-                                            <Button
-                                                size="sm"
-                                                className="h-7 text-xs"
-                                                onClick={handleSaveVariables}
-                                                disabled={!activeFile}
-                                            >
-                                                Save
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </DialogContent>
-                            </Dialog>
-                        </div>
-                    )}
-
-                    <PdfPreview isStandaloneWindow />
-                </div>
-            </div>
-
-            <div className="p-4 bg-muted/30 shrink-0 border-t">
-                <Button 
-                    className="w-full shadow-sm" 
-                    onClick={handleExport} 
-                    disabled={!activeFileId || !isInitialized || isExporting}
-                >
-                    {isExporting ? (
-                        <>
-                            <Loader2 size={16} className="mr-2 animate-spin" />
-                            Exporting...
-                        </>
-                    ) : (
-                        <>
-                            <SquareArrowOutUpRight size={16} className="mr-2" />
-                            Export
-                        </>
-                    )}
-                </Button>
-            </div>
+                    <div className="p-4 bg-muted/30 shrink-0 border-t">
+                        <Button
+                            className="w-full shadow-sm"
+                            onClick={handleExport}
+                            disabled={!activeFileId || !isInitialized || isExporting}
+                        >
+                            {isExporting ? (
+                                <>
+                                    <Loader2 size={16} className="mr-2 animate-spin" />
+                                    Exporting...
+                                </>
+                            ) : (
+                                <>
+                                    <SquareArrowOutUpRight size={16} className="mr-2" />
+                                    Export
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
