@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
-import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry } from './types';
+import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
+import { PRELOADED_FONTS } from './preloaded-fonts';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
 
 
@@ -479,16 +480,54 @@ export const useStore = create<AppState>()(
 
                 fetchFonts: async () => {
                     try {
-                        const fonts = await browserStorage.listFonts();
+                        const storedFonts = await browserStorage.listFonts();
+
+                        // Check for missing preloaded fonts
+                        const missingPreloaded = PRELOADED_FONTS.filter(pf =>
+                            !storedFonts.some(f => f.family === pf.family)
+                        );
+
+                        if (missingPreloaded.length > 0) {
+                            console.log(`[Store] Found ${missingPreloaded.length} missing preloaded fonts, loading...`);
+
+                            const loadedPreloaded = await Promise.all(
+                                missingPreloaded.map(async (pf) => {
+                                    try {
+                                        const response = await fetch(`/fonts/preloaded/${pf.fileName}`);
+                                        if (!response.ok) throw new Error(`Failed to fetch ${pf.family}`);
+                                        const blob = await response.blob();
+
+                                        const fontEntry: FontEntry = {
+                                            id: pf.family,
+                                            family: pf.family,
+                                            blob,
+                                            fileName: pf.fileName,
+                                            format: pf.format,
+                                            createdAt: Date.now(),
+                                            syncId: generateSyncId(),
+                                            updatedAt: Date.now(),
+                                            isDeleted: false,
+                                            userId: null
+                                        };
+
+                                        await browserStorage.saveFont(fontEntry);
+                                        return fontEntry;
+                                    } catch (e) {
+                                        console.error(`[Store] Failed to load preloaded font ${pf.family}:`, e);
+                                        return null;
+                                    }
+                                })
+                            );
+
+                            const validPreloaded = loadedPreloaded.filter((f): f is FontEntry => f !== null);
+                            storedFonts.push(...validPreloaded);
+                        }
+
                         // Set both customFonts and fontsLoaded atomically
-                        // fontsLoaded: true indicates fonts have been fetched from IndexedDB
-                        // (even if the result is an empty array)
-                        set({ customFonts: fonts, fontsLoaded: true });
-                        console.log(`[Store] fetchFonts completed: ${fonts.length} fonts loaded, fontsLoaded=true`);
+                        set({ customFonts: storedFonts, fontsLoaded: true });
+                        console.log(`[Store] fetchFonts completed: ${storedFonts.length} fonts loaded, fontsLoaded=true`);
                     } catch (error) {
                         console.error('Failed to fetch fonts:', error);
-                        // Even on error, mark as loaded to prevent infinite waiting
-                        // The app can function without custom fonts
                         set({ fontsLoaded: true });
                     }
                 },

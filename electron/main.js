@@ -257,7 +257,7 @@ function registerProtocol() {
   // Force Origin and Referer headers for Firebase requests
   // Custom schemes like app:// often send null or missing headers on Windows
   session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['https://*.firebaseio.com/*', 'https://*.googleapis.com/*'] },
+    { urls: ['https://*.firebaseio.com/*', 'https://*.googleapis.com/*', 'https://*.firebaseapp.com/*'] },
     (details, callback) => {
       const { requestHeaders } = details;
       if (!requestHeaders['Origin'] || requestHeaders['Origin'] === 'null') {

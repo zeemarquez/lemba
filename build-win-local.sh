@@ -56,7 +56,7 @@ fi
 if [ -f .env.local ]; then
   echo "Loading environment variables from .env.local..."
   # Use a more robust way to load .env files that handles quotes and line endings
-  export $(grep -v '^#' .env.local | xargs -L 1)
+  export $(grep -v '^#' .env.local | sed 's/\r$//' | xargs -L 1)
 fi
 
 # Check for required Firebase environment variables

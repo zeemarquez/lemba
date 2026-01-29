@@ -627,6 +627,15 @@ class BrowserStorage {
     }
 
     /**
+     * Save a complete font entry (used for preloaded or synced fonts)
+     */
+    async saveFont(font: FontEntry): Promise<void> {
+        await this.transaction(STORE_FONTS, 'readwrite', store => {
+            store.put(font);
+        });
+    }
+
+    /**
      * Retrieve all fonts from IndexedDB
      */
     async listFonts(): Promise<FontEntry[]> {
