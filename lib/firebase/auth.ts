@@ -25,13 +25,18 @@ if (typeof window !== 'undefined' && (window as any).electronAPI?.onDeepLink) {
     (window as any).electronAPI.onDeepLink(async (url: string) => {
         console.log('[Auth] Received deep link:', url);
         try {
-            const urlObj = new URL(url);
+            // Support hash routing if used
+            const actualUrl = url.replace('/#', '');
+            const urlObj = new URL(actualUrl);
             const token = urlObj.searchParams.get('token');
+
             if (token) {
                 console.log('[Auth] Found token in deep link, signing in...');
                 const auth = getFirebaseAuth();
                 await signInWithCustomToken(auth, token);
                 console.log('[Auth] Signed in with custom token');
+            } else {
+                console.warn('[Auth] No token found in deep link URL');
             }
         } catch (error) {
             console.error('[Auth] Error handling deep link:', error);
@@ -64,6 +69,22 @@ export async function signInWithGoogle(): Promise<User | null> {
         }
         if (error.code === 'auth/popup-blocked') {
             console.error('Sign-in popup was blocked.');
+
+            if (isElectron) {
+                // Try to fallback to external browser if configured
+                try {
+                    await signInWithBrowser();
+                    // If we get here, it means the browser opened successfully.
+                    // However, we don't have the user yet. The user will arrive via deep link.
+                    // We throw a specific error to let the UI know we are waiting.
+                    throw new Error('Please complete sign in in your browser.');
+                } catch (browserError: any) {
+                    if (browserError.message === 'No auth redirect URL configured') {
+                        throw new Error('Popup blocked. Please allow popups and try again.');
+                    }
+                    throw browserError;
+                }
+            }
             throw new Error('Popup blocked. Please allow popups and try again.');
         }
 
@@ -72,12 +93,50 @@ export async function signInWithGoogle(): Promise<User | null> {
         // If in Electron and popup fails, suggest alternative
         if (isElectron) {
             console.warn('[Auth] Popup sign-in failed in Electron. This may be due to browser restrictions.');
-            // We could potentially open an external browser here as a fallback
-            // but for now, we'll just throw the original error with a more helpful message
+
+            // If it's a network error or similar, maybe the external browser is better
+            if (error.code === 'auth/network-request-failed') {
+                try {
+                    await signInWithBrowser();
+                    throw new Error('Network error. Opening system browser to sign in...');
+                } catch (browserErr) {
+                    // Ignore fallback error if not configured
+                }
+            }
+
             throw new Error(`Sign-in failed: ${error.message}. If you are on Desktop, please ensure you have allowed the login window.`);
         }
 
         throw error;
+    }
+}
+
+/**
+ * Opens the system browser to the auth handler URL.
+ * Required environment variable: NEXT_PUBLIC_AUTH_HANDLER_URL
+ */
+export async function signInWithBrowser(): Promise<void> {
+    const { getAuthHandlerUrl } = await import('./config');
+    const authHandlerUrl = getAuthHandlerUrl();
+
+    if (!authHandlerUrl) {
+        console.warn('No auth handler URL configured (NEXT_PUBLIC_AUTH_HANDLER_URL)');
+        throw new Error('No auth redirect URL configured');
+    }
+
+    console.log('[Auth] Opening external browser for sign-in:', authHandlerUrl);
+
+    // Pass a state or return URL if needed by the handler
+    // e.g. ?redirect_uri=modern-markdown-editor://auth
+    const targetUrl = new URL(authHandlerUrl);
+    targetUrl.searchParams.set('redirect_uri', 'modern-markdown-editor://auth');
+
+    // Open external link
+    // usage of window.open in Electron with shell.openExternal logic handled by main process
+    // In Electron, _blank with a URL triggers the setWindowOpenHandler or will-navigate
+    // We want to force it to open in default browser
+    if (typeof window !== 'undefined') {
+        window.open(targetUrl.toString(), '_blank');
     }
 }
 

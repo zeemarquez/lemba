@@ -75,7 +75,7 @@ try {
   if (require('electron-squirrel-startup')) {
     app.quit();
   }
-} catch (e) {}
+} catch (e) { }
 
 let mainWindow = null;
 
@@ -150,7 +150,7 @@ function createWindow() {
         const match = features.match(new RegExp(`${name}=(\\d+)`));
         return match ? parseInt(match[1], 10) : undefined;
       };
-      
+
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -250,7 +250,21 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     registerProtocol();
     createWindow();
-    
+
+    // Check for deep link on startup (Windows/Linux)
+    if (process.platform !== 'darwin') {
+      const startupUrl = process.argv.find(arg => arg.startsWith('modern-markdown-editor://'));
+      if (startupUrl) {
+        // Wait for window to be ready
+        setTimeout(() => {
+          if (mainWindow) {
+            console.log('[Main] Sending startup deep link:', startupUrl);
+            mainWindow.webContents.send('deep-link', startupUrl);
+          }
+        }, 1500);
+      }
+    }
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -279,7 +293,7 @@ app.on('web-contents-created', (event, contents) => {
   contents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
     if (parsedUrl.protocol === 'app:' || parsedUrl.hostname === 'localhost') return;
-    
+
     // Check if it's an auth redirect
     if (navigationUrl.includes('firebaseapp.com') || navigationUrl.includes('google.com')) return;
 

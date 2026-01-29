@@ -365,9 +365,9 @@ export const useStore = create<AppState>()(
                                 if (manifestResponse.ok) {
                                     const manifest = await manifestResponse.json();
                                     const preloadedFiles: string[] = manifest.files || [];
-                                    
+
                                     let firstFilePath: string | null = null;
-                                    
+
                                     // Load all preloaded files
                                     for (const fileName of preloadedFiles) {
                                         try {
@@ -375,8 +375,9 @@ export const useStore = create<AppState>()(
                                             if (response.ok) {
                                                 const content = await response.text();
                                                 const path = `Files/${fileName}`;
-                                                await browserStorage.createFile(path, content);
-                                                
+                                                // Overwrite true to prevent errors if file exists but wasn't in tree for some reason
+                                                await browserStorage.createFile(path, content, true);
+
                                                 // Track the first file to open it later
                                                 if (!firstFilePath) {
                                                     firstFilePath = path;
@@ -386,11 +387,11 @@ export const useStore = create<AppState>()(
                                             console.error(`Failed to load preloaded file ${fileName}:`, err);
                                         }
                                     }
-                                    
+
                                     // Re-fetch tree after creating preloaded files
                                     const result = await browserStorage.list();
                                     tree = result.tree;
-                                    
+
                                     // Open the first file
                                     if (firstFilePath) {
                                         setTimeout(() => get().openFile(firstFilePath!), 100);
@@ -432,7 +433,7 @@ export const useStore = create<AppState>()(
                                         // Update the id to match the storage path with folder structure
                                         const path = `${defaultTemplatesFolder}/${templateFile}`;
                                         templateData.id = path;
-                                        await browserStorage.createTemplate(path, templateData);
+                                        await browserStorage.createTemplate(path, templateData, true);
                                     }
                                 } catch (err) {
                                     console.error(`Failed to load template ${templateFile}:`, err);
@@ -531,7 +532,7 @@ export const useStore = create<AppState>()(
                         const fileEntry = await browserStorage.createFile(path, content);
                         await get().fetchFileTree();
                         await get().openFile(path);
-                        
+
                         // Trigger cloud sync (push + pull)
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(fileEntry);
@@ -546,7 +547,7 @@ export const useStore = create<AppState>()(
                     try {
                         const folderEntry = await browserStorage.createFolder(path);
                         await get().fetchFileTree();
-                        
+
                         // Trigger cloud sync (push + pull)
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(folderEntry);
@@ -563,7 +564,7 @@ export const useStore = create<AppState>()(
                         await get().fetchFileTree();
                         await get().fetchTemplates();
                         get().openTemplate(path);
-                        
+
                         // Trigger cloud sync (push + pull) - templates are stored as files
                         if (syncService.isActive) {
                             const fileEntry = await browserStorage.getFileEntry(path);
@@ -583,7 +584,7 @@ export const useStore = create<AppState>()(
                         set((state) => ({
                             templates: state.templates.map((t) => (t.id === path ? template : t))
                         }));
-                        
+
                         // Trigger cloud sync (templates are stored as files)
                         if (syncService.isActive) {
                             const fileEntry = await browserStorage.getFileEntry(path);
@@ -606,7 +607,7 @@ export const useStore = create<AppState>()(
                             }
                             syncService.pullDelta().catch(console.error);
                         }
-                        
+
                         // Hard delete locally
                         await browserStorage.delete(path, type);
                         await get().fetchFileTree();
@@ -736,12 +737,12 @@ export const useStore = create<AppState>()(
                     const currentState = get();
                     const isAlreadyActive = currentState.activeFileId === path && currentState.currentView === 'file';
                     const isInTabs = openTabs.some(tab => tab.id === path && tab.type === 'file');
-                    
+
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
                         return;
                     }
-                    
+
                     if (!isInTabs) {
                         set(state => ({
                             activeFileId: path,
@@ -772,7 +773,7 @@ export const useStore = create<AppState>()(
                                 console.error('Failed to sync file content:', error);
                             }
                         }
-                        
+
                         // Trigger cloud sync
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(fileEntry);
@@ -879,12 +880,12 @@ export const useStore = create<AppState>()(
                     const template = state.templates.find(t => t.id === id);
                     const isAlreadyActive = state.activeTemplateId === id && state.currentView === 'template';
                     const isInTabs = state.openTabs.some(tab => tab.id === id && tab.type === 'template');
-                    
+
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
                         return;
                     }
-                    
+
                     if (!isInTabs) {
                         set({
                             activeTemplateId: id,
