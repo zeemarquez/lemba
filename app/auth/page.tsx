@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase/config";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-export default function AuthPage() {
+function AuthContent() {
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const searchParams = useSearchParams();
@@ -99,5 +99,17 @@ export default function AuthPage() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function AuthPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        }>
+            <AuthContent />
+        </Suspense>
     );
 }
