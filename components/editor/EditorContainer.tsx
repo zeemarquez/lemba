@@ -2,6 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { PlateEditor } from "@/components/plate-editor/plate-editor";
+import { InlineDiffOverlay } from "@/components/agent";
 import { FileText } from "lucide-react";
 import { debounce } from "lodash";
 import { useMemo, useEffect } from "react";
@@ -11,10 +12,19 @@ export function EditorContainer() {
         activeFileId,
         files,
         updateFileContent,
-        saveFile
+        saveFile,
+        pendingDiffs
     } = useStore();
 
     const activeFile = files.find((f) => f.id === activeFileId);
+
+    // Check if there are pending diffs for the current file
+    const hasPendingDiffs = useMemo(() => {
+        if (!activeFileId) return false;
+        return Object.values(pendingDiffs).some(
+            d => d.fileId === activeFileId && d.status === 'pending'
+        );
+    }, [pendingDiffs, activeFileId]);
 
     // Create a debounced save function
     const debouncedSave = useMemo(
@@ -50,6 +60,11 @@ export function EditorContainer() {
                     debouncedSave(activeFile.id, val);
                 }}
             />
+            
+            {/* Inline diff overlay when there are pending changes */}
+            {hasPendingDiffs && activeFileId && (
+                <InlineDiffOverlay fileId={activeFileId} />
+            )}
         </div>
     );
 }

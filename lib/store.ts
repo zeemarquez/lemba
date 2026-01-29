@@ -4,7 +4,9 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
+import { AgentMessage, DocumentDiff, createMessage, applyDiff as applyDiffToContent, sendMessageToAI } from './agent';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
+export type { AgentMessage, DocumentDiff };
 
 
 
@@ -22,7 +24,7 @@ interface AppState {
     leftSidebarExpanded: boolean;
     rightSidebarExpanded: boolean;
     exportWindowOpen: boolean;
-    sidebarView: 'explorer' | 'templates';
+    sidebarView: 'explorer' | 'templates' | 'agent';
     currentView: 'file' | 'template';
     isSettingsOpen: boolean;
     editorViewMode: 'source' | 'editing' | 'viewing' | 'suggestion';
@@ -30,6 +32,13 @@ interface AppState {
     uiFontSize: 'small' | 'normal' | 'big';
     showOutline: boolean;
     activeHeadingId: string | null;
+
+    // Agent State
+    agentMessages: AgentMessage[];
+    pendingDiffs: Record<string, DocumentDiff>;
+    agentMentionedFiles: string[];
+    agentLoading: boolean;
+    agentError: string | null;
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -77,7 +86,7 @@ interface AppState {
     closeTab: (id: string) => void;
     toggleLeftSidebar: () => void;
     toggleRightSidebar: () => void;
-    setSidebarView: (view: 'explorer' | 'templates') => void;
+    setSidebarView: (view: 'explorer' | 'templates' | 'agent') => void;
     setRightSidebarOpen: (isOpen: boolean) => void;
     setExportWindowOpen: (isOpen: boolean) => void;
     setSettingsOpen: (isOpen: boolean) => void;
@@ -88,6 +97,17 @@ interface AppState {
     setActiveHeadingId: (headingId: string | null) => void;
     setSourceEditorFontFamily: (fontFamily: string) => void;
     setSourceEditorFontSize: (fontSize: number) => void;
+
+    // Agent Actions
+    addAgentMessage: (message: AgentMessage) => void;
+    sendAgentMessage: (content: string, mentions?: string[]) => Promise<void>;
+    clearAgentMessages: () => void;
+    addPendingDiff: (diff: DocumentDiff) => void;
+    approveDiff: (diffId: string) => Promise<void>;
+    rejectDiff: (diffId: string) => void;
+    setAgentMentionedFiles: (files: string[]) => void;
+    setAgentLoading: (loading: boolean) => void;
+    setAgentError: (error: string | null) => void;
 
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -345,6 +365,13 @@ export const useStore = create<AppState>()(
                 activeHeadingId: null,
                 sourceEditorFontFamily: 'monospace',
                 sourceEditorFontSize: 14,
+
+                // Agent Initial State
+                agentMessages: [],
+                pendingDiffs: {},
+                agentMentionedFiles: [],
+                agentLoading: false,
+                agentError: null,
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -940,6 +967,121 @@ export const useStore = create<AppState>()(
                         });
                     }
                 },
+
+                // Agent Actions
+                addAgentMessage: (message) => set((state) => ({
+                    agentMessages: [...state.agentMessages, message]
+                })),
+
+                sendAgentMessage: async (content, mentions = []) => {
+                    // Create user message
+                    const userMessage = createMessage('user', content, 
+                        mentions.map(fileId => ({
+                            fileId,
+                            fileName: fileId.split('/').pop() || fileId,
+                        }))
+                    );
+                    
+                    // Add user message and set loading
+                    set((s) => ({
+                        agentMessages: [...s.agentMessages, userMessage],
+                        agentMentionedFiles: mentions,
+                        agentLoading: true,
+                        agentError: null,
+                    }));
+
+                    try {
+                        // Get all messages including the new one
+                        const allMessages = [...get().agentMessages];
+                        
+                        // Call AI service
+                        const response = await sendMessageToAI(
+                            allMessages,
+                            mentions,
+                            // Callback when a diff is created
+                            (diff) => {
+                                set((s) => ({
+                                    pendingDiffs: { ...s.pendingDiffs, [diff.id]: diff }
+                                }));
+                            }
+                        );
+                        
+                        // Create assistant message with response
+                        const assistantMessage = createMessage(
+                            'assistant',
+                            response.content,
+                            undefined,
+                            response.diffs?.map(d => d.id)
+                        );
+                        
+                        // Add assistant message
+                        set((s) => ({
+                            agentMessages: [...s.agentMessages, assistantMessage],
+                            agentLoading: false,
+                        }));
+                    } catch (error) {
+                        console.error('AI service error:', error);
+                        set({
+                            agentLoading: false,
+                            agentError: error instanceof Error ? error.message : 'Failed to get AI response',
+                        });
+                    }
+                },
+
+                clearAgentMessages: () => set({
+                    agentMessages: [],
+                    pendingDiffs: {},
+                    agentMentionedFiles: [],
+                    agentError: null,
+                }),
+
+                addPendingDiff: (diff) => set((state) => ({
+                    pendingDiffs: { ...state.pendingDiffs, [diff.id]: diff }
+                })),
+
+                approveDiff: async (diffId) => {
+                    const state = get();
+                    const diff = state.pendingDiffs[diffId];
+                    
+                    if (!diff) {
+                        console.error('Diff not found:', diffId);
+                        return;
+                    }
+
+                    try {
+                        // Apply the diff to get the new content
+                        const newContent = applyDiffToContent(diff.originalContent, diff);
+                        
+                        // Save the file with the new content
+                        await get().saveFile(diff.fileId, newContent);
+                        
+                        // Update the file in memory if it's loaded
+                        set((s) => ({
+                            files: s.files.map((f) => 
+                                f.id === diff.fileId ? { ...f, content: newContent } : f
+                            ),
+                            // Update diff status to approved
+                            pendingDiffs: {
+                                ...s.pendingDiffs,
+                                [diffId]: { ...diff, status: 'approved' }
+                            }
+                        }));
+                    } catch (error) {
+                        console.error('Failed to apply diff:', error);
+                        set({ agentError: 'Failed to apply changes' });
+                    }
+                },
+
+                rejectDiff: (diffId) => set((state) => ({
+                    pendingDiffs: {
+                        ...state.pendingDiffs,
+                        [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' }
+                    }
+                })),
+
+                setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
+                setAgentLoading: (loading) => set({ agentLoading: loading }),
+                setAgentError: (error) => set({ agentError: error }),
             };
         },
         {
