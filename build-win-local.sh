@@ -55,7 +55,8 @@ fi
 # Load environment variables from .env.local if it exists
 if [ -f .env.local ]; then
   echo "Loading environment variables from .env.local..."
-  export $(grep -v '^#' .env.local | grep '=' | xargs)
+  # Use a more robust way to load .env files that handles quotes and line endings
+  export $(grep -v '^#' .env.local | xargs -L 1)
 fi
 
 # Check for required Firebase environment variables
@@ -64,6 +65,7 @@ REQUIRED_VARS=(
   "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"
   "NEXT_PUBLIC_FIREBASE_PROJECT_ID"
   "NEXT_PUBLIC_FIREBASE_APP_ID"
+  "NEXT_PUBLIC_AUTH_HANDLER_URL"
 )
 
 MISSING_VARS=()
@@ -79,7 +81,7 @@ if [ ${#MISSING_VARS[@]} -gt 0 ]; then
     echo "  - $var"
   done
   echo "Cloud sync will NOT work in this build."
-  echo "To fix this, set these variables in your environment or in a .env.local file."
+  echo "To fix this, set these variables in .env.local."
   # Ask for confirmation to proceed
   read -p "Do you want to proceed anyway? (y/N) " -n 1 -r
   echo

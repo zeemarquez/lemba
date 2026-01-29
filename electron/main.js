@@ -11,7 +11,20 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient('modern-markdown-editor');
 }
 
+const { pathToFileURL } = require('url');
+
+// Register protocol as early as possible
+const PROTOCOL_SCHEME = 'modern-markdown-editor';
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+}
+
 // Try to load environment variables
+console.log('[Electron] Initializing environment...');
 try {
   const possiblePaths = [
     path.join(process.cwd(), '.env'),
@@ -25,24 +38,22 @@ try {
   for (const envPath of possiblePaths) {
     if (fs.existsSync(envPath)) {
       console.log('[Electron] Loading env from:', envPath);
-      try {
-        require('dotenv').config({ path: envPath });
-        console.log('[Electron] Dotenv loaded successfully');
-      } catch (e) {
-        // Dotenv might not be available yet if using a pre-packaged build
-        // but it should be there in dev and local builds
-        const envContent = fs.readFileSync(envPath, 'utf8');
-        envContent.split('\n').forEach(line => {
-          const match = line.match(/^([^#=]+)=(.*)$/);
-          if (match) {
-            const key = match[1].trim();
-            const value = match[2].trim().replace(/^['"](.*)['"]$/, '$1');
-            if (key.startsWith('NEXT_PUBLIC_')) {
-              process.env[key] = value;
-            }
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      envContent.split(/\r?\n/).forEach(line => {
+        const match = line.match(/^([^#=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          let value = match[2].trim();
+          // Remove wrapping quotes if present
+          if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length - 1);
           }
-        });
-      }
+          if (key.startsWith('NEXT_PUBLIC_')) {
+            process.env[key] = value;
+            console.log(`[Electron] Set runtime env: ${key}`);
+          }
+        }
+      });
     }
   }
 } catch (e) {
@@ -209,12 +220,14 @@ function createWindow() {
 function registerProtocol() {
   protocol.handle('app', (request) => {
     const staticPath = getStaticPath();
-    let urlPath = request.url.replace('app://.', '');
+    // Normalize path by removing protocol and handling potential . prefix
+    let urlPath = request.url.replace('app://.', '').replace('app://', '');
     urlPath = urlPath.split('?')[0].split('#')[0];
     urlPath = decodeURIComponent(urlPath);
 
     if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
 
+    // Handle SPA-style routing for Next.js exported files
     if (!path.extname(urlPath) && !urlPath.endsWith('/')) {
       const htmlPath = path.join(staticPath, urlPath + '.html');
       if (fs.existsSync(htmlPath)) urlPath = urlPath + '.html';
@@ -232,12 +245,30 @@ function registerProtocol() {
 
     if (!fs.existsSync(filePath)) {
       const indexPath = path.join(staticPath, 'index.html');
-      if (fs.existsSync(indexPath)) return net.fetch('file://' + indexPath);
+      if (fs.existsSync(indexPath)) return net.fetch(pathToFileURL(indexPath).href);
       return new Response('Not Found', { status: 404 });
     }
 
-    return net.fetch('file://' + filePath);
+    // Convert file path to valid file:// URL (critical for Windows net.fetch)
+    const fileUrl = pathToFileURL(filePath).href;
+    return net.fetch(fileUrl);
   });
+
+  // Force Origin and Referer headers for Firebase requests
+  // Custom schemes like app:// often send null or missing headers on Windows
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.firebaseio.com/*', 'https://*.googleapis.com/*'] },
+    (details, callback) => {
+      const { requestHeaders } = details;
+      if (!requestHeaders['Origin'] || requestHeaders['Origin'] === 'null') {
+        requestHeaders['Origin'] = 'app://.';
+      }
+      if (!requestHeaders['Referer']) {
+        requestHeaders['Referer'] = 'app://./index.html';
+      }
+      callback({ requestHeaders });
+    }
+  );
 }
 
 // Single instance lock
@@ -251,9 +282,10 @@ if (!gotTheLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
 
-      // Handle deep links from secondary instances
-      const url = commandLine.pop();
-      if (url.startsWith('modern-markdown-editor://')) {
+      // Handle deep links from secondary instances (more robust on Windows)
+      const url = commandLine.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
+      if (url) {
+        console.log('[Main] Received deep link from second instance:', url);
         mainWindow.webContents.send('deep-link', url);
       }
     }
@@ -265,7 +297,7 @@ if (!gotTheLock) {
 
     // Check for deep link on startup (Windows/Linux)
     if (process.platform !== 'darwin') {
-      const startupUrl = process.argv.find(arg => arg.startsWith('modern-markdown-editor://'));
+      const startupUrl = process.argv.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
       if (startupUrl) {
         // Wait for window to be ready
         setTimeout(() => {

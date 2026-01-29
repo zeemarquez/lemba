@@ -37,4 +37,22 @@ function Get-PackageVersion {
     $package = Get-Content $packagePath | ConvertFrom-Json
     return $package.version
 }
+function Load-EnvFile {
+    param([string]$path)
+    if (Test-Path $path) {
+        Write-Host "Loading environment variables from $path..." -ForegroundColor Gray
+        foreach ($line in Get-Content $path) {
+            if ($line -match "^([^#=]+)=(.*)$") {
+                $key = $matches[1].Trim()
+                $value = $matches[2].Trim().Trim("'").Trim('"')
+                if ($key) {
+                    [System.Environment]::SetEnvironmentVariable($key, $value)
+                    # Also set it in the current process for immediate use
+                    $env:$key = $value
+                }
+            }
+        }
+    }
+}
+
 # Utility functions for build scripts

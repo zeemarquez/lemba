@@ -6,6 +6,7 @@ param(
 $scriptDir = $PSScriptRoot
 if (-not $scriptDir) { $scriptDir = "." }
 . "$scriptDir\scripts\build-utils.ps1"
+Load-EnvFile (Join-Path $scriptDir ".env.local")
 
 Write-Host ">>> Starting Multi-Platform Build <<<" -ForegroundColor Cyan
 
