@@ -4,9 +4,9 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
-import { AgentMessage, DocumentDiff, createMessage, applyDiff as applyDiffToContent, sendMessageToAI } from './agent';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, sendMessageToAI, generateId } from './agent';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
-export type { AgentMessage, DocumentDiff };
+export type { AgentMessage, DocumentDiff, AgentChat };
 
 
 
@@ -33,12 +33,19 @@ interface AppState {
     showOutline: boolean;
     activeHeadingId: string | null;
 
-    // Agent State
+    // Agent State (multiple chats)
+    chats: Record<string, AgentChat>;
+    activeChatId: string | null;
     agentMessages: AgentMessage[];
     pendingDiffs: Record<string, DocumentDiff>;
     agentMentionedFiles: string[];
     agentLoading: boolean;
     agentError: string | null;
+    agentModel: string;
+    agentReadOnly: boolean;
+    agentApiKeyOverride: string;
+    agentTemperature: number;
+    agentMaxTokens: number;
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -108,6 +115,16 @@ interface AppState {
     setAgentMentionedFiles: (files: string[]) => void;
     setAgentLoading: (loading: boolean) => void;
     setAgentError: (error: string | null) => void;
+    setAgentModel: (model: string) => void;
+    setAgentReadOnly: (readOnly: boolean) => void;
+    setAgentApiKeyOverride: (key: string) => void;
+    setAgentTemperature: (temperature: number) => void;
+    setAgentMaxTokens: (maxTokens: number) => void;
+    // Chat history
+    createNewChat: () => string;
+    switchChat: (chatId: string) => void;
+    clearAllChats: () => void;
+    getChatsList: () => AgentChat[];
 
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -366,12 +383,19 @@ export const useStore = create<AppState>()(
                 sourceEditorFontFamily: 'monospace',
                 sourceEditorFontSize: 14,
 
-                // Agent Initial State
+                // Agent Initial State (multiple chats)
+                chats: {},
+                activeChatId: null,
                 agentMessages: [],
                 pendingDiffs: {},
                 agentMentionedFiles: [],
                 agentLoading: false,
                 agentError: null,
+                agentModel: 'gpt-4o',
+                agentReadOnly: false,
+                agentApiKeyOverride: '',
+                agentTemperature: 0.7,
+                agentMaxTokens: 4096,
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -968,57 +992,121 @@ export const useStore = create<AppState>()(
                     }
                 },
 
-                // Agent Actions
-                addAgentMessage: (message) => set((state) => ({
-                    agentMessages: [...state.agentMessages, message]
-                })),
+                // Agent Actions (sync to active chat in chats)
+                addAgentMessage: (message) => set((state) => {
+                    const nextMessages = [...state.agentMessages, message];
+                    const updates: Partial<AppState> = { agentMessages: nextMessages };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        const chat = state.chats[state.activeChatId];
+                        const title = chat.messages.length === 0 && message.role === 'user'
+                            ? (message.content.slice(0, 50).trim() || 'New chat') + (message.content.length > 50 ? '…' : '')
+                            : chat.title;
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...chat,
+                                title,
+                                messages: nextMessages,
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
+                }),
 
                 sendAgentMessage: async (content, mentions = []) => {
-                    // Create user message
-                    const userMessage = createMessage('user', content, 
+                    if (!get().activeChatId) {
+                        get().createNewChat();
+                    }
+                    const userMessage = createMessage('user', content,
                         mentions.map(fileId => ({
                             fileId,
                             fileName: fileId.split('/').pop() || fileId,
                         }))
                     );
-                    
-                    // Add user message and set loading
-                    set((s) => ({
-                        agentMessages: [...s.agentMessages, userMessage],
-                        agentMentionedFiles: mentions,
-                        agentLoading: true,
-                        agentError: null,
-                    }));
+                    const currentChatId = get().activeChatId;
+                    set((s) => {
+                        const nextMessages = [...s.agentMessages, userMessage];
+                        const updates: Partial<AppState> = {
+                            agentMessages: nextMessages,
+                            agentMentionedFiles: mentions,
+                            agentLoading: true,
+                            agentError: null,
+                        };
+                        if (currentChatId && s.chats[currentChatId]) {
+                            const chat = s.chats[currentChatId];
+                            const title = chat.messages.length === 0
+                                ? (content.slice(0, 50).trim() || 'New chat') + (content.length > 50 ? '…' : '')
+                                : chat.title;
+                            updates.chats = {
+                                ...s.chats,
+                                [currentChatId]: {
+                                    ...chat,
+                                    title,
+                                    messages: nextMessages,
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    });
 
                     try {
-                        // Get all messages including the new one
-                        const allMessages = [...get().agentMessages];
-                        
-                        // Call AI service
+                        const state = get();
+                        const allMessages = [...state.agentMessages];
                         const response = await sendMessageToAI(
                             allMessages,
                             mentions,
-                            // Callback when a diff is created
-                            (diff) => {
-                                set((s) => ({
-                                    pendingDiffs: { ...s.pendingDiffs, [diff.id]: diff }
-                                }));
+                            undefined,
+                            {
+                                model: state.agentModel,
+                                readOnly: state.agentReadOnly,
+                                apiKeyOverride: state.agentApiKeyOverride || undefined,
+                                temperature: state.agentTemperature,
+                                maxTokens: state.agentMaxTokens,
+                                onDiffCreated: (diff) => {
+                                    set((s) => {
+                                        const nextDiffs = { ...s.pendingDiffs, [diff.id]: diff };
+                                        const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                                        if (s.activeChatId && s.chats[s.activeChatId]) {
+                                            updates.chats = {
+                                                ...s.chats,
+                                                [s.activeChatId]: {
+                                                    ...s.chats[s.activeChatId],
+                                                    pendingDiffs: nextDiffs,
+                                                    updatedAt: Date.now(),
+                                                },
+                                            };
+                                        }
+                                        return updates;
+                                    });
+                                },
                             }
                         );
-                        
-                        // Create assistant message with response
                         const assistantMessage = createMessage(
                             'assistant',
                             response.content,
                             undefined,
                             response.diffs?.map(d => d.id)
                         );
-                        
-                        // Add assistant message
-                        set((s) => ({
-                            agentMessages: [...s.agentMessages, assistantMessage],
-                            agentLoading: false,
-                        }));
+                        set((s) => {
+                            const nextMessages = [...s.agentMessages, assistantMessage];
+                            const updates: Partial<AppState> = {
+                                agentMessages: nextMessages,
+                                agentLoading: false,
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        messages: nextMessages,
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
                     } catch (error) {
                         console.error('AI service error:', error);
                         set({
@@ -1028,60 +1116,154 @@ export const useStore = create<AppState>()(
                     }
                 },
 
-                clearAgentMessages: () => set({
-                    agentMessages: [],
-                    pendingDiffs: {},
-                    agentMentionedFiles: [],
-                    agentError: null,
+                clearAgentMessages: () => set((state) => {
+                    const updates: Partial<AppState> = {
+                        agentMessages: [],
+                        pendingDiffs: {},
+                        agentMentionedFiles: [],
+                        agentError: null,
+                    };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...state.chats[state.activeChatId],
+                                messages: [],
+                                pendingDiffs: {},
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
                 }),
 
-                addPendingDiff: (diff) => set((state) => ({
-                    pendingDiffs: { ...state.pendingDiffs, [diff.id]: diff }
-                })),
+                addPendingDiff: (diff) => set((state) => {
+                    const nextDiffs = { ...state.pendingDiffs, [diff.id]: diff };
+                    const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...state.chats[state.activeChatId],
+                                pendingDiffs: nextDiffs,
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
+                }),
 
                 approveDiff: async (diffId) => {
                     const state = get();
                     const diff = state.pendingDiffs[diffId];
-                    
                     if (!diff) {
                         console.error('Diff not found:', diffId);
                         return;
                     }
-
                     try {
-                        // Apply the diff to get the new content
                         const newContent = applyDiffToContent(diff.originalContent, diff);
-                        
-                        // Save the file with the new content
                         await get().saveFile(diff.fileId, newContent);
-                        
-                        // Update the file in memory if it's loaded
-                        set((s) => ({
-                            files: s.files.map((f) => 
-                                f.id === diff.fileId ? { ...f, content: newContent } : f
-                            ),
-                            // Update diff status to approved
-                            pendingDiffs: {
+                        set((s) => {
+                            const nextDiffs = {
                                 ...s.pendingDiffs,
-                                [diffId]: { ...diff, status: 'approved' }
+                                [diffId]: { ...diff, status: 'approved' as const },
+                            };
+                            const updates: Partial<AppState> = {
+                                files: s.files.map((f) =>
+                                    f.id === diff.fileId ? { ...f, content: newContent } : f
+                                ),
+                                pendingDiffs: nextDiffs,
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        pendingDiffs: nextDiffs,
+                                        updatedAt: Date.now(),
+                                    },
+                                };
                             }
-                        }));
+                            return updates;
+                        });
                     } catch (error) {
                         console.error('Failed to apply diff:', error);
                         set({ agentError: 'Failed to apply changes' });
                     }
                 },
 
-                rejectDiff: (diffId) => set((state) => ({
-                    pendingDiffs: {
+                rejectDiff: (diffId) => set((state) => {
+                    const nextDiffs = {
                         ...state.pendingDiffs,
-                        [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' }
+                        [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' as const },
+                    };
+                    const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...state.chats[state.activeChatId],
+                                pendingDiffs: nextDiffs,
+                                updatedAt: Date.now(),
+                            },
+                        };
                     }
-                })),
+                    return updates;
+                }),
 
                 setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
                 setAgentLoading: (loading) => set({ agentLoading: loading }),
                 setAgentError: (error) => set({ agentError: error }),
+                setAgentModel: (model) => set({ agentModel: model }),
+                setAgentReadOnly: (readOnly) => set({ agentReadOnly: readOnly }),
+                setAgentApiKeyOverride: (key) => set({ agentApiKeyOverride: key }),
+                setAgentTemperature: (temperature) => set({ agentTemperature: temperature }),
+                setAgentMaxTokens: (maxTokens) => set({ agentMaxTokens: maxTokens }),
+
+                createNewChat: () => {
+                    const id = generateId();
+                    const now = Date.now();
+                    const chat: AgentChat = {
+                        id,
+                        title: 'New chat',
+                        messages: [],
+                        pendingDiffs: {},
+                        createdAt: now,
+                        updatedAt: now,
+                    };
+                    set((state) => ({
+                        chats: { ...state.chats, [id]: chat },
+                        activeChatId: id,
+                        agentMessages: [],
+                        pendingDiffs: {},
+                        agentMentionedFiles: [],
+                        agentError: null,
+                    }));
+                    return id;
+                },
+
+                switchChat: (chatId) => {
+                    const state = get();
+                    const chat = state.chats[chatId];
+                    if (!chat) return;
+                    set({
+                        activeChatId: chatId,
+                        agentMessages: chat.messages,
+                        pendingDiffs: chat.pendingDiffs,
+                        agentMentionedFiles: [],
+                        agentError: null,
+                    });
+                },
+
+                clearAllChats: () => {
+                    set({ chats: {}, activeChatId: null, agentMessages: [], pendingDiffs: {}, agentMentionedFiles: [], agentError: null });
+                    get().createNewChat();
+                },
+
+                getChatsList: () => {
+                    const state = get();
+                    return Object.values(state.chats).sort((a, b) => b.updatedAt - a.updatedAt);
+                },
             };
         },
         {
@@ -1101,19 +1283,28 @@ export const useStore = create<AppState>()(
                 sidebarView: state.sidebarView,
                 currentView: state.currentView,
                 editorViewMode: state.editorViewMode,
+                chats: state.chats,
+                activeChatId: state.activeChatId,
+                agentModel: state.agentModel,
+                agentReadOnly: state.agentReadOnly,
+                agentApiKeyOverride: state.agentApiKeyOverride,
+                agentTemperature: state.agentTemperature,
+                agentMaxTokens: state.agentMaxTokens,
             }),
             merge: (persistedState, currentState) => {
-                // Ignore customFonts and fontsLoaded from localStorage as they cannot be persisted there:
-                // - customFonts contains blobs which cannot be serialized
-                // - fontsLoaded must start as false and only become true after fetchFonts() completes
-                // This prevents 'poisoned' empty objects from overwriting valid fetched fonts
-                // if hydration happens after fetchFonts.
+                const persisted = persistedState as Partial<AppState> & { chats?: Record<string, AgentChat>; activeChatId?: string | null };
                 const merged = {
                     ...currentState,
-                    ...(persistedState as object),
+                    ...persisted,
                     customFonts: currentState.customFonts,
                     fontsLoaded: currentState.fontsLoaded,
                 };
+                // Restore agentMessages and pendingDiffs from active chat
+                if (merged.activeChatId && merged.chats?.[merged.activeChatId]) {
+                    const chat = merged.chats[merged.activeChatId];
+                    merged.agentMessages = chat.messages ?? [];
+                    merged.pendingDiffs = chat.pendingDiffs ?? {};
+                }
                 return merged;
             }
         }

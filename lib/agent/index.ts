@@ -8,6 +8,7 @@ export type {
     MessageRole,
     FileMention,
     AgentMessage,
+    AgentChat,
     DiffType,
     DiffStatus,
     DiffHunk,

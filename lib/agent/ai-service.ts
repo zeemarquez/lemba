@@ -53,6 +53,17 @@ interface ChatMessage {
     }[];
 }
 
+// Read-only tools (no document editing)
+const READ_ONLY_TOOL_NAMES = new Set([
+    'read_document',
+    'read_document_section',
+    'get_document_metadata',
+    'search_in_document',
+    'search_all_documents',
+    'find_headings',
+    'list_files',
+]);
+
 // ==================== Tool Definitions ====================
 
 const TOOLS = [
@@ -516,13 +527,37 @@ function getApiKey(): string {
     return key;
 }
 
+export interface SendMessageToAIOptions {
+    model?: string;
+    readOnly?: boolean;
+    apiKeyOverride?: string;
+    temperature?: number;
+    maxTokens?: number;
+    onDiffCreated?: (diff: DocumentDiff) => void;
+}
+
 export async function sendMessageToAI(
     messages: AgentMessage[],
     mentionedFiles: string[],
-    onDiffCreated?: (diff: DocumentDiff) => void
+    onDiffCreated?: (diff: DocumentDiff) => void,
+    options?: SendMessageToAIOptions
 ): Promise<AIResponse> {
-    const apiKey = getApiKey();
-    
+    const apiKey = (options?.apiKeyOverride && options.apiKeyOverride.trim()) ? options.apiKeyOverride.trim() : getApiKey();
+    const model = options?.model ?? 'gpt-4o';
+    const readOnly = options?.readOnly ?? false;
+    const temperature = options?.temperature ?? 0.7;
+    const maxTokens = options?.maxTokens ?? 4096;
+    const onDiff = options?.onDiffCreated ?? onDiffCreated;
+
+    // In read-only mode, only expose read tools
+    const tools = readOnly
+        ? TOOLS.filter((t) => READ_ONLY_TOOL_NAMES.has(t.function.name))
+        : TOOLS;
+
+    const systemPrompt = readOnly
+        ? SYSTEM_PROMPT + '\n\n**Read-only mode is enabled.** You must NOT use any tools that propose or apply edits to documents. Only read, search, and list. If the user asks to edit, explain that edit mode is disabled.'
+        : SYSTEM_PROMPT;
+
     // Build context from mentioned files
     let fileContext = '';
     if (mentionedFiles.length > 0) {
@@ -539,7 +574,7 @@ export async function sendMessageToAI(
     
     // Convert AgentMessages to ChatMessages
     const chatMessages: ChatMessage[] = [
-        { role: 'system', content: SYSTEM_PROMPT }
+        { role: 'system', content: systemPrompt }
     ];
     
     // Add file context to the first user message if available
@@ -574,12 +609,12 @@ export async function sendMessageToAI(
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model,
                 messages: chatMessages,
-                tools: TOOLS,
-                tool_choice: 'auto',
-                temperature: 0.7,
-                max_tokens: 4096
+                tools,
+                tool_choice: tools.length > 0 ? 'auto' : undefined,
+                temperature,
+                max_tokens: maxTokens
             })
         });
         
@@ -613,8 +648,8 @@ export async function sendMessageToAI(
                         const resultObj = JSON.parse(result);
                         if (resultObj.success && resultObj.diff) {
                             collectedDiffs.push(resultObj.diff);
-                            if (onDiffCreated) {
-                                onDiffCreated(resultObj.diff);
+                            if (onDiff) {
+                                onDiff(resultObj.diff);
                             }
                         }
                     } catch {

@@ -7,6 +7,7 @@ import {
   Upload,
   Trash2,
   ChevronDown,
+  Brain,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
@@ -55,6 +56,12 @@ export function SettingsDialog() {
     sourceEditorFontSize,
     setSourceEditorFontFamily,
     setSourceEditorFontSize,
+    agentApiKeyOverride,
+    setAgentApiKeyOverride,
+    agentTemperature,
+    setAgentTemperature,
+    agentMaxTokens,
+    setAgentMaxTokens,
   } = useStore();
 
   const [isDragging, setIsDragging] = React.useState(false);
@@ -152,6 +159,13 @@ export function SettingsDialog() {
               value="templates"
             >
               Templates
+            </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="agent"
+            >
+              <Brain className="size-4 mr-2 shrink-0" />
+              Agent
             </TabsTrigger>
           </TabsList>
 
@@ -390,6 +404,72 @@ function hello() {
                   </div>
                 </div>
               </div>
+              </TabsContent>
+
+              <TabsContent className="mt-0 outline-none" value="agent">
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-sm">OpenAI API</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Configure the AI assistant. Leave the API key empty to use the environment variable (NEXT_PUBLIC_OPENAI_API_KEY or OPENAI_API_KEY).
+                    </p>
+                    <div className="space-y-2">
+                      <label htmlFor="agent-api-key" className="text-sm font-medium">
+                        API Key
+                      </label>
+                      <Input
+                        id="agent-api-key"
+                        type="password"
+                        placeholder="sk-..."
+                        value={agentApiKeyOverride}
+                        onChange={(e) => setAgentApiKeyOverride(e.target.value)}
+                        className="font-mono text-sm"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h4 className="font-medium text-sm">Model parameters</h4>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label htmlFor="agent-temperature" className="text-sm font-medium">
+                          Temperature
+                        </label>
+                        <Input
+                          id="agent-temperature"
+                          type="number"
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          value={agentTemperature}
+                          onChange={(e) => setAgentTemperature(Number(e.target.value) || 0.7)}
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Higher = more creative (0–2). Default: 0.7
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label htmlFor="agent-max-tokens" className="text-sm font-medium">
+                          Max tokens
+                        </label>
+                        <Input
+                          id="agent-max-tokens"
+                          type="number"
+                          min={256}
+                          max={128000}
+                          step={256}
+                          value={agentMaxTokens}
+                          onChange={(e) => setAgentMaxTokens(Number(e.target.value) || 4096)}
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Maximum response length. Default: 4096
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </TabsContent>
 
               <TabsContent className="mt-0 outline-none" value="templates">

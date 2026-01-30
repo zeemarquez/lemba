@@ -99,6 +99,17 @@ export type InsertPosition =
     | { type: 'start' }                              // Insert at document start
     | { type: 'end' };                               // Insert at document end
 
+// ==================== Chat Types ====================
+
+export interface AgentChat {
+    id: string;
+    title: string;                               // Derived from first user message or "New chat"
+    messages: AgentMessage[];
+    pendingDiffs: Record<string, DocumentDiff>;
+    createdAt: number;
+    updatedAt: number;
+}
+
 // ==================== Agent State Types ====================
 
 export interface AgentState {
