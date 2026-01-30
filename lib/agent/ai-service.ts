@@ -1012,11 +1012,15 @@ export async function sendMessageToAI(
         // Check if there are tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
             agentLog.step('tool_calls', message.tool_calls.length, message.tool_calls.map((t: { function: { name: string } }) => t.function.name));
-            // Add assistant message with tool calls
+            // Add assistant message with tool calls (ChatMessage requires type: 'function' on each)
             chatMessages.push({
                 role: 'assistant',
                 content: message.content || '',
-                tool_calls: message.tool_calls
+                tool_calls: message.tool_calls.map((tc) => ({
+                    id: tc.id,
+                    type: 'function' as const,
+                    function: tc.function
+                }))
             });
             
             // Execute each tool call
