@@ -15,43 +15,41 @@ export function AgentPanel() {
     const {
         agentMessages,
         pendingDiffs,
+        getMergedPendingDiffs,
+        acceptAllPending,
+        rejectAllPending,
         agentLoading,
+        agentCurrentStep,
         agentError,
-        approveDiff,
-        rejectDiff,
         agentModel,
         agentReadOnly,
+        agentUseOrchestration,
         setAgentModel,
         setAgentReadOnly,
+        setAgentUseOrchestration,
     } = useStore();
 
     const [chatsDialogOpen, setChatsDialogOpen] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
 
-    // Get all pending diffs
-    const pendingDiffsList = useMemo(() => {
-        return Object.values(pendingDiffs).filter(d => d.status === 'pending');
-    }, [pendingDiffs]);
+    // Merged pending diffs (one per file) for single accept/reject; recompute when pendingDiffs changes
+    const mergedPendingDiffs = useMemo(() => {
+        return Object.values(getMergedPendingDiffs());
+    }, [getMergedPendingDiffs, pendingDiffs]);
 
-    const hasPendingDiffs = pendingDiffsList.length > 0;
+    const hasPendingDiffs = mergedPendingDiffs.length > 0;
 
-    // Accept all pending diffs
-    const handleAcceptAll = async () => {
+    const handleAccept = async () => {
         setIsApproving(true);
         try {
-            for (const diff of pendingDiffsList) {
-                await approveDiff(diff.id);
-            }
+            await acceptAllPending();
         } finally {
             setIsApproving(false);
         }
     };
 
-    // Discard all pending diffs
-    const handleDiscardAll = () => {
-        for (const diff of pendingDiffsList) {
-            rejectDiff(diff.id);
-        }
+    const handleReject = () => {
+        rejectAllPending();
     };
 
     return (
@@ -91,12 +89,14 @@ export function AgentPanel() {
                     {/* Loading indicator */}
                     {agentLoading && (
                         <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                            <span className="animate-pulse">
+                                {agentCurrentStep ?? 'Thinking…'}
+                            </span>
                             <div className="flex space-x-1">
                                 <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.3s]" />
                                 <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.15s]" />
                                 <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
                             </div>
-                            <span>Thinking...</span>
                         </div>
                     )}
 
@@ -109,39 +109,40 @@ export function AgentPanel() {
                 </div>
             </ScrollArea>
 
-            {/* Pending Changes Section - above input */}
+            {/* Pending Changes Section - single merged accept/reject */}
             {hasPendingDiffs && (
                 <div className="border-t bg-amber-500/5 shrink-0 overflow-hidden">
                     <div className="px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-2">
-                            Pending Changes ({pendingDiffsList.length})
+                            Pending Changes
+                            {mergedPendingDiffs.length === 1
+                                ? ` (${mergedPendingDiffs[0].fileName})`
+                                : ` (${mergedPendingDiffs.length} files)`}
                         </div>
-                        <div className="space-y-1 max-h-[120px] overflow-y-auto">
-                            {pendingDiffsList.map(diff => (
-                                <DiffPreview key={diff.id} diff={diff} compact />
+                        <div className="space-y-1 max-h-[280px] overflow-y-auto">
+                            {mergedPendingDiffs.map((diff) => (
+                                <DiffPreview key={diff.fileId} diff={diff} compact={false} />
                             ))}
                         </div>
                     </div>
-                    
-                    {/* Accept/Discard All buttons */}
                     <div className="px-3 py-2 border-t border-amber-500/20 flex items-center gap-2">
                         <Button
                             variant="outline"
                             size="sm"
-                            onClick={handleDiscardAll}
+                            onClick={handleReject}
                             className="flex-1 h-8 text-xs gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50 border-red-200 dark:border-red-800"
                         >
                             <X size={14} />
-                            Discard All
+                            Reject
                         </Button>
                         <Button
                             size="sm"
-                            onClick={handleAcceptAll}
+                            onClick={handleAccept}
                             disabled={isApproving}
                             className="flex-1 h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
                         >
                             <Check size={14} />
-                            {isApproving ? 'Applying...' : 'Accept All'}
+                            {isApproving ? "Applying…" : "Accept"}
                         </Button>
                     </div>
                 </div>
@@ -188,6 +189,26 @@ export function AgentPanel() {
                         </button>
                         <span className="text-xs text-muted-foreground">Read only</span>
                     </label>
+                    <label className="flex items-center gap-2 cursor-pointer shrink-0" title="Use multi-agent orchestration (Planner, Researcher, Writer, Linter)">
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={agentUseOrchestration}
+                            onClick={() => setAgentUseOrchestration(!agentUseOrchestration)}
+                            className={cn(
+                                "relative inline-flex h-5 w-9 shrink-0 rounded-full border border-input transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                                agentUseOrchestration ? "bg-primary" : "bg-muted"
+                            )}
+                        >
+                            <span
+                                className={cn(
+                                    "pointer-events-none block h-4 w-3.5 rounded-full bg-background shadow ring-0 transition-transform mt-0.5 ml-0.5",
+                                    agentUseOrchestration ? "translate-x-4" : "translate-x-0"
+                                )}
+                            />
+                        </button>
+                        <span className="text-xs text-muted-foreground">Multi-agent</span>
+                    </label>
                 </div>
             </div>
         </div>
@@ -211,7 +232,7 @@ function EmptyState() {
                 <li>• Help with formatting</li>
             </ul>
             <p className="text-[11px] text-muted-foreground mt-3">
-                Use <code className="bg-muted px-1 rounded">@</code> to mention files
+                Open a document to start a conversation about it
             </p>
         </div>
     );

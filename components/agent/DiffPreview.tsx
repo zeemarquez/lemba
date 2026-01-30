@@ -21,7 +21,12 @@ export function DiffPreview({ diff, compact = false }: DiffPreviewProps) {
     const [isExpanded, setIsExpanded] = useState(false);
 
     const stats = calculateDiffStats(diff);
-    const formattedLines = formatDiffForDisplay(diff.originalContent, diff.proposedContent, 2);
+    const formattedLines = formatDiffForDisplay(
+        diff.originalContent,
+        diff.proposedContent,
+        isExpanded ? 0 : 2,
+        isExpanded // full document when expanded
+    );
 
     const statusColors = {
         pending: "border-amber-500/50 bg-amber-500/5",

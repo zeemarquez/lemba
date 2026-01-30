@@ -138,6 +138,32 @@ export function generateDiff(
     );
 }
 
+/**
+ * Merge multiple diffs for the same file into a single diff.
+ * Applies diffs in createdAt order: each diff's hunks are applied to the running content.
+ * Result: one diff with originalContent = first.originalContent, proposedContent = final content.
+ */
+export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
+    if (diffs.length === 0) return null;
+    if (diffs.length === 1) return diffs[0];
+
+    const sorted = [...diffs].sort((a, b) => a.createdAt - b.createdAt);
+    const first = sorted[0];
+    let content = first.originalContent;
+
+    for (const d of sorted) {
+        content = applyHunks(content, d.hunks);
+    }
+
+    return generateDiff(
+        first.fileId,
+        first.fileName,
+        first.originalContent,
+        content,
+        'Merged changes'
+    );
+}
+
 // ==================== Diff Application ====================
 
 /**
@@ -189,12 +215,14 @@ export interface FormattedLine {
 }
 
 /**
- * Format diff hunks for display in a unified diff view
+ * Format diff hunks for display in a unified diff view.
+ * @param fullDocument - If true, include all unchanged lines (full document with diffs); if false, show only context around changes.
  */
 export function formatDiffForDisplay(
     oldContent: string,
     newContent: string,
-    contextLines: number = 3
+    contextLines: number = 3,
+    fullDocument: boolean = false
 ): FormattedLine[] {
     const oldLines = splitLines(oldContent);
     const newLines = splitLines(newContent);
@@ -217,19 +245,24 @@ export function formatDiffForDisplay(
     for (let hunkIdx = 0; hunkIdx < hunks.length; hunkIdx++) {
         const hunk = hunks[hunkIdx];
         const hunkStartOld = hunk.startLine;
+        const nextHunkStart = hunkIdx < hunks.length - 1
+            ? hunks[hunkIdx + 1].startLine
+            : oldLines.length + 1;
         
-        // Add context lines before this hunk
-        const contextStart = Math.max(oldLineNum, hunkStartOld - contextLines);
+        // Context before this hunk: full gap when fullDocument, else limited
+        const contextStart = fullDocument
+            ? oldLineNum
+            : Math.max(oldLineNum, hunkStartOld - contextLines);
         
-        // Add separator if there's a gap
-        if (hunkIdx > 0 && oldLineNum < contextStart) {
+        // Add separator only when not full document (collapsed gap)
+        if (!fullDocument && hunkIdx > 0 && oldLineNum < contextStart) {
             result.push({
                 type: 'context',
                 content: '...',
             });
         }
         
-        // Add unchanged lines before the hunk (context)
+        // Add unchanged lines before the hunk
         for (let i = contextStart; i < hunkStartOld; i++) {
             result.push({
                 type: 'unchanged',
@@ -239,11 +272,10 @@ export function formatDiffForDisplay(
             });
         }
         
-        // Update line numbers to hunk start
         newLineNum += (hunkStartOld - oldLineNum);
         oldLineNum = hunkStartOld;
         
-        // Add deleted lines
+        // Deleted lines
         for (const line of hunk.oldLines) {
             result.push({
                 type: 'deletion',
@@ -253,7 +285,7 @@ export function formatDiffForDisplay(
             oldLineNum++;
         }
         
-        // Add added lines
+        // Added lines
         for (const line of hunk.newLines) {
             result.push({
                 type: 'addition',
@@ -263,14 +295,12 @@ export function formatDiffForDisplay(
             newLineNum++;
         }
         
-        // Add context lines after this hunk
-        const nextHunkStart = hunkIdx < hunks.length - 1 
-            ? hunks[hunkIdx + 1].startLine 
-            : oldLines.length + 1;
+        // Context after this hunk: full gap when fullDocument, else limited
+        const contextEnd = fullDocument
+            ? nextHunkStart - 1
+            : Math.min(oldLineNum + contextLines, nextHunkStart);
         
-        const contextEnd = Math.min(oldLineNum + contextLines, nextHunkStart);
-        
-        for (let i = oldLineNum; i < contextEnd; i++) {
+        for (let i = oldLineNum; i <= contextEnd; i++) {
             if (i <= oldLines.length) {
                 result.push({
                     type: 'unchanged',

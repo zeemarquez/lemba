@@ -364,9 +364,30 @@ export async function proposeDelete(
 }
 
 /**
+ * Normalize heading text for flexible matching (strip leading "N." or "N)" numbering).
+ */
+function normalizeHeadingForMatch(text: string): string {
+    return text
+        .trim()
+        .toLowerCase()
+        .replace(/^\d+[.)]\s*/, '') // "6. " or "6) "
+        .trim();
+}
+
+/**
+ * Check if a document heading matches the requested sectionHeading (flexible).
+ */
+function headingMatchesSection(headingText: string, sectionHeading: string): boolean {
+    const h = normalizeHeadingForMatch(headingText);
+    const s = normalizeHeadingForMatch(sectionHeading);
+    if (!h || !s) return headingText.toLowerCase().trim() === sectionHeading.toLowerCase().trim();
+    return h === s || h.includes(s) || s.includes(h);
+}
+
+/**
  * Propose replacing an entire section (from heading to next heading or end)
  * @param fileId - File path/ID
- * @param sectionHeading - Text of the heading to find
+ * @param sectionHeading - Text of the heading to find (e.g. "Conclusion" or "6. Conclusion")
  * @param newContent - New content for the section (including the heading)
  */
 export async function proposeReplaceSection(
@@ -379,9 +400,9 @@ export async function proposeReplaceSection(
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
     
-    // Find the target heading
-    const headingIndex = headings.findIndex(h => 
-        h.text.toLowerCase().includes(sectionHeading.toLowerCase())
+    // Find the target heading (flexible match: "Conclusion" matches "6. Conclusion", etc.)
+    const headingIndex = headings.findIndex(h =>
+        headingMatchesSection(h.text, sectionHeading)
     );
     
     if (headingIndex === -1) {

@@ -4,7 +4,8 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
-import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, sendMessageToAI, generateId } from './agent';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId } from './agent';
+import { agentLog } from './agent/debug';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
 export type { AgentMessage, DocumentDiff, AgentChat };
 
@@ -40,12 +41,15 @@ interface AppState {
     pendingDiffs: Record<string, DocumentDiff>;
     agentMentionedFiles: string[];
     agentLoading: boolean;
+    /** Current orchestration step label (e.g. "Researching") when agentLoading and using orchestration */
+    agentCurrentStep: string | null;
     agentError: string | null;
     agentModel: string;
     agentReadOnly: boolean;
     agentApiKeyOverride: string;
     agentTemperature: number;
     agentMaxTokens: number;
+    agentUseOrchestration: boolean; // Enable multi-agent orchestration mode
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -110,6 +114,9 @@ interface AppState {
     sendAgentMessage: (content: string, mentions?: string[]) => Promise<void>;
     clearAgentMessages: () => void;
     addPendingDiff: (diff: DocumentDiff) => void;
+    getMergedPendingDiffs: () => Record<string, DocumentDiff>;
+    acceptAllPending: () => Promise<void>;
+    rejectAllPending: () => void;
     approveDiff: (diffId: string) => Promise<void>;
     rejectDiff: (diffId: string) => void;
     setAgentMentionedFiles: (files: string[]) => void;
@@ -120,6 +127,7 @@ interface AppState {
     setAgentApiKeyOverride: (key: string) => void;
     setAgentTemperature: (temperature: number) => void;
     setAgentMaxTokens: (maxTokens: number) => void;
+    setAgentUseOrchestration: (useOrchestration: boolean) => void;
     // Chat history
     createNewChat: () => string;
     switchChat: (chatId: string) => void;
@@ -390,12 +398,14 @@ export const useStore = create<AppState>()(
                 pendingDiffs: {},
                 agentMentionedFiles: [],
                 agentLoading: false,
+                agentCurrentStep: null,
                 agentError: null,
                 agentModel: 'gpt-4o',
                 agentReadOnly: false,
                 agentApiKeyOverride: '',
                 agentTemperature: 0.7,
                 agentMaxTokens: 4096,
+                agentUseOrchestration: false,
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -1014,23 +1024,31 @@ export const useStore = create<AppState>()(
                     return updates;
                 }),
 
-                sendAgentMessage: async (content, mentions = []) => {
+                sendAgentMessage: async (content, _mentions = []) => {
                     if (!get().activeChatId) {
                         get().createNewChat();
                     }
-                    const userMessage = createMessage('user', content,
-                        mentions.map(fileId => ({
-                            fileId,
-                            fileName: fileId.split('/').pop() || fileId,
-                        }))
-                    );
+                    // Use currently open/focused file for context (mentions UI is hidden for now)
+                    const state = get();
+                    const filesForContext =
+                        state.currentView === 'file' && state.activeFileId
+                            ? [state.activeFileId]
+                            : [];
+                    agentLog.info('sendAgentMessage', {
+                        mode: state.agentUseOrchestration ? 'orchestration' : 'single-agent',
+                        readOnly: state.agentReadOnly,
+                        fileContext: filesForContext,
+                        contentLength: content.length,
+                    });
+                    const userMessage = createMessage('user', content, []);
                     const currentChatId = get().activeChatId;
                     set((s) => {
                         const nextMessages = [...s.agentMessages, userMessage];
                         const updates: Partial<AppState> = {
                             agentMessages: nextMessages,
-                            agentMentionedFiles: mentions,
+                            agentMentionedFiles: filesForContext,
                             agentLoading: true,
+                            agentCurrentStep: null,
                             agentError: null,
                         };
                         if (currentChatId && s.chats[currentChatId]) {
@@ -1054,35 +1072,78 @@ export const useStore = create<AppState>()(
                     try {
                         const state = get();
                         const allMessages = [...state.agentMessages];
-                        const response = await sendMessageToAI(
-                            allMessages,
-                            mentions,
-                            undefined,
-                            {
-                                model: state.agentModel,
-                                readOnly: state.agentReadOnly,
-                                apiKeyOverride: state.agentApiKeyOverride || undefined,
-                                temperature: state.agentTemperature,
-                                maxTokens: state.agentMaxTokens,
-                                onDiffCreated: (diff) => {
-                                    set((s) => {
-                                        const nextDiffs = { ...s.pendingDiffs, [diff.id]: diff };
-                                        const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
-                                        if (s.activeChatId && s.chats[s.activeChatId]) {
-                                            updates.chats = {
-                                                ...s.chats,
-                                                [s.activeChatId]: {
-                                                    ...s.chats[s.activeChatId],
-                                                    pendingDiffs: nextDiffs,
-                                                    updatedAt: Date.now(),
-                                                },
-                                            };
+                        
+                        // Callback for handling diff creation
+                        const onDiffCreated = (diff: DocumentDiff) => {
+                            set((s) => {
+                                const nextDiffs = { ...s.pendingDiffs, [diff.id]: diff };
+                                const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                                if (s.activeChatId && s.chats[s.activeChatId]) {
+                                    updates.chats = {
+                                        ...s.chats,
+                                        [s.activeChatId]: {
+                                            ...s.chats[s.activeChatId],
+                                            pendingDiffs: nextDiffs,
+                                            updatedAt: Date.now(),
+                                        },
+                                    };
+                                }
+                                return updates;
+                            });
+                        };
+
+                        let response: { content: string; diffs?: DocumentDiff[] };
+                        
+                        if (state.agentUseOrchestration) {
+                            // Use multi-agent orchestration system
+                            const stepLabels: Record<string, string> = {
+                                researcher: '🔍 Researching',
+                                planner: '📋 Planning',
+                                writer: '✍️ Writing',
+                                linter: '✨ Linting',
+                                summarizer: '💬 Summarizing',
+                            };
+                            const orchestrationResult = await runOrchestration(
+                                allMessages,
+                                filesForContext,
+                                {
+                                    model: state.agentModel,
+                                    readOnly: state.agentReadOnly,
+                                    apiKey: state.agentApiKeyOverride || undefined,
+                                    temperature: state.agentTemperature,
+                                    maxTokens: state.agentMaxTokens,
+                                    onDiffCreated,
+                                    onEvent: (event) => {
+                                        if (event.type === 'step_started') {
+                                            set({ agentCurrentStep: stepLabels[event.step.agentType] ?? event.step.agentType });
+                                        } else if (event.type === 'workflow_completed' || event.type === 'workflow_failed') {
+                                            set({ agentCurrentStep: null });
                                         }
-                                        return updates;
-                                    });
-                                },
-                            }
-                        );
+                                    },
+                                }
+                            );
+                            response = {
+                                content: orchestrationResult.content,
+                                diffs: orchestrationResult.diffs,
+                            };
+                        } else {
+                            // Use single-agent mode (original behavior)
+                            response = await sendMessageToAI(
+                                allMessages,
+                                filesForContext,
+                                undefined,
+                                {
+                                    model: state.agentModel,
+                                    readOnly: state.agentReadOnly,
+                                    apiKeyOverride: state.agentApiKeyOverride || undefined,
+                                    temperature: state.agentTemperature,
+                                    maxTokens: state.agentMaxTokens,
+                                    onDiffCreated,
+                                }
+                            );
+                        }
+                        
+                        agentLog.info('response received', { contentLength: response.content?.length ?? 0, diffs: response.diffs?.length ?? 0 });
                         const assistantMessage = createMessage(
                             'assistant',
                             response.content,
@@ -1108,9 +1169,10 @@ export const useStore = create<AppState>()(
                             return updates;
                         });
                     } catch (error) {
-                        console.error('AI service error:', error);
+                        agentLog.error('AI service error', error);
                         set({
                             agentLoading: false,
+                            agentCurrentStep: null,
                             agentError: error instanceof Error ? error.message : 'Failed to get AI response',
                         });
                     }
@@ -1153,6 +1215,74 @@ export const useStore = create<AppState>()(
                     return updates;
                 }),
 
+                getMergedPendingDiffs: () => {
+                    const state = get();
+                    const pending = Object.values(state.pendingDiffs).filter((d) => d.status === 'pending');
+                    const byFile: Record<string, DocumentDiff[]> = {};
+                    for (const d of pending) {
+                        if (!byFile[d.fileId]) byFile[d.fileId] = [];
+                        byFile[d.fileId].push(d);
+                    }
+                    const merged: Record<string, DocumentDiff> = {};
+                    for (const fileId of Object.keys(byFile)) {
+                        const m = mergeDiffsForFile(byFile[fileId]);
+                        if (m) merged[fileId] = m;
+                    }
+                    return merged;
+                },
+
+                acceptAllPending: async () => {
+                    const merged = get().getMergedPendingDiffs();
+                    const diffs = Object.values(merged);
+                    if (diffs.length === 0) return;
+                    try {
+                        for (const diff of diffs) {
+                            const newContent = applyDiffToContent(diff.originalContent, diff);
+                            await get().saveFile(diff.fileId, newContent);
+                        }
+                        set((s) => {
+                            const updates: Partial<AppState> = {
+                                pendingDiffs: {},
+                                files: s.files.map((f) => {
+                                    const d = diffs.find((d) => d.fileId === f.id);
+                                    if (!d) return f;
+                                    return { ...f, content: applyDiffToContent(d.originalContent, d) };
+                                }),
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        pendingDiffs: {},
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
+                    } catch (error) {
+                        console.error('Failed to apply changes:', error);
+                        set({ agentError: 'Failed to apply changes' });
+                    }
+                },
+
+                rejectAllPending: () =>
+                    set((state) => {
+                        const updates: Partial<AppState> = { pendingDiffs: {} };
+                        if (state.activeChatId && state.chats[state.activeChatId]) {
+                            updates.chats = {
+                                ...state.chats,
+                                [state.activeChatId]: {
+                                    ...state.chats[state.activeChatId],
+                                    pendingDiffs: {},
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    }),
+
                 approveDiff: async (diffId) => {
                     const state = get();
                     const diff = state.pendingDiffs[diffId];
@@ -1192,24 +1322,25 @@ export const useStore = create<AppState>()(
                     }
                 },
 
-                rejectDiff: (diffId) => set((state) => {
-                    const nextDiffs = {
-                        ...state.pendingDiffs,
-                        [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' as const },
-                    };
-                    const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
-                    if (state.activeChatId && state.chats[state.activeChatId]) {
-                        updates.chats = {
-                            ...state.chats,
-                            [state.activeChatId]: {
-                                ...state.chats[state.activeChatId],
-                                pendingDiffs: nextDiffs,
-                                updatedAt: Date.now(),
-                            },
+                rejectDiff: (diffId) =>
+                    set((state) => {
+                        const nextDiffs = {
+                            ...state.pendingDiffs,
+                            [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' as const },
                         };
-                    }
-                    return updates;
-                }),
+                        const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                        if (state.activeChatId && state.chats[state.activeChatId]) {
+                            updates.chats = {
+                                ...state.chats,
+                                [state.activeChatId]: {
+                                    ...state.chats[state.activeChatId],
+                                    pendingDiffs: nextDiffs,
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    }),
 
                 setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
                 setAgentLoading: (loading) => set({ agentLoading: loading }),
@@ -1219,6 +1350,7 @@ export const useStore = create<AppState>()(
                 setAgentApiKeyOverride: (key) => set({ agentApiKeyOverride: key }),
                 setAgentTemperature: (temperature) => set({ agentTemperature: temperature }),
                 setAgentMaxTokens: (maxTokens) => set({ agentMaxTokens: maxTokens }),
+                setAgentUseOrchestration: (useOrchestration) => set({ agentUseOrchestration: useOrchestration }),
 
                 createNewChat: () => {
                     const id = generateId();
@@ -1290,6 +1422,7 @@ export const useStore = create<AppState>()(
                 agentApiKeyOverride: state.agentApiKeyOverride,
                 agentTemperature: state.agentTemperature,
                 agentMaxTokens: state.agentMaxTokens,
+                agentUseOrchestration: state.agentUseOrchestration,
             }),
             merge: (persistedState, currentState) => {
                 const persisted = persistedState as Partial<AppState> & { chats?: Record<string, AgentChat>; activeChatId?: string | null };

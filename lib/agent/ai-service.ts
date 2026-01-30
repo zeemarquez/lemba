@@ -3,6 +3,7 @@
  * Handles OpenAI API interactions for the AI agent
  */
 
+import { agentLog } from './debug';
 import { 
     AgentMessage, 
     DocumentDiff, 
@@ -168,7 +169,7 @@ const TOOLS = [
         type: 'function' as const,
         function: {
             name: 'find_headings',
-            description: 'Find all headings in a document, optionally filtered by level',
+            description: 'Find all headings in a document (returns text and lineNumber for each). Use the exact "text" value when calling propose_replace_section.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -292,7 +293,7 @@ const TOOLS = [
         type: 'function' as const,
         function: {
             name: 'propose_replace_section',
-            description: 'Propose replacing an entire section (from heading to next heading of same/higher level)',
+            description: 'Propose replacing an entire section (from heading to next heading of same/higher level). Use the exact heading text from find_headings (e.g. "6. Conclusion") for sectionHeading.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -302,7 +303,7 @@ const TOOLS = [
                     },
                     sectionHeading: {
                         type: 'string',
-                        description: 'The heading text of the section to replace'
+                        description: 'The heading text of the section to replace (use exact text from find_headings, e.g. "6. Conclusion")'
                     },
                     newContent: {
                         type: 'string',
@@ -355,20 +356,23 @@ You have access to tools that allow you to:
    - Use \`propose_edit\` for replacing specific text
    - Use \`propose_insert\` for adding new content
    - Use \`propose_delete\` for removing content
-   - Use \`propose_replace_section\` for replacing entire sections
+   - Use \`propose_replace_section\` for replacing entire sections (pass the **exact** heading text from \`find_headings\` as \`sectionHeading\`, e.g. "6. Conclusion" not just "Conclusion")
 
-5. **File mentions**: When the user mentions a file with @filename, that file's content may be provided in context. Use this to understand what they're working on.
+5. **Finding sections**: Before replacing or editing a section, always call \`find_headings\` to get the exact heading text and structure. Use the \`text\` and \`lineNumber\` from the result. The \`sectionHeading\` in \`propose_replace_section\` must match a heading in the document (numbering like "6. Conclusion" is fine).
 
-6. **Be helpful**: Offer suggestions for improving document structure, formatting, or content when appropriate.
+6. **File mentions**: When the user mentions a file with @filename, that file's content may be provided in context. Use this to understand what they're working on.
 
-7. **Markdown expertise**: You understand markdown syntax well. Help users with formatting, tables, code blocks, links, images, and other markdown features.
+7. **Be helpful**: Offer suggestions for improving document structure, formatting, or content when appropriate.
+
+8. **Markdown expertise**: You understand markdown syntax well. Help users with formatting, tables, code blocks, links, images, and other markdown features.
 
 ## Response Format
 
-- Be concise but helpful
-- When proposing edits, explain what you're changing and why
-- If you need to read a document first, do so before making suggestions
-- Use code blocks when showing markdown examples`;
+- **Format your final reply** with bullet points (each change or key point on its own line).
+- Use **bold** for the most relevant parts: number of changes, main actions, file or section names (e.g. **3 changes** prepared, **expanded the introduction**).
+- Be concise but helpful. When proposing edits, explain what you're changing and why.
+- If you need to read a document first, do so before making suggestions.
+- Use code blocks only when showing markdown examples.`;
 
 // ==================== Tool Execution ====================
 
@@ -549,6 +553,8 @@ export async function sendMessageToAI(
     const maxTokens = options?.maxTokens ?? 4096;
     const onDiff = options?.onDiffCreated ?? onDiffCreated;
 
+    agentLog.info('sendMessageToAI (single-agent)', { model, readOnly, messageCount: messages.length, mentionedFiles: mentionedFiles.length });
+
     // In read-only mode, only expose read tools
     const tools = readOnly
         ? TOOLS.filter((t) => READ_ONLY_TOOL_NAMES.has(t.function.name))
@@ -630,6 +636,7 @@ export async function sendMessageToAI(
         
         // Check if there are tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
+            agentLog.step('tool_calls', message.tool_calls.length, message.tool_calls.map((t: { function: { name: string } }) => t.function.name));
             // Add assistant message with tool calls
             chatMessages.push({
                 role: 'assistant',
@@ -640,6 +647,7 @@ export async function sendMessageToAI(
             // Execute each tool call
             for (const toolCall of message.tool_calls) {
                 const args = JSON.parse(toolCall.function.arguments);
+                agentLog.tool(toolCall.function.name, args);
                 const result = await executeTool(toolCall.function.name, args);
                 
                 // Check if this was an edit operation that created a diff
@@ -670,12 +678,14 @@ export async function sendMessageToAI(
         }
         
         // No more tool calls, return the final response
+        agentLog.info('sendMessageToAI done', { diffs: collectedDiffs.length });
         return {
             content: message.content || '',
             diffs: collectedDiffs.length > 0 ? collectedDiffs : undefined
         };
     }
     
+    agentLog.warn('sendMessageToAI max iterations reached');
     // If we hit max iterations, return what we have
     return {
         content: 'I apologize, but I encountered an issue processing your request. Please try again.',

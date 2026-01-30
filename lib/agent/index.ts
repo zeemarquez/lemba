@@ -34,6 +34,7 @@ export {
     generateHunks,
     determineDiffType,
     generateDiff,
+    mergeDiffsForFile,
     applyDiff,
     applyHunk,
     applyHunks,
@@ -60,8 +61,45 @@ export {
     documentOps,
 } from './document-ops';
 
+// Debug logging (filter console by "AI Agent")
+export { agentLog } from './debug';
+
 // AI Service
 export {
     sendMessageToAI,
     streamMessageToAI,
 } from './ai-service';
+
+// Orchestration System
+export {
+    runOrchestration,
+    OrchestratorAgent,
+    PlannerAgent,
+    ResearcherAgent,
+    WriterAgent,
+    LinterAgent,
+    RAGEngine,
+    DocumentChunker,
+    EmbeddingService,
+    VectorStore,
+    ToolRegistry,
+} from './orchestration';
+
+export type {
+    OrchestrationOptions,
+    OrchestrationResult,
+} from './orchestration/orchestrator';
+
+export type {
+    AgentType,
+    AgentContext,
+    AgentTask,
+    AgentResult,
+    Workflow,
+    WorkflowStep,
+    IntentAnalysis,
+    UserIntent,
+    RAGChunk,
+    RAGQueryResult,
+    OrchestrationEvent,
+} from './orchestration/types';
