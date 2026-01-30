@@ -2,7 +2,7 @@
 
 import { AgentMessage } from "@/lib/agent";
 import { cn } from "@/lib/utils";
-import { Bot, User, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 
 interface ChatMessageProps {
     message: AgentMessage;
@@ -10,7 +10,6 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message }: ChatMessageProps) {
     const isUser = message.role === 'user';
-    const isAssistant = message.role === 'assistant';
 
     return (
         <div
@@ -19,20 +18,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 isUser && "flex-row-reverse"
             )}
         >
-            {/* Avatar */}
-            <div
-                className={cn(
-                    "w-7 h-7 rounded-full flex items-center justify-center shrink-0",
-                    isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-                )}
-            >
-                {isUser ? (
-                    <User size={14} />
-                ) : (
-                    <Bot size={14} />
-                )}
-            </div>
-
             {/* Message Content */}
             <div
                 className={cn(
@@ -68,11 +53,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
                     )}
                 >
                     <MessageContent content={message.content} />
-                </div>
-
-                {/* Timestamp */}
-                <div className="text-[10px] text-muted-foreground mt-1">
-                    {formatTime(message.timestamp)}
                 </div>
             </div>
         </div>
@@ -175,22 +155,4 @@ function MessageContent({ content }: { content: string }) {
             })}
         </div>
     );
-}
-
-function formatTime(timestamp: number): string {
-    const date = new Date(timestamp);
-    const now = new Date();
-    
-    // If same day, show time only
-    if (date.toDateString() === now.toDateString()) {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    
-    // Otherwise show date and time
-    return date.toLocaleDateString([], { 
-        month: 'short', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
 }

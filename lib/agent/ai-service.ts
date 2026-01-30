@@ -1,7 +1,9 @@
 /**
  * AI Service
- * Handles OpenAI API interactions for the AI agent
+ * Handles LLM API interactions for the AI agent (OpenAI, Anthropic, Google)
  */
+
+export type LLMProvider = 'openai' | 'anthropic' | 'google';
 
 import { agentLog } from './debug';
 import { 
@@ -518,20 +520,301 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
 // ==================== AI Service ====================
 
-function getApiKey(): string {
-    // Try NEXT_PUBLIC first (client-side), then server-side
-    const key = typeof window !== 'undefined' 
-        ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY || '')
-        : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '');
-    
-    if (!key) {
-        throw new Error('OpenAI API key not configured. Please set NEXT_PUBLIC_OPENAI_API_KEY in your environment.');
+const PROVIDER_LABELS: Record<LLMProvider, string> = {
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    google: 'Google',
+};
+
+/**
+ * Format API error for display: "Provider: short message"
+ */
+function formatProviderError(provider: LLMProvider, status: number, body: string): string {
+    const label = PROVIDER_LABELS[provider];
+    if (status === 401) return `${label}: Invalid API key`;
+    if (status === 429) return `${label}: Rate limit exceeded`;
+    if (status >= 500) return `${label}: Service error`;
+    try {
+        const j = JSON.parse(body) as { error?: { message?: string }; message?: string };
+        const msg = j?.error?.message ?? j?.message;
+        if (typeof msg === 'string' && msg.length > 0) {
+            const short = msg.length > 100 ? msg.slice(0, 97) + '…' : msg;
+            return `${label}: ${short}`;
+        }
+    } catch {
+        // ignore parse errors
     }
-    
+    return `${label}: Request failed (${status})`;
+}
+
+/** Whether an API key for this provider is set in environment (client checks NEXT_PUBLIC_* only). */
+export function hasEnvApiKey(provider: LLMProvider): boolean {
+    const keys: Record<LLMProvider, string> = {
+        openai: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_OPENAI_API_KEY : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) || '',
+        anthropic: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY) || '',
+        google: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY : process.env.GOOGLE_AI_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY) || '',
+    };
+    return (keys[provider] ?? '').trim().length > 0;
+}
+
+export function getApiKey(provider: LLMProvider, override?: string): string {
+    if (override && override.trim()) return override.trim();
+    const keys: Record<LLMProvider, string> = {
+        openai: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_OPENAI_API_KEY : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) || '',
+        anthropic: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY) || '',
+        google: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY : process.env.GOOGLE_AI_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY) || '',
+    };
+    const key = keys[provider];
+    if (!key) {
+        const label = PROVIDER_LABELS[provider];
+        throw new Error(`${label}: API key not configured. Add key in Settings → Agent.`);
+    }
     return key;
 }
 
+/**
+ * Validate an API key by making a minimal request. Returns true if key is valid.
+ */
+export async function validateApiKey(provider: LLMProvider, apiKey: string): Promise<boolean> {
+    const key = apiKey?.trim();
+    if (!key) return false;
+    try {
+        if (provider === 'openai') {
+            const res = await fetch('https://api.openai.com/v1/models', {
+                headers: { 'Authorization': `Bearer ${key}` },
+            });
+            return res.ok;
+        }
+        if (provider === 'google') {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
+            return res.ok;
+        }
+        if (provider === 'anthropic') {
+            const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': key,
+                    'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-haiku-20240307',
+                    max_tokens: 1,
+                    messages: [{ role: 'user', content: 'x' }],
+                }),
+            });
+            return res.ok;
+        }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
+/** Derive provider from model id (e.g. gpt-4o -> openai, claude-* -> anthropic, gemini-* -> google). */
+export function modelToProvider(model: string): LLMProvider {
+    if (!model) return 'openai';
+    if (model.startsWith('claude-')) return 'anthropic';
+    if (model.startsWith('gemini-')) return 'google';
+    return 'openai';
+}
+
+// ==================== Shared LLM client (one round) for orchestration ====================
+
+export interface ChatCompletionMessage {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string;
+    tool_call_id?: string;
+    tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+export interface ChatCompletionTool {
+    type: 'function';
+    function: { name: string; description?: string; parameters: Record<string, unknown> };
+}
+
+export interface ChatCompletionOneRoundOptions {
+    provider: LLMProvider;
+    apiKey: string;
+    model: string;
+    messages: ChatCompletionMessage[];
+    tools?: ChatCompletionTool[];
+    temperature?: number;
+    maxTokens?: number;
+}
+
+export interface ChatCompletionOneRoundResult {
+    content: string;
+    tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+/**
+ * One round of chat completion with optional tools. Used by orchestration agents.
+ */
+export async function chatCompletionOneRound(options: ChatCompletionOneRoundOptions): Promise<ChatCompletionOneRoundResult> {
+    const { provider, apiKey, model, messages, tools = [], temperature = 0.7, maxTokens = 4096 } = options;
+    const useOpenAIFormat = provider === 'openai' || provider === 'google';
+    const url = provider === 'google'
+        ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+        : 'https://api.openai.com/v1/chat/completions';
+
+    if (useOpenAIFormat) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model,
+                messages,
+                tools: tools.length ? tools : undefined,
+                tool_choice: tools.length ? 'auto' : undefined,
+                temperature,
+                max_tokens: maxTokens,
+            }),
+        });
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(formatProviderError(provider, response.status, err));
+        }
+        const data = await response.json();
+        const msg = data.choices?.[0]?.message;
+        if (!msg) throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
+        return {
+            content: msg.content ?? '',
+            tool_calls: msg.tool_calls,
+        };
+    }
+
+    // Anthropic
+    const anthropicTools = tools.map((t) => ({
+        name: t.function.name,
+        description: (t.function as { description?: string }).description ?? '',
+        input_schema: t.function.parameters as Record<string, unknown>,
+    }));
+    const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: string | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
+    const systemParts: string[] = [];
+    for (const m of messages) {
+        if (m.role === 'system') {
+            systemParts.push(m.content);
+            continue;
+        }
+        if (m.role === 'user') {
+            anthropicMessages.push({ role: 'user', content: m.content });
+        } else if (m.role === 'assistant') {
+            if (m.tool_calls?.length) {
+                anthropicMessages.push({
+                    role: 'assistant',
+                    content: m.tool_calls.map((tc) => ({
+                        type: 'tool_use' as const,
+                        id: tc.id,
+                        name: tc.function.name,
+                        input: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+                    })),
+                });
+            } else {
+                anthropicMessages.push({ role: 'assistant', content: m.content || '' });
+            }
+        } else if (m.role === 'tool') {
+            anthropicMessages.push({
+                role: 'user',
+                content: [{ type: 'tool_result' as const, tool_use_id: m.tool_call_id!, content: m.content }],
+            });
+        }
+    }
+    const systemPrompt = systemParts.join('\n\n');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+            model,
+            max_tokens: maxTokens,
+            system: systemPrompt,
+            messages: anthropicMessages,
+            tools: anthropicTools.length ? anthropicTools : undefined,
+            tool_choice: anthropicTools.length ? { type: 'auto' as const } : undefined,
+        }),
+    });
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(formatProviderError('anthropic', response.status, err));
+    }
+    const data = await response.json();
+    const blocks = data.content ?? [];
+    const textParts: string[] = [];
+    const toolCalls: Array<{ id: string; function: { name: string; arguments: string } }> = [];
+    for (const block of blocks) {
+        if (block.type === 'text') textParts.push(block.text ?? '');
+        else if (block.type === 'tool_use')
+            toolCalls.push({
+                id: block.id,
+                function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+            });
+    }
+    return { content: textParts.join('').trim(), tool_calls: toolCalls.length ? toolCalls : undefined };
+}
+
+/**
+ * Simple chat completion (no tools). Used by summarizer agent.
+ */
+export async function chatCompletion(options: {
+    provider: LLMProvider;
+    apiKey: string;
+    model: string;
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    temperature?: number;
+    maxTokens?: number;
+}): Promise<string> {
+    const { provider, apiKey, model, messages, temperature = 0.7, maxTokens = 4096 } = options;
+    const useOpenAIFormat = provider === 'openai' || provider === 'google';
+    const url = provider === 'google'
+        ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+        : 'https://api.openai.com/v1/chat/completions';
+
+    if (useOpenAIFormat) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+        });
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(formatProviderError(provider, response.status, err));
+        }
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content?.trim() ?? '';
+    }
+
+    const systemParts: string[] = [];
+    const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (const m of messages) {
+        if (m.role === 'system') systemParts.push(m.content);
+        else anthropicMessages.push({ role: m.role as 'user' | 'assistant', content: m.content });
+    }
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+            model,
+            max_tokens: maxTokens,
+            system: systemParts.join('\n\n'),
+            messages: anthropicMessages,
+        }),
+    });
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(formatProviderError('anthropic', response.status, err));
+    }
+    const data = await response.json();
+    const blocks = data.content ?? [];
+    const text = blocks.filter((b: { type: string }) => b.type === 'text').map((b: { text?: string }) => b.text ?? '').join('').trim();
+    return text || '';
+}
+
 export interface SendMessageToAIOptions {
+    provider?: LLMProvider;
     model?: string;
     readOnly?: boolean;
     apiKeyOverride?: string;
@@ -546,14 +829,15 @@ export async function sendMessageToAI(
     onDiffCreated?: (diff: DocumentDiff) => void,
     options?: SendMessageToAIOptions
 ): Promise<AIResponse> {
-    const apiKey = (options?.apiKeyOverride && options.apiKeyOverride.trim()) ? options.apiKeyOverride.trim() : getApiKey();
-    const model = options?.model ?? 'gpt-4o';
+    const provider = options?.provider ?? 'openai';
+    const apiKey = getApiKey(provider, options?.apiKeyOverride);
+    const model = options?.model ?? (provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gemini-1.5-flash');
     const readOnly = options?.readOnly ?? false;
     const temperature = options?.temperature ?? 0.7;
     const maxTokens = options?.maxTokens ?? 4096;
     const onDiff = options?.onDiffCreated ?? onDiffCreated;
 
-    agentLog.info('sendMessageToAI (single-agent)', { model, readOnly, messageCount: messages.length, mentionedFiles: mentionedFiles.length });
+    agentLog.info('sendMessageToAI (single-agent)', { provider, model, readOnly, messageCount: messages.length, mentionedFiles: mentionedFiles.length });
 
     // In read-only mode, only expose read tools
     const tools = readOnly
@@ -601,38 +885,129 @@ export async function sendMessageToAI(
         }
     }
     
-    // Make API call with tools
+    // Make API call with tools (provider-specific)
     const collectedDiffs: DocumentDiff[] = [];
     let maxIterations = 10; // Prevent infinite loops
+
+    const openaiCompatibleUrl = provider === 'google'
+        ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+        : 'https://api.openai.com/v1/chat/completions';
+
+    const useOpenAIFormat = provider === 'openai' || provider === 'google';
+    type MessageWithTools = { content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
     
     while (maxIterations > 0) {
         maxIterations--;
+        let message: MessageWithTools;
         
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model,
-                messages: chatMessages,
-                tools,
-                tool_choice: tools.length > 0 ? 'auto' : undefined,
-                temperature,
-                max_tokens: maxTokens
-            })
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('OpenAI API error:', errorText);
-            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+        if (useOpenAIFormat) {
+            // OpenAI and Google (OpenAI-compatible) use same request shape
+            const response = await fetch(openaiCompatibleUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: chatMessages,
+                    tools,
+                    tool_choice: tools.length > 0 ? 'auto' : undefined,
+                    temperature,
+                    max_tokens: maxTokens
+                })
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(formatProviderError(provider, response.status, errorText));
+            }
+            
+            const data = await response.json();
+            const choice = data.choices?.[0];
+            const msg = choice?.message;
+            if (!msg) {
+                throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
+            }
+            message = msg;
+        } else {
+            // Anthropic Messages API
+            const anthropicTools = tools.map((t) => ({
+                name: t.function.name,
+                description: (t.function as { description?: string }).description ?? '',
+                input_schema: t.function.parameters as Record<string, unknown>,
+            }));
+            const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: string | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
+            for (let i = 1; i < chatMessages.length; i++) {
+                const m = chatMessages[i];
+                if (m.role === 'user') {
+                    anthropicMessages.push({ role: 'user', content: m.content as string });
+                } else if (m.role === 'assistant') {
+                    if ((m as { tool_calls?: unknown[] }).tool_calls?.length) {
+                        const blocks = (m as { tool_calls: Array<{ id: string; function: { name: string; arguments: string } }> }).tool_calls.map((tc) => ({
+                            type: 'tool_use' as const,
+                            id: tc.id,
+                            name: tc.function.name,
+                            input: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+                        }));
+                        anthropicMessages.push({ role: 'assistant', content: blocks });
+                    } else {
+                        anthropicMessages.push({ role: 'assistant', content: (m.content as string) || '' });
+                    }
+                } else if (m.role === 'tool') {
+                    const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = [];
+                    let j = i;
+                    while (j < chatMessages.length && (chatMessages[j] as { role: string }).role === 'tool') {
+                        const tm = chatMessages[j] as { tool_call_id: string; content: string };
+                        toolResults.push({ type: 'tool_result', tool_use_id: tm.tool_call_id, content: tm.content });
+                        j++;
+                    }
+                    anthropicMessages.push({ role: 'user', content: toolResults });
+                    i = j - 1;
+                }
+            }
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                    model,
+                    max_tokens: maxTokens,
+                    system: systemPrompt,
+                    messages: anthropicMessages,
+                    tools: anthropicTools.length ? anthropicTools : undefined,
+                    tool_choice: anthropicTools.length ? { type: 'auto' as const } : undefined,
+                }),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(formatProviderError('anthropic', response.status, errorText));
+            }
+            const data = await response.json();
+            const contentBlocks = data.content ?? [];
+            const textParts: string[] = [];
+            const toolCalls: Array<{ id: string; function: { name: string; arguments: string } }> = [];
+            for (const block of contentBlocks) {
+                if (block.type === 'text') {
+                    textParts.push(block.text ?? '');
+                } else if (block.type === 'tool_use') {
+                    toolCalls.push({
+                        id: block.id,
+                        function: {
+                            name: block.name,
+                            arguments: JSON.stringify(block.input ?? {}),
+                        },
+                    });
+                }
+            }
+            message = {
+                content: textParts.join('').trim() || undefined,
+                tool_calls: toolCalls.length ? toolCalls : undefined,
+            };
         }
-        
-        const data = await response.json();
-        const choice = data.choices[0];
-        const message = choice.message;
         
         // Check if there are tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {

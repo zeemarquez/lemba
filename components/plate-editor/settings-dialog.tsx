@@ -7,7 +7,9 @@ import {
   Upload,
   Trash2,
   ChevronDown,
-  Brain,
+  Loader2,
+  Check,
+  X,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
@@ -35,6 +37,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/plate-ui/dropdown-menu';
 import { useStore } from '@/lib/store';
+import { validateApiKey, hasEnvApiKey } from '@/lib/agent';
+import type { LLMProvider } from '@/lib/agent';
+import { useDebounce } from '@/hooks/use-debounce';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
@@ -56,13 +61,57 @@ export function SettingsDialog() {
     sourceEditorFontSize,
     setSourceEditorFontFamily,
     setSourceEditorFontSize,
-    agentApiKeyOverride,
-    setAgentApiKeyOverride,
-    agentTemperature,
-    setAgentTemperature,
-    agentMaxTokens,
-    setAgentMaxTokens,
+    agentApiKeys,
+    setAgentApiKey,
+    agentProviderKeysValid,
+    setAgentProviderKeyValid,
   } = useStore();
+
+  const agentProviderConfig: Record<LLMProvider, { label: string; placeholder: string }> = {
+    openai: { label: 'OpenAI', placeholder: 'sk-...' },
+    anthropic: { label: 'Anthropic', placeholder: 'sk-ant-...' },
+    google: { label: 'Google Gemini', placeholder: 'API key' },
+  };
+
+  const [validating, setValidating] = React.useState<Record<LLMProvider, boolean>>({
+    openai: false,
+    anthropic: false,
+    google: false,
+  });
+  const validationSeqRef = React.useRef(0);
+
+  const debouncedOpenai = useDebounce(agentApiKeys?.openai ?? '', 600);
+  const debouncedAnthropic = useDebounce(agentApiKeys?.anthropic ?? '', 600);
+  const debouncedGoogle = useDebounce(agentApiKeys?.google ?? '', 600);
+
+  const runValidation = React.useCallback(
+    (provider: LLMProvider, key: string) => {
+      if (!key.trim()) {
+        setAgentProviderKeyValid(provider, false);
+        return;
+      }
+      setValidating((v) => ({ ...v, [provider]: true }));
+      const seq = ++validationSeqRef.current;
+      validateApiKey(provider, key)
+        .then((valid) => {
+          if (seq === validationSeqRef.current) setAgentProviderKeyValid(provider, valid);
+        })
+        .finally(() => {
+          if (seq === validationSeqRef.current) setValidating((v) => ({ ...v, [provider]: false }));
+        });
+    },
+    [setAgentProviderKeyValid]
+  );
+
+  React.useEffect(() => {
+    runValidation('openai', debouncedOpenai);
+  }, [debouncedOpenai, runValidation]);
+  React.useEffect(() => {
+    runValidation('anthropic', debouncedAnthropic);
+  }, [debouncedAnthropic, runValidation]);
+  React.useEffect(() => {
+    runValidation('google', debouncedGoogle);
+  }, [debouncedGoogle, runValidation]);
 
   const [isDragging, setIsDragging] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -164,7 +213,6 @@ export function SettingsDialog() {
               className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
               value="agent"
             >
-              <Brain className="size-4 mr-2 shrink-0" />
               Agent
             </TabsTrigger>
           </TabsList>
@@ -409,65 +457,49 @@ function hello() {
               <TabsContent className="mt-0 outline-none" value="agent">
                 <div className="space-y-6">
                   <div className="space-y-4">
-                    <h4 className="font-medium text-sm">OpenAI API</h4>
+                    <h4 className="font-medium text-sm">API keys</h4>
                     <p className="text-sm text-muted-foreground">
-                      Configure the AI assistant. Leave the API key empty to use the environment variable (NEXT_PUBLIC_OPENAI_API_KEY or OPENAI_API_KEY).
+                      Configure one or more providers. Valid keys appear in the model dropdown in the agent panel.
                     </p>
-                    <div className="space-y-2">
-                      <label htmlFor="agent-api-key" className="text-sm font-medium">
-                        API Key
-                      </label>
-                      <Input
-                        id="agent-api-key"
-                        type="password"
-                        placeholder="sk-..."
-                        value={agentApiKeyOverride}
-                        onChange={(e) => setAgentApiKeyOverride(e.target.value)}
-                        className="font-mono text-sm"
-                        autoComplete="off"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h4 className="font-medium text-sm">Model parameters</h4>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <label htmlFor="agent-temperature" className="text-sm font-medium">
-                          Temperature
-                        </label>
-                        <Input
-                          id="agent-temperature"
-                          type="number"
-                          min={0}
-                          max={2}
-                          step={0.1}
-                          value={agentTemperature}
-                          onChange={(e) => setAgentTemperature(Number(e.target.value) || 0.7)}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Higher = more creative (0–2). Default: 0.7
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="agent-max-tokens" className="text-sm font-medium">
-                          Max tokens
-                        </label>
-                        <Input
-                          id="agent-max-tokens"
-                          type="number"
-                          min={256}
-                          max={128000}
-                          step={256}
-                          value={agentMaxTokens}
-                          onChange={(e) => setAgentMaxTokens(Number(e.target.value) || 4096)}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Maximum response length. Default: 4096
-                        </p>
-                      </div>
-                    </div>
+                    {(['openai', 'anthropic', 'google'] as LLMProvider[]).map((provider) => {
+                      const cfg = agentProviderConfig[provider];
+                      const key = agentApiKeys?.[provider] ?? '';
+                      const envSet = hasEnvApiKey(provider);
+                      const isValidating = validating[provider];
+                      const isValid = agentProviderKeysValid?.[provider];
+                      return (
+                        <div key={provider} className="space-y-1">
+                          <label
+                            htmlFor={`agent-api-key-${provider}`}
+                            className="text-sm text-muted-foreground"
+                          >
+                            {cfg.label}
+                          </label>
+                          <div className="relative flex items-center">
+                            <Input
+                              id={`agent-api-key-${provider}`}
+                              type="password"
+                              placeholder={envSet && !key.trim() ? 'API KEY SET IN ENVIRONMENT' : (envSet ? 'Override environment key' : cfg.placeholder)}
+                              value={key}
+                              onChange={(e) => setAgentApiKey(provider, e.target.value)}
+                              className={envSet && !key.trim() ? 'font-mono text-sm pr-9 placeholder:font-bold placeholder:text-foreground/80' : 'font-mono text-sm pr-9'}
+                              autoComplete="off"
+                            />
+                            <div className="absolute right-2.5 flex items-center justify-center w-5 h-5 pointer-events-none">
+                              {isValidating ? (
+                                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                              ) : key.trim() ? (
+                                isValid ? (
+                                  <Check className="size-4 text-green-600 dark:text-green-500" />
+                                ) : (
+                                  <X className="size-4 text-red-600 dark:text-red-500" />
+                                )
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </TabsContent>

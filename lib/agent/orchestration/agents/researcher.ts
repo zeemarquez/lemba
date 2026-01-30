@@ -3,6 +3,9 @@
  * Gathers and synthesizes information from multiple sources
  */
 
+import type { LLMProvider } from '../../ai-service';
+import { chatCompletionOneRound } from '../../ai-service';
+import type { ChatCompletionMessage } from '../../ai-service';
 import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
 import { ToolRegistry } from '../tools';
 import { RAGEngine, defaultRAGEngine } from '../rag';
@@ -18,24 +21,20 @@ interface ResearcherOptions {
 export class ResearcherAgent {
     private toolRegistry: ToolRegistry;
     private ragEngine: RAGEngine;
+    private provider: LLMProvider;
     private apiKey: string;
     private config = DEFAULT_AGENT_CONFIGS.researcher;
 
     constructor(options: {
         toolRegistry?: ToolRegistry;
         ragEngine?: RAGEngine;
+        provider?: LLMProvider;
         apiKey?: string;
     } = {}) {
         this.toolRegistry = options.toolRegistry || new ToolRegistry();
         this.ragEngine = options.ragEngine || defaultRAGEngine;
-        this.apiKey = options.apiKey || this.getApiKey();
-    }
-
-    private getApiKey(): string {
-        const key = typeof window !== 'undefined'
-            ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY || '')
-            : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '');
-        return key;
+        this.provider = options.provider ?? 'openai';
+        this.apiKey = options.apiKey!;
     }
 
     /**
@@ -126,79 +125,39 @@ export class ResearcherAgent {
             },
         }));
 
-        // Make API call
-        const response = await this.callOpenAI(messages, tools, {
-            model,
-            temperature,
-            maxTokens,
-        });
-
-        return response;
-    }
-
-    /**
-     * Call OpenAI API with tool support
-     */
-    private async callOpenAI(
-        messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: unknown[] }>,
-        tools: unknown[],
-        options: { model: string; temperature: number; maxTokens: number }
-    ): Promise<string> {
-        let currentMessages = [...messages];
-        let maxIterations = 8; // More iterations for research
+        let currentMessages: ChatCompletionMessage[] = [...messages];
+        let maxIterations = 8;
 
         while (maxIterations > 0) {
             maxIterations--;
-
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`,
-                },
-                body: JSON.stringify({
-                    model: options.model,
-                    messages: currentMessages,
-                    tools: tools.length > 0 ? tools : undefined,
-                    tool_choice: tools.length > 0 ? 'auto' : undefined,
-                    temperature: options.temperature,
-                    max_tokens: options.maxTokens,
-                }),
+            const result = await chatCompletionOneRound({
+                provider: this.provider,
+                apiKey: this.apiKey,
+                model,
+                messages: currentMessages,
+                tools: tools as import('../../ai-service').ChatCompletionTool[],
+                temperature,
+                maxTokens,
             });
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
-            }
-
-            const data = await response.json();
-            const message = data.choices[0].message;
-
-            // Check for tool calls
-            if (message.tool_calls && message.tool_calls.length > 0) {
+            if (result.tool_calls && result.tool_calls.length > 0) {
                 currentMessages.push({
                     role: 'assistant',
-                    content: message.content || '',
-                    tool_calls: message.tool_calls,
+                    content: result.content || '',
+                    tool_calls: result.tool_calls,
                 });
-
-                // Execute tools
-                for (const toolCall of message.tool_calls) {
+                for (const toolCall of result.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
-                    const result = await this.toolRegistry.execute(toolCall.function.name, args);
-
+                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args);
                     currentMessages.push({
                         role: 'tool',
                         tool_call_id: toolCall.id,
-                        content: JSON.stringify(result.data || result.error),
+                        content: JSON.stringify(execResult.data ?? execResult.error),
                     });
                 }
-
                 continue;
             }
-
-            // No more tool calls, return the response
-            return message.content || '';
+            return result.content || '';
         }
 
         return 'Research task timed out - gathered partial results.';

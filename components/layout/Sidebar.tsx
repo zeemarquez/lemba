@@ -14,7 +14,7 @@ import {
     RefreshCw,
     ChevronRight,
     ChevronDown,
-    Brain
+    Bot
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -352,7 +352,7 @@ export function Sidebar() {
                         onClick={() => setSidebarView('agent')}
                         title="AI Assistant"
                     >
-                        <Brain size={18} />
+                        <Bot size={18} />
                     </Button>
                     <div className="flex-1" />
                     <Button

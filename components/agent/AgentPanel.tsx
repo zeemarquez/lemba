@@ -1,15 +1,43 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Bot, Check, X } from "lucide-react";
+import { History, MessageSquarePlus, Bot, Check, X, ChevronDown, MessageCircleQuestion, Pencil } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { modelToProvider, hasEnvApiKey } from "@/lib/agent";
+import type { LLMProvider } from "@/lib/agent";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { DiffPreview } from "./DiffPreview";
 import { ChatsDialog } from "./ChatsDialog";
+
+const PROVIDER_MODELS: Record<LLMProvider, { value: string; label: string }[]> = {
+    openai: [
+        { value: 'gpt-4o', label: 'GPT-4o' },
+        { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
+        { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+        { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+    ],
+    anthropic: [
+        { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+        { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+        { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+        { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
+    ],
+    google: [
+        { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+        { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+        { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    ],
+};
 
 export function AgentPanel() {
     const {
@@ -21,13 +49,45 @@ export function AgentPanel() {
         agentLoading,
         agentCurrentStep,
         agentError,
+        agentApiKeys,
+        agentProviderKeysValid,
         agentModel,
         agentReadOnly,
         agentUseOrchestration,
         setAgentModel,
+        setAgentProvider,
         setAgentReadOnly,
         setAgentUseOrchestration,
+        createNewChat,
     } = useStore();
+
+    const currentModels = useMemo(() => {
+        const list: { value: string; label: string; provider: LLMProvider }[] = [];
+        (['openai', 'anthropic', 'google'] as LLMProvider[]).forEach((provider) => {
+            const hasStoredKey = (agentApiKeys?.[provider] ?? '').trim().length > 0;
+            const validStored = agentProviderKeysValid?.[provider];
+            const hasEnv = hasEnvApiKey(provider);
+            const includeProvider = (hasStoredKey && validStored) || hasEnv;
+            if (includeProvider) {
+                (PROVIDER_MODELS[provider] ?? []).forEach((m) => list.push({ ...m, provider }));
+            }
+        });
+        return list;
+    }, [agentApiKeys, agentProviderKeysValid]);
+
+    const currentModelLabel = useMemo(() => {
+        const found = currentModels.find((m) => m.value === agentModel);
+        return found?.label ?? agentModel;
+    }, [currentModels, agentModel]);
+
+    useEffect(() => {
+        if (currentModels.length === 0) return;
+        const isCurrentInList = currentModels.some((m) => m.value === agentModel);
+        if (!isCurrentInList) {
+            setAgentModel(currentModels[0].value);
+            setAgentProvider(currentModels[0].provider);
+        }
+    }, [currentModels, agentModel, setAgentModel, setAgentProvider]);
 
     const [chatsDialogOpen, setChatsDialogOpen] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
@@ -56,21 +116,29 @@ export function AgentPanel() {
         <div className="h-full flex flex-col overflow-hidden">
             {/* Header */}
             <div className="p-3 border-b flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                    <Bot size={16} className="text-muted-foreground" />
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
-                        AI Assistant
-                    </span>
+                <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
+                    AI Assistant
+                </span>
+                <div className="flex items-center gap-0.5">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setChatsDialogOpen(true)}
+                        title="Chat history"
+                    >
+                        <History size={14} />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => createNewChat()}
+                        title="New chat"
+                    >
+                        <MessageSquarePlus size={14} />
+                    </Button>
                 </div>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => setChatsDialogOpen(true)}
-                    title="Chat history"
-                >
-                    <MessageSquare size={14} />
-                </Button>
             </div>
 
             <ChatsDialog open={chatsDialogOpen} onOpenChange={setChatsDialogOpen} />
@@ -151,64 +219,95 @@ export function AgentPanel() {
             {/* Input Area */}
             <div className="p-3 border-t shrink-0 space-y-3">
                 <ChatInput />
-                {/* Model and read-only controls */}
+                {/* Model and mode (Ask / Quick edit / Agent) */}
                 <div className="flex items-center gap-3 flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <label htmlFor="agent-model" className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground shrink-0">
-                            Model
-                        </label>
-                        <select
-                            id="agent-model"
-                            value={agentModel}
-                            onChange={(e) => setAgentModel(e.target.value)}
-                            className="h-7 rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 min-w-0 flex-1 max-w-[140px]"
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 rounded-md border border-input bg-muted/50 px-2.5 text-[10px] font-medium min-w-0 max-w-[140px] gap-1 hover:bg-muted focus-visible:ring-ring focus-visible:ring-offset-2"
+                                disabled={currentModels.length === 0}
+                                title={currentModels.length === 0 ? 'Add and validate API keys in Settings → Agent' : undefined}
+                            >
+                                <span className="truncate">
+                                    {currentModels.length === 0
+                                        ? 'No provider'
+                                        : currentModelLabel}
+                                </span>
+                                <ChevronDown size={12} className="shrink-0 opacity-60" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="min-w-[140px]">
+                            {currentModels.map((m) => (
+                                <DropdownMenuItem
+                                    key={m.value}
+                                    className="text-[10px] py-1.5"
+                                    onClick={() => {
+                                        setAgentModel(m.value);
+                                        setAgentProvider(m.provider);
+                                    }}
+                                >
+                                    {m.label}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    <div
+                        role="group"
+                        aria-label="Agent mode"
+                        className="inline-flex rounded-md border border-input bg-muted/50 p-0.5"
+                    >
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setAgentReadOnly(true);
+                                setAgentUseOrchestration(false);
+                            }}
+                            className={cn(
+                                "inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded transition-colors",
+                                agentReadOnly && !agentUseOrchestration
+                                    ? "bg-background text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
                         >
-                            <option value="gpt-4o">GPT-4o</option>
-                            <option value="gpt-4o-mini">GPT-4o mini</option>
-                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                        </select>
+                            <MessageCircleQuestion size={12} className="shrink-0" />
+                            Ask
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setAgentReadOnly(false);
+                                setAgentUseOrchestration(false);
+                            }}
+                            className={cn(
+                                "inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded transition-colors",
+                                !agentReadOnly && !agentUseOrchestration
+                                    ? "bg-background text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            <Pencil size={12} className="shrink-0" />
+                            Quick edit
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setAgentReadOnly(false);
+                                setAgentUseOrchestration(true);
+                            }}
+                            title="Multi-agent (Planner, Researcher, Writer, Linter)"
+                            className={cn(
+                                "inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded transition-colors",
+                                agentUseOrchestration
+                                    ? "bg-background text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            <Bot size={12} className="shrink-0" />
+                            Agent
+                        </button>
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={agentReadOnly}
-                            onClick={() => setAgentReadOnly(!agentReadOnly)}
-                            className={cn(
-                                "relative inline-flex h-5 w-9 shrink-0 rounded-full border border-input transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                                agentReadOnly ? "bg-primary" : "bg-muted"
-                            )}
-                        >
-                            <span
-                                className={cn(
-                                    "pointer-events-none block h-4 w-3.5 rounded-full bg-background shadow ring-0 transition-transform mt-0.5 ml-0.5",
-                                    agentReadOnly ? "translate-x-4" : "translate-x-0"
-                                )}
-                            />
-                        </button>
-                        <span className="text-xs text-muted-foreground">Read only</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer shrink-0" title="Use multi-agent orchestration (Planner, Researcher, Writer, Linter)">
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={agentUseOrchestration}
-                            onClick={() => setAgentUseOrchestration(!agentUseOrchestration)}
-                            className={cn(
-                                "relative inline-flex h-5 w-9 shrink-0 rounded-full border border-input transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                                agentUseOrchestration ? "bg-primary" : "bg-muted"
-                            )}
-                        >
-                            <span
-                                className={cn(
-                                    "pointer-events-none block h-4 w-3.5 rounded-full bg-background shadow ring-0 transition-transform mt-0.5 ml-0.5",
-                                    agentUseOrchestration ? "translate-x-4" : "translate-x-0"
-                                )}
-                            />
-                        </button>
-                        <span className="text-xs text-muted-foreground">Multi-agent</span>
-                    </label>
                 </div>
             </div>
         </div>
@@ -230,9 +329,10 @@ function EmptyState() {
                 <li>• Search for content</li>
                 <li>• Propose edits with diffs</li>
                 <li>• Help with formatting</li>
+                
             </ul>
             <p className="text-[11px] text-muted-foreground mt-3">
-                Open a document to start a conversation about it
+            Press <kbd className="rounded bg-muted px-1 py-0.5 font-mono">Enter</kbd> to send,{" "}<kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono">Shift+Enter</kbd> for new line
             </p>
         </div>
     );

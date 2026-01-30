@@ -5,6 +5,8 @@
 
 import { AgentMessage, DocumentDiff } from '../types';
 import { agentLog } from '../debug';
+import type { LLMProvider } from '../ai-service';
+import { getApiKey } from '../ai-service';
 import {
     AgentType,
     AgentContext,
@@ -33,6 +35,7 @@ import { ORCHESTRATOR_PROMPT } from './prompts';
 // ==================== Types ====================
 
 export interface OrchestrationOptions {
+    provider?: LLMProvider;
     model?: string;
     temperature?: number;
     maxTokens?: number;
@@ -60,6 +63,7 @@ export class OrchestratorAgent {
     private writerAgent: WriterAgent;
     private linterAgent: LinterAgent;
     private summarizerAgent: SummarizerAgent;
+    private provider: LLMProvider;
     private apiKey: string;
     private eventHandler?: OrchestrationEventHandler;
 
@@ -67,44 +71,38 @@ export class OrchestratorAgent {
         options: {
             toolRegistry?: ToolRegistry;
             ragEngine?: RAGEngine;
+            provider?: LLMProvider;
             apiKey?: string;
         } = {}
     ) {
         this.toolRegistry = options.toolRegistry || defaultToolRegistry;
         this.ragEngine = options.ragEngine || defaultRAGEngine;
-        this.apiKey = options.apiKey || this.getApiKey();
+        this.provider = options.provider ?? 'openai';
+        this.apiKey = getApiKey(this.provider, options.apiKey);
 
         // Initialize specialist agents
         this.plannerAgent = new PlannerAgent({
             toolRegistry: this.toolRegistry,
+            provider: this.provider,
             apiKey: this.apiKey,
         });
         this.researcherAgent = new ResearcherAgent({
             toolRegistry: this.toolRegistry,
             ragEngine: this.ragEngine,
+            provider: this.provider,
             apiKey: this.apiKey,
         });
         this.writerAgent = new WriterAgent({
             toolRegistry: this.toolRegistry,
+            provider: this.provider,
             apiKey: this.apiKey,
         });
         this.linterAgent = new LinterAgent({
             toolRegistry: this.toolRegistry,
+            provider: this.provider,
             apiKey: this.apiKey,
         });
-        this.summarizerAgent = new SummarizerAgent({ apiKey: this.apiKey });
-    }
-
-    private getApiKey(): string {
-        const key = typeof window !== 'undefined'
-            ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY || '')
-            : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '');
-
-        if (!key) {
-            throw new Error('OpenAI API key not configured');
-        }
-
-        return key;
+        this.summarizerAgent = new SummarizerAgent({ provider: this.provider, apiKey: this.apiKey });
     }
 
     /**
@@ -639,9 +637,12 @@ export async function runOrchestration(
         }
     }
 
-    // Create orchestrator and run
+    const provider = options.provider ?? 'openai';
+    const apiKey = getApiKey(provider, options.apiKey);
+
     const orchestrator = new OrchestratorAgent({
-        apiKey: options.apiKey,
+        provider,
+        apiKey,
     });
 
     return orchestrator.run(lastUserMessage.content, context, options);

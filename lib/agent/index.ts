@@ -68,6 +68,20 @@ export { agentLog } from './debug';
 export {
     sendMessageToAI,
     streamMessageToAI,
+    chatCompletionOneRound,
+    chatCompletion,
+    getApiKey,
+    hasEnvApiKey,
+    validateApiKey,
+    modelToProvider,
+} from './ai-service';
+export type {
+    LLMProvider,
+    SendMessageToAIOptions,
+    ChatCompletionMessage,
+    ChatCompletionTool,
+    ChatCompletionOneRoundOptions,
+    ChatCompletionOneRoundResult,
 } from './ai-service';
 
 // Orchestration System

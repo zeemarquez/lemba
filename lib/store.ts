@@ -4,7 +4,8 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
-import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId } from './agent';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider } from './agent';
+import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
 export type { AgentMessage, DocumentDiff, AgentChat };
@@ -44,9 +45,13 @@ interface AppState {
     /** Current orchestration step label (e.g. "Researching") when agentLoading and using orchestration */
     agentCurrentStep: string | null;
     agentError: string | null;
+    agentProvider: LLMProvider;
     agentModel: string;
     agentReadOnly: boolean;
-    agentApiKeyOverride: string;
+    /** API keys per provider (empty string = not set) */
+    agentApiKeys: Record<LLMProvider, string>;
+    /** Validity per provider (only true after successful validation in settings) */
+    agentProviderKeysValid: Record<LLMProvider, boolean>;
     agentTemperature: number;
     agentMaxTokens: number;
     agentUseOrchestration: boolean; // Enable multi-agent orchestration mode
@@ -122,9 +127,11 @@ interface AppState {
     setAgentMentionedFiles: (files: string[]) => void;
     setAgentLoading: (loading: boolean) => void;
     setAgentError: (error: string | null) => void;
+    setAgentProvider: (provider: LLMProvider) => void;
     setAgentModel: (model: string) => void;
     setAgentReadOnly: (readOnly: boolean) => void;
-    setAgentApiKeyOverride: (key: string) => void;
+    setAgentApiKey: (provider: LLMProvider, key: string) => void;
+    setAgentProviderKeyValid: (provider: LLMProvider, valid: boolean) => void;
     setAgentTemperature: (temperature: number) => void;
     setAgentMaxTokens: (maxTokens: number) => void;
     setAgentUseOrchestration: (useOrchestration: boolean) => void;
@@ -400,9 +407,11 @@ export const useStore = create<AppState>()(
                 agentLoading: false,
                 agentCurrentStep: null,
                 agentError: null,
+                agentProvider: 'openai',
                 agentModel: 'gpt-4o',
                 agentReadOnly: false,
-                agentApiKeyOverride: '',
+                agentApiKeys: { openai: '', anthropic: '', google: '' },
+                agentProviderKeysValid: { openai: false, anthropic: false, google: false },
                 agentTemperature: 0.7,
                 agentMaxTokens: 4096,
                 agentUseOrchestration: false,
@@ -1095,7 +1104,9 @@ export const useStore = create<AppState>()(
                         let response: { content: string; diffs?: DocumentDiff[] };
                         
                         if (state.agentUseOrchestration) {
-                            // Use multi-agent orchestration system
+                            // Use multi-agent orchestration system (any provider)
+                            const provider = modelToProvider(state.agentModel);
+                            const apiKey = state.agentApiKeys[provider]?.trim() || undefined;
                             const stepLabels: Record<string, string> = {
                                 researcher: '🔍 Researching',
                                 planner: '📋 Planning',
@@ -1107,9 +1118,10 @@ export const useStore = create<AppState>()(
                                 allMessages,
                                 filesForContext,
                                 {
+                                    provider,
                                     model: state.agentModel,
                                     readOnly: state.agentReadOnly,
-                                    apiKey: state.agentApiKeyOverride || undefined,
+                                    apiKey,
                                     temperature: state.agentTemperature,
                                     maxTokens: state.agentMaxTokens,
                                     onDiffCreated,
@@ -1127,15 +1139,17 @@ export const useStore = create<AppState>()(
                                 diffs: orchestrationResult.diffs,
                             };
                         } else {
-                            // Use single-agent mode (original behavior)
+                            const provider = modelToProvider(state.agentModel);
+                            const apiKeyOverride = state.agentApiKeys[provider]?.trim() || undefined;
                             response = await sendMessageToAI(
                                 allMessages,
                                 filesForContext,
                                 undefined,
                                 {
+                                    provider,
                                     model: state.agentModel,
                                     readOnly: state.agentReadOnly,
-                                    apiKeyOverride: state.agentApiKeyOverride || undefined,
+                                    apiKeyOverride,
                                     temperature: state.agentTemperature,
                                     maxTokens: state.agentMaxTokens,
                                     onDiffCreated,
@@ -1345,9 +1359,16 @@ export const useStore = create<AppState>()(
                 setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
                 setAgentLoading: (loading) => set({ agentLoading: loading }),
                 setAgentError: (error) => set({ agentError: error }),
+                setAgentProvider: (provider) => set({ agentProvider: provider }),
                 setAgentModel: (model) => set({ agentModel: model }),
                 setAgentReadOnly: (readOnly) => set({ agentReadOnly: readOnly }),
-                setAgentApiKeyOverride: (key) => set({ agentApiKeyOverride: key }),
+                setAgentApiKey: (provider, key) =>
+                    set((s) => ({
+                        agentApiKeys: { ...s.agentApiKeys, [provider]: key },
+                        agentProviderKeysValid: { ...s.agentProviderKeysValid, [provider]: false },
+                    })),
+                setAgentProviderKeyValid: (provider, valid) =>
+                    set((s) => ({ agentProviderKeysValid: { ...s.agentProviderKeysValid, [provider]: valid } })),
                 setAgentTemperature: (temperature) => set({ agentTemperature: temperature }),
                 setAgentMaxTokens: (maxTokens) => set({ agentMaxTokens: maxTokens }),
                 setAgentUseOrchestration: (useOrchestration) => set({ agentUseOrchestration: useOrchestration }),
@@ -1417,21 +1438,37 @@ export const useStore = create<AppState>()(
                 editorViewMode: state.editorViewMode,
                 chats: state.chats,
                 activeChatId: state.activeChatId,
+                agentProvider: state.agentProvider,
                 agentModel: state.agentModel,
                 agentReadOnly: state.agentReadOnly,
-                agentApiKeyOverride: state.agentApiKeyOverride,
+                agentApiKeys: state.agentApiKeys,
+                agentProviderKeysValid: state.agentProviderKeysValid,
                 agentTemperature: state.agentTemperature,
                 agentMaxTokens: state.agentMaxTokens,
                 agentUseOrchestration: state.agentUseOrchestration,
             }),
             merge: (persistedState, currentState) => {
-                const persisted = persistedState as Partial<AppState> & { chats?: Record<string, AgentChat>; activeChatId?: string | null };
+                const persisted = persistedState as Partial<AppState> & {
+                    chats?: Record<string, AgentChat>;
+                    activeChatId?: string | null;
+                    agentApiKeyOverride?: string;
+                };
                 const merged = {
                     ...currentState,
                     ...persisted,
                     customFonts: currentState.customFonts,
                     fontsLoaded: currentState.fontsLoaded,
                 };
+                // Migrate old single API key to per-provider keys
+                if (!merged.agentApiKeys || typeof merged.agentApiKeys !== 'object') {
+                    merged.agentApiKeys = { openai: '', anthropic: '', google: '' };
+                    if (persisted.agentApiKeyOverride && typeof persisted.agentApiKeyOverride === 'string') {
+                        merged.agentApiKeys.openai = persisted.agentApiKeyOverride;
+                    }
+                }
+                if (!merged.agentProviderKeysValid || typeof merged.agentProviderKeysValid !== 'object') {
+                    merged.agentProviderKeysValid = { openai: false, anthropic: false, google: false };
+                }
                 // Restore agentMessages and pendingDiffs from active chat
                 if (merged.activeChatId && merged.chats?.[merged.activeChatId]) {
                     const chat = merged.chats[merged.activeChatId];
