@@ -99,15 +99,21 @@ export class PlannerAgent {
 
         while (maxIterations > 0) {
             maxIterations--;
-            const result = await chatCompletionOneRound({
-                provider: this.provider,
-                apiKey: this.apiKey,
-                model,
-                messages: currentMessages,
-                tools: tools as import('../../ai-service').ChatCompletionTool[],
-                temperature,
-                maxTokens,
-            });
+            let result;
+            try {
+                result = await chatCompletionOneRound({
+                    provider: this.provider,
+                    apiKey: this.apiKey,
+                    model,
+                    messages: currentMessages,
+                    tools: tools as import('../../ai-service').ChatCompletionTool[],
+                    temperature,
+                    maxTokens,
+                });
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                throw new Error(`Planner agent API call failed: ${errorMsg}`);
+            }
 
             if (result.tool_calls && result.tool_calls.length > 0) {
                 currentMessages.push({

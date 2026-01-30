@@ -745,6 +745,31 @@ export interface ChatCompletionOneRoundResult {
 }
 
 /**
+ * Helper to check if error is retryable
+ */
+function isRetryableError(error: unknown): boolean {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const retryablePatterns = [
+        'Failed to fetch',
+        'Network request failed',
+        'ECONNREFUSED',
+        'ETIMEDOUT',
+        'ENOTFOUND',
+        'ECONNRESET',
+        'NetworkError',
+        'fetch failed',
+    ];
+    return retryablePatterns.some(pattern => errorMsg.toLowerCase().includes(pattern.toLowerCase()));
+}
+
+/**
+ * Helper to check if HTTP status is retryable
+ */
+function isRetryableStatus(status: number): boolean {
+    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+/**
  * One round of chat completion with optional tools. Used by orchestration agents.
  */
 export async function chatCompletionOneRound(options: ChatCompletionOneRoundOptions): Promise<ChatCompletionOneRoundResult> {
@@ -758,32 +783,53 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
     await assertTrialLimit(provider, apiKey);
 
     if (useOpenAIFormat) {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({
-                model: effectiveModel,
-                messages,
-                tools: tools.length ? tools : undefined,
-                tool_choice: tools.length ? 'auto' : undefined,
-                temperature,
-                max_tokens: maxTokens,
-            }),
-        });
-        if (!response.ok) {
-            const err = await response.text();
-            throw new Error(formatProviderError(provider, response.status, err));
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                if (attempt > 0) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                    body: JSON.stringify({
+                        model: effectiveModel,
+                        messages,
+                        tools: tools.length ? tools : undefined,
+                        tool_choice: tools.length ? 'auto' : undefined,
+                        temperature,
+                        max_tokens: maxTokens,
+                    }),
+                });
+                if (!response.ok) {
+                    const err = await response.text();
+                    const error = new Error(formatProviderError(provider, response.status, err));
+                    if (!isRetryableStatus(response.status) || attempt === 2) {
+                        throw error;
+                    }
+                    lastError = error;
+                    continue;
+                }
+                const data = await response.json();
+                const msg = data.choices?.[0]?.message;
+                if (!msg) throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
+                const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+                const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
+                recordTrialUsage(provider, apiKey, tokens);
+                return {
+                    content: msg.content ?? '',
+                    tool_calls: msg.tool_calls,
+                };
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                if (!isRetryableError(error) || attempt === 2) {
+                    throw lastError;
+                }
+            }
         }
-        const data = await response.json();
-        const msg = data.choices?.[0]?.message;
-        if (!msg) throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
-        const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
-        const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
-        recordTrialUsage(provider, apiKey, tokens);
-        return {
-            content: msg.content ?? '',
-            tool_calls: msg.tool_calls,
-        };
+        throw lastError || new Error(`${PROVIDER_LABELS[provider]}: Request failed`);
     }
 
     // Anthropic
@@ -823,39 +869,61 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
         }
     }
     const systemPrompt = systemParts.join('\n\n');
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-            model,
-            max_tokens: maxTokens,
-            system: systemPrompt,
-            messages: anthropicMessages,
-            tools: anthropicTools.length ? anthropicTools : undefined,
-            tool_choice: anthropicTools.length ? { type: 'auto' as const } : undefined,
-        }),
-    });
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(formatProviderError('anthropic', response.status, err));
-    }
-    const data = await response.json();
-    const blocks = data.content ?? [];
-    const textParts: string[] = [];
-    const toolCalls: Array<{ id: string; function: { name: string; arguments: string } }> = [];
-    for (const block of blocks) {
-        if (block.type === 'text') textParts.push(block.text ?? '');
-        else if (block.type === 'tool_use')
-            toolCalls.push({
-                id: block.id,
-                function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+    
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            if (attempt > 0) {
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                    model,
+                    max_tokens: maxTokens,
+                    system: systemPrompt,
+                    messages: anthropicMessages,
+                    tools: anthropicTools.length ? anthropicTools : undefined,
+                    tool_choice: anthropicTools.length ? { type: 'auto' as const } : undefined,
+                }),
             });
+            if (!response.ok) {
+                const err = await response.text();
+                const error = new Error(formatProviderError('anthropic', response.status, err));
+                if (!isRetryableStatus(response.status) || attempt === 2) {
+                    throw error;
+                }
+                lastError = error;
+                continue;
+            }
+            const data = await response.json();
+            const blocks = data.content ?? [];
+            const textParts: string[] = [];
+            const toolCalls: Array<{ id: string; function: { name: string; arguments: string } }> = [];
+            for (const block of blocks) {
+                if (block.type === 'text') textParts.push(block.text ?? '');
+                else if (block.type === 'tool_use')
+                    toolCalls.push({
+                        id: block.id,
+                        function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+                    });
+            }
+            return { content: textParts.join('').trim(), tool_calls: toolCalls.length ? toolCalls : undefined };
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (!isRetryableError(error) || attempt === 2) {
+                throw lastError;
+            }
+        }
     }
-    return { content: textParts.join('').trim(), tool_calls: toolCalls.length ? toolCalls : undefined };
+    throw lastError || new Error(`${PROVIDER_LABELS['anthropic']}: Request failed`);
 }
 
 /**
@@ -879,20 +947,41 @@ export async function chatCompletion(options: {
     await assertTrialLimit(provider, apiKey);
 
     if (useOpenAIFormat) {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({ model: effectiveModel, messages, temperature, max_tokens: maxTokens }),
-        });
-        if (!response.ok) {
-            const err = await response.text();
-            throw new Error(formatProviderError(provider, response.status, err));
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                if (attempt > 0) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                    body: JSON.stringify({ model: effectiveModel, messages, temperature, max_tokens: maxTokens }),
+                });
+                if (!response.ok) {
+                    const err = await response.text();
+                    const error = new Error(formatProviderError(provider, response.status, err));
+                    if (!isRetryableStatus(response.status) || attempt === 2) {
+                        throw error;
+                    }
+                    lastError = error;
+                    continue;
+                }
+                const data = await response.json();
+                const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+                const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
+                recordTrialUsage(provider, apiKey, tokens);
+                return data.choices?.[0]?.message?.content?.trim() ?? '';
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                if (!isRetryableError(error) || attempt === 2) {
+                    throw lastError;
+                }
+            }
         }
-        const data = await response.json();
-        const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
-        const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
-        recordTrialUsage(provider, apiKey, tokens);
-        return data.choices?.[0]?.message?.content?.trim() ?? '';
+        throw lastError || new Error(`${PROVIDER_LABELS[provider]}: Request failed`);
     }
 
     const systemParts: string[] = [];
@@ -901,24 +990,46 @@ export async function chatCompletion(options: {
         if (m.role === 'system') systemParts.push(m.content);
         else anthropicMessages.push({ role: m.role as 'user' | 'assistant', content: m.content });
     }
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-            model,
-            max_tokens: maxTokens,
-            system: systemParts.join('\n\n'),
-            messages: anthropicMessages,
-        }),
-    });
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(formatProviderError('anthropic', response.status, err));
+    
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            if (attempt > 0) {
+                const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+                body: JSON.stringify({
+                    model,
+                    max_tokens: maxTokens,
+                    system: systemParts.join('\n\n'),
+                    messages: anthropicMessages,
+                }),
+            });
+            if (!response.ok) {
+                const err = await response.text();
+                const error = new Error(formatProviderError('anthropic', response.status, err));
+                if (!isRetryableStatus(response.status) || attempt === 2) {
+                    throw error;
+                }
+                lastError = error;
+                continue;
+            }
+            const data = await response.json();
+            const blocks = data.content ?? [];
+            const text = blocks.filter((b: { type: string }) => b.type === 'text').map((b: { text?: string }) => b.text ?? '').join('').trim();
+            return text || '';
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (!isRetryableError(error) || attempt === 2) {
+                throw lastError;
+            }
+        }
     }
-    const data = await response.json();
-    const blocks = data.content ?? [];
-    const text = blocks.filter((b: { type: string }) => b.type === 'text').map((b: { text?: string }) => b.text ?? '').join('').trim();
-    return text || '';
+    throw lastError || new Error(`${PROVIDER_LABELS['anthropic']}: Request failed`);
 }
 
 export interface SendMessageToAIOptions {

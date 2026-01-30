@@ -163,13 +163,14 @@ export class OrchestratorAgent {
                     // Build context for this step
                     const stepContext = this.buildStepContext(context, results, workflow);
 
-                    // Execute the appropriate agent
-                    const result = await this.executeAgent(
+                    // Execute the appropriate agent with retry logic
+                    const result = await this.executeAgentWithRetry(
                         step.agentType,
                         step.instructions,
                         stepContext,
                         onDiff,
-                        options
+                        options,
+                        3 // max retries
                     );
 
                     step.status = result.status;
@@ -519,6 +520,74 @@ export class OrchestratorAgent {
             startedAt,
             completedAt: Date.now(),
         };
+    }
+
+    /**
+     * Execute agent with retry logic for network failures
+     */
+    private async executeAgentWithRetry(
+        agentType: AgentType,
+        instructions: string,
+        context: AgentContext,
+        onDiff: (diff: DocumentDiff) => void,
+        options: OrchestrationOptions,
+        maxRetries: number = 3
+    ): Promise<AgentResult> {
+        let lastError: Error | null = null;
+        
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    // Exponential backoff: 1s, 2s, 4s
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                    agentLog.info(`Retrying ${agentType} (attempt ${attempt + 1}/${maxRetries + 1}) after ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+                return await this.executeAgent(agentType, instructions, context, onDiff, options);
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                const errorMsg = lastError.message;
+                
+                // Check if it's a retryable error
+                const isRetryable = this.isRetryableError(errorMsg);
+                
+                if (!isRetryable || attempt === maxRetries) {
+                    agentLog.error(`${agentType} failed after ${attempt + 1} attempt(s)`, errorMsg);
+                    throw lastError;
+                }
+                
+                agentLog.warn(`${agentType} failed (attempt ${attempt + 1}/${maxRetries + 1})`, errorMsg);
+            }
+        }
+        
+        // Should never reach here, but TypeScript needs it
+        throw lastError || new Error(`${agentType} failed after retries`);
+    }
+
+    /**
+     * Check if an error is retryable
+     */
+    private isRetryableError(errorMsg: string): boolean {
+        const retryablePatterns = [
+            'Failed to fetch',
+            'Network request failed',
+            'ECONNREFUSED',
+            'ETIMEDOUT',
+            'ENOTFOUND',
+            'ECONNRESET',
+            'Rate limit',
+            'Too Many Requests',
+            'Service error',
+            '500',
+            '502',
+            '503',
+            '504',
+        ];
+        
+        return retryablePatterns.some(pattern => 
+            errorMsg.toLowerCase().includes(pattern.toLowerCase())
+        );
     }
 
     /**
