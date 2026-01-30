@@ -12,7 +12,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { modelToProvider, hasEnvApiKey } from "@/lib/agent";
+import { modelToProvider, hasEnvApiKey, isTrialOnlyOpenAI, TRIAL_MODEL } from "@/lib/agent";
 import type { LLMProvider } from "@/lib/agent";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
@@ -69,7 +69,13 @@ export function AgentPanel() {
             const hasEnv = hasEnvApiKey(provider);
             const includeProvider = (hasStoredKey && validStored) || hasEnv;
             if (includeProvider) {
-                (PROVIDER_MODELS[provider] ?? []).forEach((m) => list.push({ ...m, provider }));
+                const models = PROVIDER_MODELS[provider] ?? [];
+                const trialOnlyOpenAI = provider === 'openai' && isTrialOnlyOpenAI(agentApiKeys?.openai ?? '');
+                if (trialOnlyOpenAI) {
+                    list.push({ value: TRIAL_MODEL, label: 'GPT-4o mini (Free trial)', provider: 'openai' });
+                } else {
+                    models.forEach((m) => list.push({ ...m, provider }));
+                }
             }
         });
         return list;
@@ -221,38 +227,47 @@ export function AgentPanel() {
                 <ChatInput />
                 {/* Model and mode (Ask / Quick edit / Agent) */}
                 <div className="flex items-center gap-3 flex-wrap">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 rounded-md border border-input bg-muted/50 px-2.5 text-[10px] font-medium min-w-0 max-w-[140px] gap-1 hover:bg-muted focus-visible:ring-ring focus-visible:ring-offset-2"
-                                disabled={currentModels.length === 0}
-                                title={currentModels.length === 0 ? 'Add and validate API keys in Settings → Agent' : undefined}
-                            >
-                                <span className="truncate">
-                                    {currentModels.length === 0
-                                        ? 'No provider'
-                                        : currentModelLabel}
-                                </span>
-                                <ChevronDown size={12} className="shrink-0 opacity-60" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="min-w-[140px]">
-                            {currentModels.map((m) => (
-                                <DropdownMenuItem
-                                    key={m.value}
-                                    className="text-[10px] py-1.5"
-                                    onClick={() => {
-                                        setAgentModel(m.value);
-                                        setAgentProvider(m.provider);
-                                    }}
+                    {isTrialOnlyOpenAI(agentApiKeys?.openai ?? '') ? (
+                        <span
+                            className="inline-flex items-center px-2.5 py-1 rounded-md border border-input bg-muted/50 text-[10px] font-medium text-muted-foreground"
+                            title="Free trial uses GPT-4o mini. Add your API key in Settings to use other models."
+                        >
+                            GPT-4o mini (Free trial)
+                        </span>
+                    ) : (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 rounded-md border border-input bg-muted/50 px-2.5 text-[10px] font-medium min-w-0 max-w-[140px] gap-1 hover:bg-muted focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    disabled={currentModels.length === 0}
+                                    title={currentModels.length === 0 ? 'Add and validate API keys in Settings → Agent' : undefined}
                                 >
-                                    {m.label}
-                                </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                                    <span className="truncate">
+                                        {currentModels.length === 0
+                                            ? 'No provider'
+                                            : currentModelLabel}
+                                    </span>
+                                    <ChevronDown size={12} className="shrink-0 opacity-60" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="min-w-[140px]">
+                                {currentModels.map((m) => (
+                                    <DropdownMenuItem
+                                        key={m.value}
+                                        className="text-[10px] py-1.5"
+                                        onClick={() => {
+                                            setAgentModel(m.value);
+                                            setAgentProvider(m.provider);
+                                        }}
+                                    >
+                                        {m.label}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                     <div
                         role="group"
                         aria-label="Agent mode"

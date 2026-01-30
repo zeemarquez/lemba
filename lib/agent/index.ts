@@ -74,6 +74,9 @@ export {
     hasEnvApiKey,
     validateApiKey,
     modelToProvider,
+    isTrialMode,
+    isTrialOnlyOpenAI,
+    TRIAL_MODEL_EXPORT as TRIAL_MODEL,
 } from './ai-service';
 export type {
     LLMProvider,

@@ -27,6 +27,12 @@ import {
     proposeFullReplace,
 } from './document-ops';
 import { browserStorage } from '../browser-storage';
+import {
+    getTrialUserId,
+    checkTrialLimit,
+    addTrialTokenUsage,
+    TRIAL_TOKEN_LIMIT,
+} from './trial-usage';
 
 // ==================== Types ====================
 
@@ -526,6 +532,29 @@ const PROVIDER_LABELS: Record<LLMProvider, string> = {
     google: 'Google',
 };
 
+const TRIAL_MODEL = 'gpt-4o-mini';
+
+function getElectronEnv(key: string): string | undefined {
+    if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: { env?: Record<string, string> } }).electronAPI?.env?.[key]) {
+        return (window as unknown as { electronAPI: { env: Record<string, string> } }).electronAPI.env[key];
+    }
+    return undefined;
+}
+
+function getMainOpenAIKey(): string {
+    const key = typeof window !== 'undefined'
+        ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? getElectronEnv('NEXT_PUBLIC_OPENAI_API_KEY'))
+        : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY);
+    return (key ?? '').trim();
+}
+
+function getTrialOpenAIKey(): string {
+    const key = typeof window !== 'undefined'
+        ? (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? getElectronEnv('NEXT_PUBLIC_TRIAL_OPENAI_API_KEY'))
+        : (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? '');
+    return (key ?? '').trim();
+}
+
 /**
  * Format API error for display: "Provider: short message"
  */
@@ -547,10 +576,13 @@ function formatProviderError(provider: LLMProvider, status: number, body: string
     return `${label}: Request failed (${status})`;
 }
 
-/** Whether an API key for this provider is set in environment (client checks NEXT_PUBLIC_* only). */
+/** Whether an API key for this provider is set in environment or trial (OpenAI only). */
 export function hasEnvApiKey(provider: LLMProvider): boolean {
+    if (provider === 'openai') {
+        return getMainOpenAIKey().length > 0 || getTrialOpenAIKey().length > 0;
+    }
     const keys: Record<LLMProvider, string> = {
-        openai: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_OPENAI_API_KEY : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) || '',
+        openai: '', // handled above
         anthropic: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY) || '',
         google: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY : process.env.GOOGLE_AI_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY) || '',
     };
@@ -559,8 +591,15 @@ export function hasEnvApiKey(provider: LLMProvider): boolean {
 
 export function getApiKey(provider: LLMProvider, override?: string): string {
     if (override && override.trim()) return override.trim();
+    if (provider === 'openai') {
+        const main = getMainOpenAIKey();
+        if (main) return main;
+        const trial = getTrialOpenAIKey();
+        if (trial) return trial;
+        throw new Error('OpenAI: API key not configured. Add key in Settings → Agent or use free trial.');
+    }
     const keys: Record<LLMProvider, string> = {
-        openai: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_OPENAI_API_KEY : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) || '',
+        openai: '', // handled above
         anthropic: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY) || '',
         google: (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY : process.env.GOOGLE_AI_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_AI_API_KEY) || '',
     };
@@ -570,6 +609,48 @@ export function getApiKey(provider: LLMProvider, override?: string): string {
         throw new Error(`${label}: API key not configured. Add key in Settings → Agent.`);
     }
     return key;
+}
+
+/** True when using the free trial OpenAI key (no user/settings key, fallback to trial). */
+export function isTrialMode(provider: LLMProvider, apiKeyOverride?: string): boolean {
+    if (provider !== 'openai') return false;
+    if (apiKeyOverride && apiKeyOverride.trim()) return false;
+    const main = getMainOpenAIKey();
+    if (main) return false;
+    const trial = getTrialOpenAIKey();
+    return trial.length > 0;
+}
+
+/** Model to use in trial mode (GPT-4o mini only). */
+export const TRIAL_MODEL_EXPORT = TRIAL_MODEL;
+
+/** True when OpenAI is only available via trial key (no main env key, no user key in settings). */
+export function isTrialOnlyOpenAI(userApiKeyOverride?: string): boolean {
+    if (userApiKeyOverride && userApiKeyOverride.trim()) return false;
+    if (getMainOpenAIKey().length > 0) return false;
+    return getTrialOpenAIKey().length > 0;
+}
+
+function isTrialApiKey(apiKey: string): boolean {
+    const trial = getTrialOpenAIKey();
+    return trial.length > 0 && apiKey === trial;
+}
+
+async function assertTrialLimit(provider: LLMProvider, apiKey: string): Promise<void> {
+    if (provider !== 'openai' || !isTrialApiKey(apiKey)) return;
+    const userId = getTrialUserId();
+    const { allowed, used, remaining } = checkTrialLimit(userId);
+    if (!allowed) {
+        throw new Error(
+            `Free trial limit reached (${TRIAL_TOKEN_LIMIT.toLocaleString()} tokens). You've used ${used.toLocaleString()} tokens. Add your own API key in Settings → Agent to continue.`
+        );
+    }
+}
+
+function recordTrialUsage(provider: LLMProvider, apiKey: string, tokens: number): void {
+    if (provider !== 'openai' || !isTrialApiKey(apiKey) || tokens <= 0) return;
+    const userId = getTrialUserId();
+    addTrialTokenUsage(userId, tokens);
 }
 
 /**
@@ -654,16 +735,19 @@ export interface ChatCompletionOneRoundResult {
 export async function chatCompletionOneRound(options: ChatCompletionOneRoundOptions): Promise<ChatCompletionOneRoundResult> {
     const { provider, apiKey, model, messages, tools = [], temperature = 0.7, maxTokens = 4096 } = options;
     const useOpenAIFormat = provider === 'openai' || provider === 'google';
+    const effectiveModel = provider === 'openai' && isTrialApiKey(apiKey) ? TRIAL_MODEL : model;
     const url = provider === 'google'
         ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
         : 'https://api.openai.com/v1/chat/completions';
+
+    await assertTrialLimit(provider, apiKey);
 
     if (useOpenAIFormat) {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
             body: JSON.stringify({
-                model,
+                model: effectiveModel,
                 messages,
                 tools: tools.length ? tools : undefined,
                 tool_choice: tools.length ? 'auto' : undefined,
@@ -678,6 +762,9 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
         const data = await response.json();
         const msg = data.choices?.[0]?.message;
         if (!msg) throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
+        const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+        const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
+        recordTrialUsage(provider, apiKey, tokens);
         return {
             content: msg.content ?? '',
             tool_calls: msg.tool_calls,
@@ -769,21 +856,27 @@ export async function chatCompletion(options: {
 }): Promise<string> {
     const { provider, apiKey, model, messages, temperature = 0.7, maxTokens = 4096 } = options;
     const useOpenAIFormat = provider === 'openai' || provider === 'google';
+    const effectiveModel = provider === 'openai' && isTrialApiKey(apiKey) ? TRIAL_MODEL : model;
     const url = provider === 'google'
         ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
         : 'https://api.openai.com/v1/chat/completions';
+
+    await assertTrialLimit(provider, apiKey);
 
     if (useOpenAIFormat) {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+            body: JSON.stringify({ model: effectiveModel, messages, temperature, max_tokens: maxTokens }),
         });
         if (!response.ok) {
             const err = await response.text();
             throw new Error(formatProviderError(provider, response.status, err));
         }
         const data = await response.json();
+        const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+        const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
+        recordTrialUsage(provider, apiKey, tokens);
         return data.choices?.[0]?.message?.content?.trim() ?? '';
     }
 
@@ -831,7 +924,10 @@ export async function sendMessageToAI(
 ): Promise<AIResponse> {
     const provider = options?.provider ?? 'openai';
     const apiKey = getApiKey(provider, options?.apiKeyOverride);
-    const model = options?.model ?? (provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gemini-1.5-flash');
+    const baseModel = options?.model ?? (provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gemini-1.5-flash');
+    const model = provider === 'openai' && isTrialApiKey(apiKey) ? TRIAL_MODEL : baseModel;
+
+    await assertTrialLimit(provider, apiKey);
     const readOnly = options?.readOnly ?? false;
     const temperature = options?.temperature ?? 0.7;
     const maxTokens = options?.maxTokens ?? 4096;
@@ -929,6 +1025,9 @@ export async function sendMessageToAI(
             if (!msg) {
                 throw new Error(`${PROVIDER_LABELS[provider]}: No response from API`);
             }
+            const usage = data.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+            const tokens = usage?.total_tokens ?? (usage && typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number' ? usage.prompt_tokens + usage.completion_tokens : 0);
+            recordTrialUsage(provider, apiKey, tokens);
             message = msg;
         } else {
             // Anthropic Messages API

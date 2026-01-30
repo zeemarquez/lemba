@@ -4,7 +4,7 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
-import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider } from './agent';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL } from './agent';
 import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
@@ -1468,6 +1468,11 @@ export const useStore = create<AppState>()(
                 }
                 if (!merged.agentProviderKeysValid || typeof merged.agentProviderKeysValid !== 'object') {
                     merged.agentProviderKeysValid = { openai: false, anthropic: false, google: false };
+                }
+                // In trial-only mode, enforce GPT-4o mini
+                if (isTrialOnlyOpenAI(merged.agentApiKeys?.openai ?? '')) {
+                    merged.agentModel = TRIAL_MODEL;
+                    merged.agentProvider = 'openai';
                 }
                 // Restore agentMessages and pendingDiffs from active chat
                 if (merged.activeChatId && merged.chats?.[merged.activeChatId]) {

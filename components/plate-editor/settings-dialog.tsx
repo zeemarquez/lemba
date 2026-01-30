@@ -37,9 +37,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/plate-ui/dropdown-menu';
 import { useStore } from '@/lib/store';
-import { validateApiKey, hasEnvApiKey } from '@/lib/agent';
+import { validateApiKey, hasEnvApiKey, isTrialOnlyOpenAI } from '@/lib/agent';
 import type { LLMProvider } from '@/lib/agent';
 import { useDebounce } from '@/hooks/use-debounce';
+import { getTrialUserId, checkTrialLimit, TRIAL_TOKEN_LIMIT } from '@/lib/agent/trial-usage';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
@@ -456,6 +457,28 @@ function hello() {
 
               <TabsContent className="mt-0 outline-none" value="agent">
                 <div className="space-y-6">
+                  {(() => {
+                    const inTrial = isTrialOnlyOpenAI(agentApiKeys?.openai ?? '');
+                    if (!inTrial) return null;
+                    const { used } = checkTrialLimit(getTrialUserId());
+                    const percent = Math.min(100, (used / TRIAL_TOKEN_LIMIT) * 100);
+                    return (
+                      <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">Free trial usage</span>
+                          <span className="text-muted-foreground">
+                            {percent.toFixed(1)}% used
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-primary transition-all duration-150"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="space-y-4">
                     <h4 className="font-medium text-sm">API keys</h4>
                     <p className="text-sm text-muted-foreground">
@@ -465,6 +488,8 @@ function hello() {
                       const cfg = agentProviderConfig[provider];
                       const key = agentApiKeys?.[provider] ?? '';
                       const envSet = hasEnvApiKey(provider);
+                      const trialOnlyOpenAI = provider === 'openai' && isTrialOnlyOpenAI(key);
+                      const showEnvPlaceholder = envSet && !key.trim() && !trialOnlyOpenAI;
                       const isValidating = validating[provider];
                       const isValid = agentProviderKeysValid?.[provider];
                       return (
@@ -479,10 +504,10 @@ function hello() {
                             <Input
                               id={`agent-api-key-${provider}`}
                               type="password"
-                              placeholder={envSet && !key.trim() ? 'API KEY SET IN ENVIRONMENT' : (envSet ? 'Override environment key' : cfg.placeholder)}
+                              placeholder={showEnvPlaceholder ? 'API KEY SET IN ENVIRONMENT' : (envSet && !trialOnlyOpenAI ? 'Override environment key' : cfg.placeholder)}
                               value={key}
                               onChange={(e) => setAgentApiKey(provider, e.target.value)}
-                              className={envSet && !key.trim() ? 'font-mono text-sm pr-9 placeholder:font-bold placeholder:text-foreground/80' : 'font-mono text-sm pr-9'}
+                              className={showEnvPlaceholder ? 'font-mono text-sm pr-9 placeholder:font-bold placeholder:text-foreground/80' : 'font-mono text-sm pr-9'}
                               autoComplete="off"
                             />
                             <div className="absolute right-2.5 flex items-center justify-center w-5 h-5 pointer-events-none">

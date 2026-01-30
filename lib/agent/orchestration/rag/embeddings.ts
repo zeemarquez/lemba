@@ -3,6 +3,49 @@
  * Generates embeddings for text using OpenAI's embedding API
  */
 
+import { getTrialUserId, checkTrialLimit, addTrialTokenUsage } from '../../trial-usage';
+
+function getElectronEnv(key: string): string | undefined {
+    if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: { env?: Record<string, string> } }).electronAPI?.env?.[key]) {
+        return (window as unknown as { electronAPI: { env: Record<string, string> } }).electronAPI.env[key];
+    }
+    return undefined;
+}
+
+function getMainOpenAIKey(): string {
+    const key = typeof window !== 'undefined'
+        ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? getElectronEnv('NEXT_PUBLIC_OPENAI_API_KEY'))
+        : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY);
+    return (key ?? '').trim();
+}
+
+function getTrialOpenAIKey(): string {
+    const key = typeof window !== 'undefined'
+        ? (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? getElectronEnv('NEXT_PUBLIC_TRIAL_OPENAI_API_KEY'))
+        : (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? '');
+    return (key ?? '').trim();
+}
+
+function isTrialApiKey(apiKey: string): boolean {
+    const trial = getTrialOpenAIKey();
+    return trial.length > 0 && apiKey === trial;
+}
+
+async function assertTrialLimitEmbeddings(apiKey: string): Promise<void> {
+    if (!isTrialApiKey(apiKey)) return;
+    const userId = getTrialUserId();
+    const { allowed } = checkTrialLimit(userId);
+    if (!allowed) {
+        throw new Error('Free trial token limit reached. Add your own API key in Settings → Agent to continue.');
+    }
+}
+
+function recordTrialUsageEmbeddings(apiKey: string, tokens: number): void {
+    if (!isTrialApiKey(apiKey) || tokens <= 0) return;
+    const userId = getTrialUserId();
+    addTrialTokenUsage(userId, tokens);
+}
+
 export interface EmbeddingOptions {
     model: string;
     apiKey?: string;
@@ -29,22 +72,20 @@ export class EmbeddingService {
     }
 
     /**
-     * Get API key from options or environment
+     * Get API key from options or environment (with trial key fallback)
      */
     private getApiKey(): string {
         if (this.options.apiKey) {
             return this.options.apiKey;
         }
 
-        const key = typeof window !== 'undefined'
-            ? (process.env.NEXT_PUBLIC_OPENAI_API_KEY || '')
-            : (process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '');
+        const main = getMainOpenAIKey();
+        if (main) return main;
 
-        if (!key) {
-            throw new Error('OpenAI API key not configured for embeddings');
-        }
+        const trial = getTrialOpenAIKey();
+        if (trial) return trial;
 
-        return key;
+        throw new Error('OpenAI API key not configured for embeddings');
     }
 
     /**
@@ -128,6 +169,8 @@ export class EmbeddingService {
     private async fetchEmbeddings(texts: string[]): Promise<number[][]> {
         const apiKey = this.getApiKey();
 
+        await assertTrialLimitEmbeddings(apiKey);
+
         const response = await fetch('https://api.openai.com/v1/embeddings', {
             method: 'POST',
             headers: {
@@ -147,10 +190,14 @@ export class EmbeddingService {
         }
 
         const data = await response.json();
-        
+
+        const usage = data.usage as { total_tokens?: number } | undefined;
+        const tokens = usage?.total_tokens ?? 0;
+        recordTrialUsageEmbeddings(apiKey, tokens);
+
         // Sort by index to ensure correct order
         const sortedData = data.data.sort((a: { index: number }, b: { index: number }) => a.index - b.index);
-        
+
         return sortedData.map((item: { embedding: number[] }) => item.embedding);
     }
 
