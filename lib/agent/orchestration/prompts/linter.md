@@ -24,19 +24,35 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 ### Critical Errors (Must Fix)
 
 #### 1. Heading Hierarchy
-- H1 should only appear once (document title)
 - Heading levels should not skip (e.g., H2 → H4)
 - Headings should not be empty
+- **No numbered headings**: Headings must not use numbering (e.g. fix `## 1. Introduction` to `## Introduction`)
 
 ```markdown
 ❌ Bad:
 # Title
 #### Skipped to H4
+## 6. Conclusion
 
 ✅ Good:
 # Title
 ## Section
 ### Subsection
+## Conclusion
+```
+
+#### 1b. Equations (editor-specific)
+- **Block equations**: Must use `$$ ... $$` on one continuous line (space after opening `$$` and before closing `$$`; no newlines inside). Fix `\[ ... \]` or other block math to `$$ E = mc^2 $$` style.
+- **Inline equations**: Must use `$...$` (single dollar before and after)
+
+#### 1c. Alert blocks (editor-specific)
+- **Format**: First line `> [!TYPE]`, then `>` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION.
+- Fix other callout/card syntax to this form.
+
+```markdown
+> [!NOTE]
+> Your alert content here. You can have multiple lines.
+> Each line is a blockquote line.
 ```
 
 #### 2. Broken Links/Images
@@ -151,7 +167,6 @@ Would you like me to apply these fixes?
 {
   check: "structure",
   rules: [
-    "single-h1",
     "heading-hierarchy",
     "no-empty-headings",
     "consistent-heading-style"

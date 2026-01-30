@@ -135,7 +135,7 @@ export class WriterAgent {
 
         const defaultFileId = context.activeDocument?.id;
         let currentMessages: ChatCompletionMessage[] = [...messages];
-        let maxIterations = 10;
+        let maxIterations = 5;
 
         while (maxIterations > 0) {
             maxIterations--;
@@ -158,14 +158,30 @@ export class WriterAgent {
                 for (const toolCall of result.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
                     const execResult = await this.toolRegistry.execute(toolCall.function.name, args, { defaultFileId });
+                    let isDuplicate = false;
                     if (execResult.diff) {
-                        collectedDiffs.push(execResult.diff);
-                        if (options.onDiffCreated) options.onDiffCreated(execResult.diff);
+                        isDuplicate = collectedDiffs.some(
+                            d =>
+                                d.fileId === execResult.diff!.fileId &&
+                                (d.description && execResult.diff!.description
+                                    ? d.description === execResult.diff!.description
+                                    : d.proposedContent === execResult.diff!.proposedContent)
+                        );
+                        if (!isDuplicate) {
+                            collectedDiffs.push(execResult.diff);
+                            if (options.onDiffCreated) options.onDiffCreated(execResult.diff);
+                        }
+                    }
+                    let toolContent = JSON.stringify(execResult.data ?? execResult.error);
+                    if (isDuplicate) {
+                        toolContent += `\n\nThis change was already recorded. Do not repeat. In this response, reply with a brief summary and do not call further tools in this same response.`;
+                    } else if (collectedDiffs.length > 0) {
+                        toolContent += `\n\nYou have recorded ${collectedDiffs.length} edit(s). If the plan is fully implemented for this request, reply with a brief summary and do not call further tools in this same response.`;
                     }
                     currentMessages.push({
                         role: 'tool',
                         tool_call_id: toolCall.id,
-                        content: JSON.stringify(execResult.data ?? execResult.error),
+                        content: toolContent,
                     });
                 }
                 continue;

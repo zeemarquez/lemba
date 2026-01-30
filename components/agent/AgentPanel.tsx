@@ -72,7 +72,7 @@ export function AgentPanel() {
                 const models = PROVIDER_MODELS[provider] ?? [];
                 const trialOnlyOpenAI = provider === 'openai' && isTrialOnlyOpenAI(agentApiKeys?.openai ?? '');
                 if (trialOnlyOpenAI) {
-                    list.push({ value: TRIAL_MODEL, label: 'GPT-4o mini (Free trial)', provider: 'openai' });
+                    list.push({ value: TRIAL_MODEL, label: 'GPT-4o (Free trial)', provider: 'openai' });
                 } else {
                     models.forEach((m) => list.push({ ...m, provider }));
                 }
@@ -230,9 +230,9 @@ export function AgentPanel() {
                     {isTrialOnlyOpenAI(agentApiKeys?.openai ?? '') ? (
                         <span
                             className="inline-flex items-center px-2.5 py-1 rounded-md border border-input bg-muted/50 text-[10px] font-medium text-muted-foreground"
-                            title="Free trial uses GPT-4o mini. Add your API key in Settings to use other models."
+                            title="Free trial uses GPT-4o. Add your API key in Settings to use other models."
                         >
-                            GPT-4o mini (Free trial)
+                            GPT-4o (Free trial)
                         </span>
                     ) : (
                         <DropdownMenu>

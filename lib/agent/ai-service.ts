@@ -301,7 +301,7 @@ const TOOLS = [
         type: 'function' as const,
         function: {
             name: 'propose_replace_section',
-            description: 'Propose replacing an entire section (from heading to next heading of same/higher level). Use the exact heading text from find_headings (e.g. "6. Conclusion") for sectionHeading.',
+            description: 'Propose replacing an entire section (from heading to next heading of same/higher level). Use the exact heading text from find_headings for sectionHeading (no numbering on headings).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -311,7 +311,7 @@ const TOOLS = [
                     },
                     sectionHeading: {
                         type: 'string',
-                        description: 'The heading text of the section to replace (use exact text from find_headings, e.g. "6. Conclusion")'
+                        description: 'The heading text of the section to replace (use exact text from find_headings; headings in this editor have no numbering, e.g. "Conclusion")'
                     },
                     newContent: {
                         type: 'string',
@@ -364,9 +364,18 @@ You have access to tools that allow you to:
    - Use \`propose_edit\` for replacing specific text
    - Use \`propose_insert\` for adding new content
    - Use \`propose_delete\` for removing content
-   - Use \`propose_replace_section\` for replacing entire sections (pass the **exact** heading text from \`find_headings\` as \`sectionHeading\`, e.g. "6. Conclusion" not just "Conclusion")
+   - Use \`propose_replace_section\` for replacing entire sections (pass the **exact** heading text from \`find_headings\` as \`sectionHeading\`)
 
-5. **Finding sections**: Before replacing or editing a section, always call \`find_headings\` to get the exact heading text and structure. Use the \`text\` and \`lineNumber\` from the result. The \`sectionHeading\` in \`propose_replace_section\` must match a heading in the document (numbering like "6. Conclusion" is fine).
+5. **Finding sections**: Before replacing or editing a section, always call \`find_headings\` to get the exact heading text and structure. Use the \`text\` and \`lineNumber\` from the result. The \`sectionHeading\` in \`propose_replace_section\` must match a heading in the document exactly.
+
+## Markdown formatting rules (editor-specific)
+
+Apply these rules to all markdown you produce or modify so the document renders correctly in this editor:
+
+- **Headings**: Do not use numbering on any headings. Write \`## Introduction\`, \`## Conclusion\`, etc.—never \`## 1. Introduction\` or \`## 6. Conclusion\`. When matching sections, use the exact heading text from \`find_headings\` (which will not include numbers).
+- **Block equations**: Use double dollar signs on one continuous line with a space after the opening \`$$\` and before the closing \`$$\`. Example: \`$$ E = mc^2 $$\` (no newlines inside; single line only).
+- **Inline equations**: Use a single dollar sign before and after: \`$...$\`. Example: \`The formula $E = mc^2$ is famous.\`
+- **Alert blocks**: Use blockquote syntax with \`> [!TYPE]\` on the first line, then \`>\` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Example: \`> [!NOTE]\n> Your alert content here. You can have multiple lines.\n> Each line is a blockquote line.\`
 
 6. **File mentions**: When the user mentions a file with @filename, that file's content may be provided in context. Use this to understand what they're working on.
 
@@ -380,7 +389,11 @@ You have access to tools that allow you to:
 - Use **bold** for the most relevant parts: number of changes, main actions, file or section names (e.g. **3 changes** prepared, **expanded the introduction**).
 - Be concise but helpful. When proposing edits, explain what you're changing and why.
 - If you need to read a document first, do so before making suggestions.
-- Use code blocks only when showing markdown examples.`;
+- Use code blocks only when showing markdown examples.
+
+## Long conversations
+
+- **Each new user message is a new request.** Use your tools (read, search, find_headings, propose_edit, etc.) whenever the user asks to read, edit, or change something—including on follow-up messages. Do not assume you should only reply in text after the first exchange; if the user wants changes, use your tools to propose them.`;
 
 // ==================== Tool Execution ====================
 
@@ -532,7 +545,7 @@ const PROVIDER_LABELS: Record<LLMProvider, string> = {
     google: 'Google',
 };
 
-const TRIAL_MODEL = 'gpt-4o-mini';
+const TRIAL_MODEL = 'gpt-4o';
 
 function getElectronEnv(key: string): string | undefined {
     if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: { env?: Record<string, string> } }).electronAPI?.env?.[key]) {

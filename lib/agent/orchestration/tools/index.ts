@@ -413,11 +413,13 @@ export async function executeTool(
     optionsOrRag?: ExecuteToolOptions | RAGEngine
 ): Promise<ToolResult> {
     agentLog.tool(name, args);
-    const options: ExecuteToolOptions =
-        optionsOrRag && typeof optionsOrRag === 'object' && 'ragEngine' in optionsOrRag
-            ? (optionsOrRag as ExecuteToolOptions)
-            : { ragEngine: (optionsOrRag as RAGEngine) ?? defaultRAGEngine };
-    const ragEngine = options.ragEngine ?? defaultRAGEngine;
+    // Merge options so defaultFileId is preserved when caller passes { defaultFileId } without ragEngine
+    const options: ExecuteToolOptions = {
+        ragEngine: defaultRAGEngine,
+        ...(optionsOrRag && typeof optionsOrRag === 'object' ? (optionsOrRag as ExecuteToolOptions) : {}),
+    };
+    if (options.ragEngine == null) options.ragEngine = defaultRAGEngine;
+    const ragEngine = options.ragEngine;
     const defaultFileId = options.defaultFileId ?? undefined;
 
     const resolveFile = async (fileId: string): Promise<string> =>
@@ -654,7 +656,6 @@ async function lintMarkdown(fileId: string): Promise<LintResult> {
     const issues: LintIssue[] = [];
 
     // Track heading levels
-    let h1Count = 0;
     let lastHeadingLevel = 0;
     let consecutiveBlankLines = 0;
 
@@ -667,19 +668,6 @@ async function lintMarkdown(fileId: string): Promise<LintResult> {
         if (headingMatch) {
             const level = headingMatch[1].length;
             const text = headingMatch[2].trim();
-
-            // Single H1 rule
-            if (level === 1) {
-                h1Count++;
-                if (h1Count > 1) {
-                    issues.push({
-                        type: 'error',
-                        rule: 'single-h1',
-                        message: 'Multiple H1 headings found. Document should have only one H1.',
-                        line: lineNum
-                    });
-                }
-            }
 
             // Heading hierarchy
             if (lastHeadingLevel > 0 && level > lastHeadingLevel + 1) {

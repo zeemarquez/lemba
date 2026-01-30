@@ -266,7 +266,9 @@ export class OrchestratorAgent {
     }
 
     /**
-     * Analyze user intent from the message
+     * Analyze user intent from the message.
+     * When no keyword matches, treat as content/edit request if user has a document open
+     * so the workflow always runs planner + writer instead of no-op.
      */
     private async analyzeIntent(
         userMessage: string,
@@ -291,7 +293,10 @@ export class OrchestratorAgent {
         } else if (message.includes('edit') || message.includes('modify') || message.includes('change') || message.includes('update')) {
             primaryIntent = 'edit_section';
             requiredAgents = ['researcher', 'writer', 'linter'];
-        } else if (message.includes('expand') || message.includes('add more') || message.includes('elaborate')) {
+        } else if (
+            message.includes('expand') || message.includes('add more') || message.includes('elaborate') ||
+            message.includes('add ') || message.includes('insert ') || message.includes('include ')
+        ) {
             primaryIntent = 'expand_content';
             requiredAgents = ['researcher', 'planner', 'writer', 'linter'];
         } else if (message.includes('summarize') || message.includes('summary') || message.includes('condense')) {
@@ -315,6 +320,12 @@ export class OrchestratorAgent {
         } else if (message.includes('?') || message.includes('what') || message.includes('how') || message.includes('why')) {
             primaryIntent = 'question';
             requiredAgents = ['researcher'];
+        }
+
+        // Unknown intent but user has a document open: assume they want to modify it (plan + write + lint)
+        if (primaryIntent === 'unknown' && context.activeDocument) {
+            primaryIntent = 'expand_content';
+            requiredAgents = ['planner', 'writer', 'linter'];
         }
 
         // Check if document is long (needs RAG)
@@ -406,7 +417,7 @@ export class OrchestratorAgent {
                 }
                 return `${baseContext}\n\nGather relevant information for this task. Use RAG for document context and web search for external information.`;
             case 'writer':
-                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Follow markdown best practices.`;
+                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line.`;
             case 'linter':
                 return `${baseContext}\n\nCheck the document for errors and style issues. Propose fixes for any problems found.`;
             default:
@@ -623,18 +634,21 @@ export async function runOrchestration(
         mentionedFiles,
     };
 
-    // If files are mentioned, load the first one as active document
+    // If files are mentioned, load the first one as active document (even if empty, so writer/linter get defaultFileId)
     if (mentionedFiles.length > 0) {
         const { browserStorage } = await import('../../browser-storage');
-        const content = await browserStorage.readFile(mentionedFiles[0]);
-        if (content) {
-            const fileName = mentionedFiles[0].split('/').pop() || mentionedFiles[0];
-            context.activeDocument = {
-                id: mentionedFiles[0],
-                name: fileName,
-                content,
-            };
+        let content: string;
+        try {
+            content = await browserStorage.readFile(mentionedFiles[0]) ?? '';
+        } catch {
+            content = '';
         }
+        const fileName = mentionedFiles[0].split('/').pop() || mentionedFiles[0];
+        context.activeDocument = {
+            id: mentionedFiles[0],
+            name: fileName,
+            content,
+        };
     }
 
     const provider = options.provider ?? 'openai';

@@ -28,14 +28,28 @@ Transform plans and research into clean, well-structured markdown content. You a
 
 #### Headings
 ```markdown
-# Document Title (H1 - only one per document)
+# Document Title (H1)
 ## Major Section (H2)
 ### Subsection (H3)
 #### Sub-subsection (H4)
 ```
+- **No numbering on headings**: Write `## Introduction`, `## Conclusion`—never `## 1. Introduction` or `## 6. Conclusion`
 - Never skip heading levels
 - Use sentence case for headings
 - Keep headings concise and descriptive
+
+#### Equations (editor-specific)
+- **Block equations**: Use double dollar signs on one continuous line with a space after the opening `$$` and before the closing `$$`. Example: `$$ E = mc^2 $$` (no newlines inside; single line only).
+- **Inline equations**: Use a single dollar sign before and after: `$...$`. Example: `The formula $E = mc^2$ is famous.`
+
+#### Alert blocks (editor-specific)
+Five alert types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Use blockquote syntax: first line `> [!TYPE]`, then `>` on each content line.
+
+```markdown
+> [!NOTE]
+> Your alert content here. You can have multiple lines.
+> Each line is a blockquote line.
+```
 
 #### Paragraphs
 - Keep paragraphs focused on one idea

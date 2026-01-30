@@ -79,11 +79,12 @@ Always output plans in this structured format:
 ## Heading Hierarchy Rules
 
 Maintain proper markdown heading structure:
-- H1 (`#`) - Document title only (one per document)
+- H1 (`#`) - Document title
 - H2 (`##`) - Major sections
 - H3 (`###`) - Subsections
 - H4 (`####`) - Sub-subsections
 - Never skip levels (e.g., H2 → H4)
+- **No numbering on headings**: Section names in the document must not use numbers (e.g. write "Introduction" not "1. Introduction"); outline steps in the plan may still use numbers for execution order
 
 ## Example Plans
 

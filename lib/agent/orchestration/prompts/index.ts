@@ -96,7 +96,8 @@ Always output plans in this structured format:
 2. **Be specific** - Vague plans lead to poor execution
 3. **Consider context** - Plans should fit the document's style and purpose
 4. **Think sequentially** - Order steps logically for the Writer
-5. **Preserve intent** - The plan should achieve the user's original goal`;
+5. **Preserve intent** - The plan should achieve the user's original goal
+6. **No numbering on headings** - Document section headings must not use numbers (e.g. "Introduction" not "1. Introduction"); outline step numbers in the plan are for execution order only`;
 
 export const RESEARCHER_PROMPT = `# Researcher Agent System Prompt
 
@@ -163,7 +164,11 @@ Transform plans and research into clean, well-structured markdown content. You a
 ## Writing Guidelines
 
 ### Markdown Best Practices
-- Use proper heading hierarchy (H1 only once, don't skip levels)
+- Use proper heading hierarchy (don't skip levels)
+- **No numbering on headings**: Write \`## Introduction\`, \`## Conclusion\`—never \`## 1. Introduction\` or \`## 6. Conclusion\`
+- **Block equations**: Use double dollar signs on one continuous line with a space after the opening \`$$\` and before the closing \`$$\`. Example: \`$$ E = mc^2 $$\` (no newlines inside; single line only).
+- **Inline equations**: Use a single dollar sign before and after: \`$...$\`. Example: \`The formula $E = mc^2$ is famous.\`
+- **Alert blocks**: Use \`> [!TYPE]\` on the first line, then \`>\` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Example: \`> [!NOTE]\n> Your alert content here.\n> Each line is a blockquote line.\`
 - Keep paragraphs focused on one idea
 - Use code blocks with language specification
 - Use descriptive link text
@@ -181,7 +186,8 @@ Transform plans and research into clean, well-structured markdown content. You a
 2. **Preserve existing content** - Don't accidentally overwrite
 3. **Match exact text for edits** - Including whitespace and newlines
 4. **Provide descriptions** - Every edit should explain its purpose
-5. **Follow the plan** - Stick to what was outlined`;
+5. **Follow the plan** - Stick to what was outlined
+6. **Stop after implementing (this response only)** - Implement the plan in one or two rounds of tool calls. Within this response, after you have applied all planned edits for this request, end with a brief summary and do not call further tools in this same response. Each new user message is a new request and you may call tools again as needed. Prefer batching edits in one round. Never repeat the same or similar edits.`;
 
 export const LINTER_PROMPT = `# Linter Agent System Prompt
 
@@ -201,8 +207,11 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 ## Lint Rules
 
 ### Critical Errors (Must Fix)
-- H1 should only appear once
 - Heading levels should not skip
+- **No numbered headings**: Headings must not use numbering (e.g. fix \`## 1. Introduction\` to \`## Introduction\`)
+- **Block equations**: Must use \`$$ ... $$\` on one continuous line (space after opening \`$$\` and before closing \`$$\`; no newlines inside). Fix \`\\[ ... \\]\` or other block math to \`$$ E = mc^2 $$\` style.
+- **Inline equations**: Must use \`$...$\` (single dollar before and after)
+- **Alert blocks**: Must use \`> [!TYPE]\` (NOTE, TIP, IMPORTANT, WARNING, CAUTION) then \`>\` on each content line; fix other callout syntax to this form
 - Code blocks must be closed
 - Links and images must have proper syntax
 
