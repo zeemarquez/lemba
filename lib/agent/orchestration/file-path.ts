@@ -5,17 +5,19 @@
 
 import { browserStorage } from '../../browser-storage';
 
+type TreeNode = { id: string; type: string; children?: TreeNode[] };
+
 /** Collect all file paths from the storage tree */
 export async function getAllFilePaths(): Promise<string[]> {
     const { tree } = await browserStorage.list();
     const paths: string[] = [];
-    function collect(nodes: { id: string; type: string; children?: unknown[] }) {
+    function collect(nodes: TreeNode[]) {
         for (const node of nodes) {
             if (node.type === 'file') paths.push(node.id);
-            else if (node.children) collect(node.children as { id: string; type: string; children?: unknown[] }[]);
+            else if (node.children) collect(node.children);
         }
     }
-    collect(tree as { id: string; type: string; children?: unknown[] }[]);
+    collect(tree as TreeNode[]);
     return paths;
 }
 

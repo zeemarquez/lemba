@@ -13,6 +13,8 @@ import {
     SearchResult,
     createDiff,
 } from './types';
+
+export type { InsertPosition } from './types';
 import { generateHunks, determineDiffType, splitLines, joinLines } from './diff-utils';
 
 // ==================== Read Operations ====================

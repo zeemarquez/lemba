@@ -647,6 +647,3 @@ export async function runOrchestration(
 
     return orchestrator.run(lastUserMessage.content, context, options);
 }
-
-// Export class
-export { OrchestratorAgent };

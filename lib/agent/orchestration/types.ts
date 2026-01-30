@@ -11,7 +11,7 @@ export type AgentType = 'orchestrator' | 'planner' | 'researcher' | 'writer' | '
 
 export type TaskType = 'plan' | 'research' | 'write' | 'lint' | 'orchestrate';
 
-export type TaskStatus = 'pending' | 'in_progress' | 'success' | 'error' | 'partial';
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'success' | 'error' | 'partial';
 
 // ==================== RAG Types ====================
 

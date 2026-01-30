@@ -273,7 +273,8 @@ export class RAGEngine {
 }
 
 // Export components
-export { DocumentChunker, ChunkingOptions } from './chunker';
+export { DocumentChunker } from './chunker';
+export type { ChunkingOptions } from './chunker';
 export { EmbeddingService } from './embeddings';
 export { VectorStore } from './vector-store';
 

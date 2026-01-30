@@ -14,7 +14,7 @@ interface PlannerOptions {
     model?: string;
     temperature?: number;
     maxTokens?: number;
-    onDiffCreated?: (diff: unknown) => void;
+    onDiffCreated?: (diff: import('../../types').DocumentDiff) => void;
 }
 
 export class PlannerAgent {
