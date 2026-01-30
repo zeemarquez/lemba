@@ -89,8 +89,8 @@ export class ResearcherAgent {
         }
 
         // Build messages
-        const messages = [
-            { role: 'system' as const, content: systemPrompt },
+        const messages: ChatCompletionMessage[] = [
+            { role: 'system', content: systemPrompt },
         ];
 
         // Add previous research findings if available

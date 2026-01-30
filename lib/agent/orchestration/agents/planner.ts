@@ -62,8 +62,8 @@ export class PlannerAgent {
         }
 
         // Build messages
-        const messages = [
-            { role: 'system' as const, content: systemPrompt },
+        const messages: ChatCompletionMessage[] = [
+            { role: 'system', content: systemPrompt },
         ];
 
         // Add conversation history (last few messages for context)

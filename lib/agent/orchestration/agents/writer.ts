@@ -79,7 +79,7 @@ export class WriterAgent {
         }
 
         // Build messages
-        const messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: unknown[] }> = [
+        const messages: ChatCompletionMessage[] = [
             { role: 'system', content: systemPrompt },
         ];
 
