@@ -417,7 +417,7 @@ export class OrchestratorAgent {
                 }
                 return `${baseContext}\n\nGather relevant information for this task. Use RAG for document context and web search for external information.`;
             case 'writer':
-                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line.`;
+                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line. Use one sentence per line in prose and blank lines before block equations, headings, code blocks, alert blocks, and tables.`;
             case 'linter':
                 return `${baseContext}\n\nCheck the document for errors and style issues. Propose fixes for any problems found.`;
             default:

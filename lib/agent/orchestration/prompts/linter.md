@@ -55,6 +55,10 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 > Each line is a blockquote line.
 ```
 
+#### 1d. Source-mode readability (editor-specific)
+- **One sentence per line**: Prose should have one sentence per line (no long continuous lines).
+- **Blank lines before blocks**: Ensure a blank line before block equations, headings, code blocks, alert blocks, and tables.
+
 #### 2. Broken Links/Images
 - Check for malformed link syntax
 - Verify image syntax is complete

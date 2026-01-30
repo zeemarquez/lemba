@@ -276,18 +276,19 @@ export function AgentPanel() {
                         <button
                             type="button"
                             onClick={() => {
-                                setAgentReadOnly(true);
-                                setAgentUseOrchestration(false);
+                                setAgentReadOnly(false);
+                                setAgentUseOrchestration(true);
                             }}
+                            title="Multi-agent (Planner, Researcher, Writer, Linter)"
                             className={cn(
                                 "inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded transition-colors",
-                                agentReadOnly && !agentUseOrchestration
+                                agentUseOrchestration
                                     ? "bg-background text-foreground shadow-sm"
                                     : "text-muted-foreground hover:text-foreground"
                             )}
                         >
-                            <MessageCircleQuestion size={12} className="shrink-0" />
-                            Ask
+                            <Bot size={12} className="shrink-0" />
+                            Agent
                         </button>
                         <button
                             type="button"
@@ -308,19 +309,18 @@ export function AgentPanel() {
                         <button
                             type="button"
                             onClick={() => {
-                                setAgentReadOnly(false);
-                                setAgentUseOrchestration(true);
+                                setAgentReadOnly(true);
+                                setAgentUseOrchestration(false);
                             }}
-                            title="Multi-agent (Planner, Researcher, Writer, Linter)"
                             className={cn(
                                 "inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded transition-colors",
-                                agentUseOrchestration
+                                agentReadOnly && !agentUseOrchestration
                                     ? "bg-background text-foreground shadow-sm"
                                     : "text-muted-foreground hover:text-foreground"
                             )}
                         >
-                            <Bot size={12} className="shrink-0" />
-                            Agent
+                            <MessageCircleQuestion size={12} className="shrink-0" />
+                            Ask
                         </button>
                     </div>
                 </div>

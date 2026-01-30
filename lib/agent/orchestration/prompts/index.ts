@@ -169,6 +169,8 @@ Transform plans and research into clean, well-structured markdown content. You a
 - **Block equations**: Use double dollar signs on one continuous line with a space after the opening \`$$\` and before the closing \`$$\`. Example: \`$$ E = mc^2 $$\` (no newlines inside; single line only).
 - **Inline equations**: Use a single dollar sign before and after: \`$...$\`. Example: \`The formula $E = mc^2$ is famous.\`
 - **Alert blocks**: Use \`> [!TYPE]\` on the first line, then \`>\` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Example: \`> [!NOTE]\n> Your alert content here.\n> Each line is a blockquote line.\`
+- **Line breaks**: Put each sentence on its own line in prose (one sentence per line) for readable source mode.
+- **Blank lines before blocks**: Add a blank line before block equations, headings, code blocks, alert blocks, and tables.
 - Keep paragraphs focused on one idea
 - Use code blocks with language specification
 - Use descriptive link text
@@ -212,6 +214,7 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 - **Block equations**: Must use \`$$ ... $$\` on one continuous line (space after opening \`$$\` and before closing \`$$\`; no newlines inside). Fix \`\\[ ... \\]\` or other block math to \`$$ E = mc^2 $$\` style.
 - **Inline equations**: Must use \`$...$\` (single dollar before and after)
 - **Alert blocks**: Must use \`> [!TYPE]\` (NOTE, TIP, IMPORTANT, WARNING, CAUTION) then \`>\` on each content line; fix other callout syntax to this form
+- **Line breaks**: Prose should have one sentence per line; add blank lines before block equations, headings, code blocks, alert blocks, and tables
 - Code blocks must be closed
 - Links and images must have proper syntax
 

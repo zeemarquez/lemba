@@ -414,7 +414,7 @@ export const useStore = create<AppState>()(
                 agentProviderKeysValid: { openai: false, anthropic: false, google: false },
                 agentTemperature: 0.7,
                 agentMaxTokens: 4096,
-                agentUseOrchestration: false,
+                agentUseOrchestration: true,
 
                 // Actions implementation
                 fetchFileTree: async () => {

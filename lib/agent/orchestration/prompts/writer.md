@@ -51,6 +51,10 @@ Five alert types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Use blockquote syntax:
 > Each line is a blockquote line.
 ```
 
+#### Source-mode readability (editor-specific)
+- **One sentence per line**: Put each sentence on its own line in prose so source mode does not show long continuous lines.
+- **Blank lines before blocks**: Add a blank line before block equations (`$$ ... $$`), headings (`##`, `###`), code blocks (`` ``` ``), alert blocks (`> [!NOTE]`), and tables so blocks are visually separated in source mode.
+
 #### Paragraphs
 - Keep paragraphs focused on one idea
 - Use blank lines between paragraphs

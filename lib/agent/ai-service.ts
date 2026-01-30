@@ -376,6 +376,8 @@ Apply these rules to all markdown you produce or modify so the document renders 
 - **Block equations**: Use double dollar signs on one continuous line with a space after the opening \`$$\` and before the closing \`$$\`. Example: \`$$ E = mc^2 $$\` (no newlines inside; single line only).
 - **Inline equations**: Use a single dollar sign before and after: \`$...$\`. Example: \`The formula $E = mc^2$ is famous.\`
 - **Alert blocks**: Use blockquote syntax with \`> [!TYPE]\` on the first line, then \`>\` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Example: \`> [!NOTE]\n> Your alert content here. You can have multiple lines.\n> Each line is a blockquote line.\`
+- **Line breaks for readability**: Put each sentence on its own line in prose (one sentence per line). This keeps source mode readable instead of long continuous lines.
+- **Blank lines before blocks**: Add a blank line before block equations (\`$$ ... $$\`), headings (\`##\`), code blocks (\`\`\`\`), alert blocks (\`> [!NOTE]\`), and tables so blocks are visually separated in source mode.
 
 6. **File mentions**: When the user mentions a file with @filename, that file's content may be provided in context. Use this to understand what they're working on.
 
