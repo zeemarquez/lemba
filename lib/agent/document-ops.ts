@@ -4,18 +4,26 @@
  */
 
 import { browserStorage } from '../browser-storage';
-import { 
-    DocumentDiff, 
-    DocumentMetadata, 
-    Heading, 
-    InsertPosition, 
-    SearchMatch, 
+import {
+    DocumentDiff,
+    DocumentMetadata,
+    Heading,
+    InsertPosition,
+    SearchMatch,
     SearchResult,
     createDiff,
 } from './types';
 
 export type { InsertPosition } from './types';
 import { generateHunks, determineDiffType, splitLines, joinLines } from './diff-utils';
+
+export interface SectionNode {
+    text: string;
+    level: number;
+    lineNumber: number;
+    endLine: number;
+    children: SectionNode[];
+}
 
 // ==================== Read Operations ====================
 
@@ -39,11 +47,11 @@ export async function readDocumentSection(
 ): Promise<string> {
     const content = await browserStorage.readFile(fileId);
     const lines = splitLines(content);
-    
+
     // Clamp to valid range
     const start = Math.max(1, startLine) - 1; // Convert to 0-indexed
     const end = Math.min(lines.length, endLine);
-    
+
     return joinLines(lines.slice(start, end));
 }
 
@@ -54,13 +62,13 @@ export async function getDocumentMetadata(fileId: string): Promise<DocumentMetad
     const content = await browserStorage.readFile(fileId);
     const lines = splitLines(content);
     const headings = findHeadingsInContent(content);
-    
+
     // Calculate word count (split by whitespace and filter empty)
     const wordCount = content
         .split(/\s+/)
         .filter(word => word.length > 0)
         .length;
-    
+
     return {
         fileId,
         fileName: fileId.split('/').pop() || fileId,
@@ -80,19 +88,19 @@ function findHeadingsInContent(content: string): Heading[] {
     const lines = splitLines(content);
     const headings: Heading[] = [];
     const headingRegex = /^(#{1,6})\s+(.+)$/;
-    
+
     for (let i = 0; i < lines.length; i++) {
         const match = lines[i].match(headingRegex);
         if (match) {
             const level = match[1].length as 1 | 2 | 3 | 4 | 5 | 6;
             const text = match[2].trim();
-            
+
             // Generate a slug-style ID
             const id = text
                 .toLowerCase()
                 .replace(/[^\w\s-]/g, '')
                 .replace(/\s+/g, '-');
-            
+
             headings.push({
                 level,
                 text,
@@ -101,7 +109,7 @@ function findHeadingsInContent(content: string): Heading[] {
             });
         }
     }
-    
+
     return headings;
 }
 
@@ -116,11 +124,11 @@ export async function findHeadings(
 ): Promise<Heading[]> {
     const content = await browserStorage.readFile(fileId);
     const headings = findHeadingsInContent(content);
-    
+
     if (level !== undefined) {
         return headings.filter(h => h.level === level);
     }
-    
+
     return headings;
 }
 
@@ -137,19 +145,19 @@ export async function searchInDocument(
 ): Promise<SearchResult> {
     const content = await browserStorage.readFile(fileId);
     const lines = splitLines(content);
-    const regex = typeof query === 'string' 
+    const regex = typeof query === 'string'
         ? new RegExp(escapeRegex(query), 'gi')
         : query;
-    
+
     const matches: SearchMatch[] = [];
-    
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         let match;
-        
+
         // Reset regex lastIndex for global searches
         regex.lastIndex = 0;
-        
+
         while ((match = regex.exec(line)) !== null) {
             const contextBefore = lines.slice(
                 Math.max(0, i - contextLines),
@@ -159,7 +167,7 @@ export async function searchInDocument(
                 i + 1,
                 Math.min(lines.length, i + 1 + contextLines)
             );
-            
+
             matches.push({
                 lineNumber: i + 1, // 1-indexed
                 lineContent: line,
@@ -170,12 +178,12 @@ export async function searchInDocument(
                     after: contextAfter,
                 },
             });
-            
+
             // For non-global regex, break after first match per line
             if (!regex.global) break;
         }
     }
-    
+
     return {
         fileId,
         fileName: fileId.split('/').pop() || fileId,
@@ -193,7 +201,7 @@ export async function searchAllDocuments(
 ): Promise<SearchResult[]> {
     const { tree } = await browserStorage.list();
     const results: SearchResult[] = [];
-    
+
     // Recursively collect all file IDs
     const fileIds: string[] = [];
     const collectFiles = (nodes: typeof tree) => {
@@ -206,7 +214,7 @@ export async function searchAllDocuments(
         }
     };
     collectFiles(tree);
-    
+
     // Search each file
     for (const fileId of fileIds) {
         try {
@@ -219,7 +227,7 @@ export async function searchAllDocuments(
             console.warn(`Could not search file ${fileId}:`, err);
         }
     }
-    
+
     return results;
 }
 
@@ -239,16 +247,16 @@ export async function proposeEdit(
     description?: string
 ): Promise<DocumentDiff | null> {
     const content = await browserStorage.readFile(fileId);
-    
+
     if (!content.includes(oldText)) {
         return null; // Text not found
     }
-    
+
     const newContent = content.replace(oldText, newText);
     const hunks = generateHunks(content, newContent);
     const type = determineDiffType(hunks);
     const fileName = fileId.split('/').pop() || fileId;
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -272,49 +280,49 @@ export async function proposeInsert(
     const content = await browserStorage.readFile(fileId);
     const lines = splitLines(content);
     let insertIndex: number;
-    
+
     switch (position.type) {
         case 'start':
             insertIndex = 0;
             break;
-        
+
         case 'end':
             insertIndex = lines.length;
             break;
-        
+
         case 'line':
             // Insert before the specified line (1-indexed)
             insertIndex = Math.max(0, Math.min(lines.length, position.lineNumber - 1));
             break;
-        
+
         case 'afterHeading': {
             const headings = findHeadingsInContent(content);
-            const heading = headings.find(h => 
+            const heading = headings.find(h =>
                 h.text.toLowerCase().includes(position.headingText.toLowerCase())
             );
-            
+
             if (!heading) {
                 return null; // Heading not found
             }
-            
+
             // Insert after the heading line
             insertIndex = heading.lineNumber; // Already 1-indexed, so this is correct for "after"
             break;
         }
-        
+
         default:
             return null;
     }
-    
+
     // Insert the new content
     const newLines = [...lines];
     const insertLines = splitLines(contentToInsert);
     newLines.splice(insertIndex, 0, ...insertLines);
-    
+
     const newContent = joinLines(newLines);
     const hunks = generateHunks(content, newContent);
     const fileName = fileId.split('/').pop() || fileId;
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -340,20 +348,20 @@ export async function proposeDelete(
 ): Promise<DocumentDiff | null> {
     const content = await browserStorage.readFile(fileId);
     const lines = splitLines(content);
-    
+
     // Validate range
     if (startLine < 1 || endLine > lines.length || startLine > endLine) {
         return null;
     }
-    
+
     // Remove the specified lines
     const newLines = [...lines];
     newLines.splice(startLine - 1, endLine - startLine + 1);
-    
+
     const newContent = joinLines(newLines);
     const hunks = generateHunks(content, newContent);
     const fileName = fileId.split('/').pop() || fileId;
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -401,19 +409,19 @@ export async function proposeReplaceSection(
     const content = await browserStorage.readFile(fileId);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
-    
+
     // Find the target heading (flexible match: "Conclusion" matches "6. Conclusion", etc.)
     const headingIndex = headings.findIndex(h =>
         headingMatchesSection(h.text, sectionHeading)
     );
-    
+
     if (headingIndex === -1) {
         return null; // Heading not found
     }
-    
+
     const startHeading = headings[headingIndex];
     const startLine = startHeading.lineNumber - 1; // Convert to 0-indexed
-    
+
     // Find the end of the section (next heading of same or higher level, or end of document)
     let endLine = lines.length;
     for (let i = headingIndex + 1; i < headings.length; i++) {
@@ -422,16 +430,16 @@ export async function proposeReplaceSection(
             break;
         }
     }
-    
+
     // Replace the section
     const newLines = [...lines];
     const insertLines = splitLines(newSectionContent);
     newLines.splice(startLine, endLine - startLine, ...insertLines);
-    
+
     const newContent = joinLines(newLines);
     const hunks = generateHunks(content, newContent);
     const fileName = fileId.split('/').pop() || fileId;
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -455,7 +463,7 @@ export async function proposeFullReplace(
     const hunks = generateHunks(content, newContent);
     const type = determineDiffType(hunks);
     const fileName = fileId.split('/').pop() || fileId;
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -464,6 +472,261 @@ export async function proposeFullReplace(
         newContent,
         hunks,
         description || 'Replace document content'
+    );
+}
+
+/**
+ * Get the hierarchical structure of a document
+ */
+export async function getDocumentStructure(fileId: string): Promise<SectionNode[]> {
+    const content = await browserStorage.readFile(fileId);
+    const headings = findHeadingsInContent(content);
+    const lines = splitLines(content);
+
+    // Build tree
+    const root: SectionNode[] = [];
+    const stack: SectionNode[] = []; // Stack of active parents
+
+    for (let i = 0; i < headings.length; i++) {
+        const h = headings[i];
+
+        // Determine end line
+        let endLine = lines.length;
+        if (i < headings.length - 1) {
+            endLine = headings[i + 1].lineNumber - 1;
+        }
+
+        const node: SectionNode = {
+            text: h.text,
+            level: h.level,
+            lineNumber: h.lineNumber,
+            endLine,
+            children: []
+        };
+
+        while (stack.length > 0 && stack[stack.length - 1].level >= node.level) {
+            stack.pop();
+        }
+
+        if (stack.length === 0) {
+            root.push(node);
+        } else {
+            stack[stack.length - 1].children.push(node);
+        }
+
+        stack.push(node);
+    }
+
+    return root;
+}
+
+/**
+ * Propose updating a specific section's content
+ * @param fileId - File path/ID
+ * @param sectionHeading - Heading text to find
+ * @param newContent - New content for the section (including the heading if desired, usually yes)
+ */
+export async function proposeUpdateSection(
+    fileId: string,
+    sectionHeading: string,
+    newContent: string,
+    description?: string
+): Promise<DocumentDiff | null> {
+    const content = await browserStorage.readFile(fileId);
+    const headings = findHeadingsInContent(content);
+    const lines = splitLines(content);
+
+    const headingIndex = headings.findIndex(h =>
+        headingMatchesSection(h.text, sectionHeading)
+    );
+
+    if (headingIndex === -1) return null;
+
+    const heading = headings[headingIndex];
+    let endLine = lines.length;
+    for (let i = headingIndex + 1; i < headings.length; i++) {
+        if (headings[i].level <= heading.level) {
+            endLine = headings[i].lineNumber - 1;
+            break;
+        }
+    }
+
+    const startLine = heading.lineNumber - 1; // 0-indexed
+
+    const newLines = [...lines];
+    const insertLines = splitLines(newContent);
+    newLines.splice(startLine, endLine - startLine, ...insertLines);
+
+    const finalContent = joinLines(newLines);
+    const hunks = generateHunks(content, finalContent);
+    const fileName = fileId.split('/').pop() || fileId;
+
+    return createDiff(
+        fileId,
+        fileName,
+        'replace',
+        content,
+        finalContent,
+        hunks,
+        description || `Update section "${truncate(sectionHeading, 30)}"`
+    );
+}
+
+/**
+ * Propose adding a new section relative to another
+ */
+export async function proposeAddSection(
+    fileId: string,
+    targetHeading: string,
+    relation: 'before' | 'after',
+    newContent: string,
+    description?: string
+): Promise<DocumentDiff | null> {
+    const content = await browserStorage.readFile(fileId);
+    const headings = findHeadingsInContent(content);
+    const lines = splitLines(content);
+
+    const headingIndex = headings.findIndex(h =>
+        headingMatchesSection(h.text, targetHeading)
+    );
+
+    if (headingIndex === -1) return null;
+    const heading = headings[headingIndex];
+
+    let insertLine = 0;
+
+    if (relation === 'before') {
+        insertLine = heading.lineNumber - 1; // 0-indexed line of heading
+    } else {
+        // After this section (skip all children)
+        let endLine = lines.length;
+        for (let i = headingIndex + 1; i < headings.length; i++) {
+            if (headings[i].level <= heading.level) {
+                endLine = headings[i].lineNumber - 1;
+                break;
+            }
+        }
+        insertLine = endLine;
+    }
+
+    const newLines = [...lines];
+    const insertLines = splitLines(newContent);
+
+    // Ensure newline separation padding
+    if (insertLines.length > 0) {
+        insertLines.push(''); // Add trailing newline for spacing
+        if (insertLine > 0 && newLines[insertLine - 1] && newLines[insertLine - 1].trim() !== '') {
+            insertLines.unshift('');
+        }
+    }
+
+    newLines.splice(insertLine, 0, ...insertLines);
+
+    const finalContent = joinLines(newLines);
+    const hunks = generateHunks(content, finalContent);
+    const fileName = fileId.split('/').pop() || fileId;
+
+    return createDiff(
+        fileId,
+        fileName,
+        'insert',
+        content,
+        finalContent,
+        hunks,
+        description || `Add section ${relation} "${truncate(targetHeading, 30)}"`
+    );
+}
+
+/**
+ * Propose removing a section
+ */
+export async function proposeRemoveSection(
+    fileId: string,
+    sectionHeading: string,
+    description?: string
+): Promise<DocumentDiff | null> {
+    return proposeUpdateSection(fileId, sectionHeading, "", description || `Remove section "${truncate(sectionHeading, 30)}"`);
+}
+
+/**
+ * Propose moving a section
+ */
+export async function proposeMoveSection(
+    fileId: string,
+    sectionHeading: string,
+    targetHeading: string,
+    relation: 'before' | 'after',
+    description?: string
+): Promise<DocumentDiff | null> {
+    const content = await browserStorage.readFile(fileId);
+    const headings = findHeadingsInContent(content);
+    const lines = splitLines(content);
+
+    // 1. Identify source range
+    const sourceIdx = headings.findIndex(h => headingMatchesSection(h.text, sectionHeading));
+    if (sourceIdx === -1) return null;
+    const sourceHeading = headings[sourceIdx];
+
+    let sourceEnd = lines.length;
+    for (let i = sourceIdx + 1; i < headings.length; i++) {
+        if (headings[i].level <= sourceHeading.level) {
+            sourceEnd = headings[i].lineNumber - 1;
+            break;
+        }
+    }
+    const sourceStart = sourceHeading.lineNumber - 1;
+
+    // 2. Identify target insertion point
+    const targetIdx = headings.findIndex(h => headingMatchesSection(h.text, targetHeading));
+    if (targetIdx === -1) return null;
+    const targetHeadingObj = headings[targetIdx];
+
+    // Check nested move
+    if (targetHeadingObj.lineNumber >= sourceHeading.lineNumber && targetHeadingObj.lineNumber < sourceEnd) {
+        return null; // Target is inside source
+    }
+
+    let insertAt = 0;
+    if (relation === 'before') {
+        insertAt = targetHeadingObj.lineNumber - 1;
+    } else {
+        let targetEnd = lines.length;
+        for (let i = targetIdx + 1; i < headings.length; i++) {
+            if (headings[i].level <= targetHeadingObj.level) {
+                targetEnd = headings[i].lineNumber - 1;
+                break;
+            }
+        }
+        insertAt = targetEnd;
+    }
+
+    const newLines = [...lines];
+    const sectionLines = lines.slice(sourceStart, sourceEnd);
+
+    // Remove source
+    newLines.splice(sourceStart, sourceEnd - sourceStart);
+
+    // Adjust insertAt
+    let finalInsertAt = insertAt;
+    if (insertAt > sourceStart) {
+        finalInsertAt -= (sourceEnd - sourceStart);
+    }
+
+    // Insert
+    newLines.splice(finalInsertAt, 0, ...sectionLines);
+
+    const finalContent = joinLines(newLines);
+    const hunks = generateHunks(content, finalContent);
+    const fileName = fileId.split('/').pop() || fileId;
+
+    return createDiff(
+        fileId,
+        fileName,
+        'replace',
+        content,
+        finalContent,
+        hunks,
+        description || `Move section "${truncate(sectionHeading, 30)}" ${relation} "${truncate(targetHeading, 30)}"`
     );
 }
 
@@ -491,16 +754,21 @@ export const documentOps = {
     readDocument,
     readDocumentSection,
     getDocumentMetadata,
-    
+
     // Search
     findHeadings,
     searchInDocument,
     searchAllDocuments,
-    
+
     // Edit (propose)
     proposeEdit,
     proposeInsert,
     proposeDelete,
     proposeReplaceSection,
     proposeFullReplace,
+    getDocumentStructure,
+    proposeUpdateSection,
+    proposeAddSection,
+    proposeRemoveSection,
+    proposeMoveSection,
 };

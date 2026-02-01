@@ -28,10 +28,10 @@ export function joinLines(lines: string[]): string {
 function lcs(oldLines: string[], newLines: string[]): { oldIdx: number; newIdx: number }[] {
     const m = oldLines.length;
     const n = newLines.length;
-    
+
     // Build LCS table
     const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    
+
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
             if (oldLines[i - 1] === newLines[j - 1]) {
@@ -41,11 +41,11 @@ function lcs(oldLines: string[], newLines: string[]): { oldIdx: number; newIdx: 
             }
         }
     }
-    
+
     // Backtrack to find the actual LCS
     const result: { oldIdx: number; newIdx: number }[] = [];
     let i = m, j = n;
-    
+
     while (i > 0 && j > 0) {
         if (oldLines[i - 1] === newLines[j - 1]) {
             result.unshift({ oldIdx: i - 1, newIdx: j - 1 });
@@ -57,7 +57,7 @@ function lcs(oldLines: string[], newLines: string[]): { oldIdx: number; newIdx: 
             j--;
         }
     }
-    
+
     return result;
 }
 
@@ -67,13 +67,13 @@ function lcs(oldLines: string[], newLines: string[]): { oldIdx: number; newIdx: 
 export function generateHunks(oldContent: string, newContent: string): DiffHunk[] {
     const oldLines = splitLines(oldContent);
     const newLines = splitLines(newContent);
-    
+
     const commonLines = lcs(oldLines, newLines);
     const hunks: DiffHunk[] = [];
-    
+
     let oldIdx = 0;
     let newIdx = 0;
-    
+
     for (const match of commonLines) {
         // Check if there are differences before this common line
         if (oldIdx < match.oldIdx || newIdx < match.newIdx) {
@@ -84,11 +84,11 @@ export function generateHunks(oldContent: string, newContent: string): DiffHunk[
                 newLines: newLines.slice(newIdx, match.newIdx),
             });
         }
-        
+
         oldIdx = match.oldIdx + 1;
         newIdx = match.newIdx + 1;
     }
-    
+
     // Handle any remaining differences after the last common line
     if (oldIdx < oldLines.length || newIdx < newLines.length) {
         hunks.push({
@@ -98,7 +98,7 @@ export function generateHunks(oldContent: string, newContent: string): DiffHunk[
             newLines: newLines.slice(newIdx),
         });
     }
-    
+
     return hunks;
 }
 
@@ -108,7 +108,7 @@ export function generateHunks(oldContent: string, newContent: string): DiffHunk[
 export function determineDiffType(hunks: DiffHunk[]): DiffType {
     const hasOld = hunks.some(h => h.oldLines.length > 0);
     const hasNew = hunks.some(h => h.newLines.length > 0);
-    
+
     if (!hasOld && hasNew) return 'insert';
     if (hasOld && !hasNew) return 'delete';
     return 'replace';
@@ -126,7 +126,7 @@ export function generateDiff(
 ): DocumentDiff {
     const hunks = generateHunks(oldContent, newContent);
     const type = determineDiffType(hunks);
-    
+
     return createDiff(
         fileId,
         fileName,
@@ -147,21 +147,59 @@ export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
     if (diffs.length === 0) return null;
     if (diffs.length === 1) return diffs[0];
 
-    const sorted = [...diffs].sort((a, b) => a.createdAt - b.createdAt);
-    const first = sorted[0];
-    let content = first.originalContent;
+    // Check if all diffs are based on the same original content
+    const first = diffs[0];
+    const allSameBase = diffs.every(d => d.originalContent === first.originalContent);
 
-    for (const d of sorted) {
-        content = applyHunks(content, d.hunks);
+    if (allSameBase) {
+        // Parallel edits against the same version: Merge all hunks
+        const allHunks: DiffHunk[] = [];
+        for (const d of diffs) {
+            allHunks.push(...d.hunks);
+        }
+
+        // Sort by startLine descending to handle overlaps? No, applyHunks expects ascending.
+        // But if we have Overlaps (collisions), simply sorting might interleaving them weirdly.
+        // We generally assume the agent avoids editing the same lines.
+        // If we sort ascending, and use the offset logic in applyHunks, it works perfectly for disjoint regions.
+
+        // Note: applyHunks implementation sorts internally, but we can do it here too.
+        // We pass ALL hunks to applyHunks, which applies them and tracks offset.
+
+        const content = applyHunks(first.originalContent, allHunks);
+
+        return generateDiff(
+            first.fileId,
+            first.fileName,
+            first.originalContent,
+            content,
+            'Merged changes'
+        );
+    } else {
+        // Sequential edits against evolving content?
+        // This effectively rebases later diffs on top of earlier ones blindly.
+        // This is what the previous code did, and it causes issues if the versions don't match.
+        // Ideally we should warn or fail, but falling back to sequential application 
+        // (assuming the user accepted one, then another) is the best effort if bases differ.
+        // But in the "pending diffs" view, they are usually all "pending" at once.
+
+        const sorted = [...diffs].sort((a, b) => a.createdAt - b.createdAt);
+        let content = sorted[0].originalContent;
+
+        for (const d of sorted) {
+            // If d.originalContent matches current content, just apply.
+            // If not, we are applying patches blindly.
+            content = applyHunks(content, d.hunks);
+        }
+
+        return generateDiff(
+            sorted[0].fileId,
+            sorted[0].fileName,
+            sorted[0].originalContent,
+            content,
+            'Merged changes'
+        );
     }
-
-    return generateDiff(
-        first.fileId,
-        first.fileName,
-        first.originalContent,
-        content,
-        'Merged changes'
-    );
 }
 
 // ==================== Diff Application ====================
@@ -181,9 +219,9 @@ export function applyDiff(originalContent: string, diff: DocumentDiff): string {
 export function applyHunk(lines: string[], hunk: DiffHunk, offset: number): number {
     const startIdx = hunk.startLine - 1 + offset; // Convert to 0-indexed with offset
     const deleteCount = hunk.oldLines.length;
-    
+
     lines.splice(startIdx, deleteCount, ...hunk.newLines);
-    
+
     // Return the offset change (new lines added minus old lines removed)
     return hunk.newLines.length - deleteCount;
 }
@@ -194,14 +232,14 @@ export function applyHunk(lines: string[], hunk: DiffHunk, offset: number): numb
 export function applyHunks(content: string, hunks: DiffHunk[]): string {
     const lines = splitLines(content);
     let offset = 0;
-    
+
     // Sort hunks by start line to apply in order
     const sortedHunks = [...hunks].sort((a, b) => a.startLine - b.startLine);
-    
+
     for (const hunk of sortedHunks) {
         offset += applyHunk(lines, hunk, offset);
     }
-    
+
     return joinLines(lines);
 }
 
@@ -227,7 +265,7 @@ export function formatDiffForDisplay(
     const oldLines = splitLines(oldContent);
     const newLines = splitLines(newContent);
     const hunks = generateHunks(oldContent, newContent);
-    
+
     if (hunks.length === 0) {
         // No changes - show all as unchanged
         return oldLines.map((line, idx) => ({
@@ -237,23 +275,23 @@ export function formatDiffForDisplay(
             newLineNumber: idx + 1,
         }));
     }
-    
+
     const result: FormattedLine[] = [];
     let oldLineNum = 1;
     let newLineNum = 1;
-    
+
     for (let hunkIdx = 0; hunkIdx < hunks.length; hunkIdx++) {
         const hunk = hunks[hunkIdx];
         const hunkStartOld = hunk.startLine;
         const nextHunkStart = hunkIdx < hunks.length - 1
             ? hunks[hunkIdx + 1].startLine
             : oldLines.length + 1;
-        
+
         // Context before this hunk: full gap when fullDocument, else limited
         const contextStart = fullDocument
             ? oldLineNum
             : Math.max(oldLineNum, hunkStartOld - contextLines);
-        
+
         // Add separator only when not full document (collapsed gap)
         if (!fullDocument && hunkIdx > 0 && oldLineNum < contextStart) {
             result.push({
@@ -261,7 +299,7 @@ export function formatDiffForDisplay(
                 content: '...',
             });
         }
-        
+
         // Add unchanged lines before the hunk
         for (let i = contextStart; i < hunkStartOld; i++) {
             result.push({
@@ -271,10 +309,10 @@ export function formatDiffForDisplay(
                 newLineNumber: newLineNum + (i - oldLineNum),
             });
         }
-        
+
         newLineNum += (hunkStartOld - oldLineNum);
         oldLineNum = hunkStartOld;
-        
+
         // Deleted lines
         for (const line of hunk.oldLines) {
             result.push({
@@ -284,7 +322,7 @@ export function formatDiffForDisplay(
             });
             oldLineNum++;
         }
-        
+
         // Added lines
         for (const line of hunk.newLines) {
             result.push({
@@ -294,12 +332,12 @@ export function formatDiffForDisplay(
             });
             newLineNum++;
         }
-        
+
         // Context after this hunk: full gap when fullDocument, else limited
         const contextEnd = fullDocument
             ? nextHunkStart - 1
             : Math.min(oldLineNum + contextLines, nextHunkStart);
-        
+
         for (let i = oldLineNum; i <= contextEnd; i++) {
             if (i <= oldLines.length) {
                 result.push({
@@ -313,7 +351,7 @@ export function formatDiffForDisplay(
             }
         }
     }
-    
+
     return result;
 }
 
@@ -327,10 +365,10 @@ export function formatUnifiedDiff(
 ): string {
     const lines = formatDiffForDisplay(oldContent, newContent);
     const output: string[] = [];
-    
+
     output.push(`--- a/${fileName}`);
     output.push(`+++ b/${fileName}`);
-    
+
     for (const line of lines) {
         switch (line.type) {
             case 'addition':
@@ -347,7 +385,7 @@ export function formatUnifiedDiff(
                 break;
         }
     }
-    
+
     return output.join('\n');
 }
 
@@ -365,12 +403,12 @@ export interface DiffStats {
 export function calculateDiffStats(diff: DocumentDiff): DiffStats {
     let additions = 0;
     let deletions = 0;
-    
+
     for (const hunk of diff.hunks) {
         additions += hunk.newLines.length;
         deletions += hunk.oldLines.length;
     }
-    
+
     return {
         additions,
         deletions,

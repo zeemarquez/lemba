@@ -6,18 +6,18 @@
 export type LLMProvider = 'openai' | 'anthropic' | 'google';
 
 import { agentLog } from './debug';
-import { 
-    AgentMessage, 
-    DocumentDiff, 
-    createMessage, 
+import {
+    AgentMessage,
+    DocumentDiff,
+    createMessage,
     FileMention,
-    generateId 
+    generateId
 } from './types';
-import { 
-    readDocument, 
-    readDocumentSection, 
-    getDocumentMetadata, 
-    searchInDocument, 
+import {
+    readDocument,
+    readDocumentSection,
+    getDocumentMetadata,
+    searchInDocument,
     searchAllDocuments,
     findHeadings,
     proposeEdit,
@@ -25,6 +25,11 @@ import {
     proposeDelete,
     proposeReplaceSection,
     proposeFullReplace,
+    getDocumentStructure,
+    proposeUpdateSection,
+    proposeAddSection,
+    proposeRemoveSection,
+    proposeMoveSection,
 } from './document-ops';
 import { browserStorage } from '../browser-storage';
 import {
@@ -70,6 +75,7 @@ const READ_ONLY_TOOL_NAMES = new Set([
     'search_in_document',
     'search_all_documents',
     'find_headings',
+    'get_document_structure',
     'list_files',
 ]);
 
@@ -329,6 +335,92 @@ const TOOLS = [
     {
         type: 'function' as const,
         function: {
+            name: 'get_document_structure',
+            description: 'Get the hierarchical structure of headings in the document. Returns a tree of sections.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileId: {
+                        type: 'string',
+                        description: 'The file path/ID of the document'
+                    }
+                },
+                required: ['fileId']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'update_section',
+            description: 'Update the content of a specific section. Replaces everything from the section heading to the next heading.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileId: { type: 'string' },
+                    sectionHeading: { type: 'string', description: 'Exact text of the heading to update' },
+                    newContent: { type: 'string', description: 'New content for the section (including the heading)' },
+                    description: { type: 'string', description: 'Reason for the change' }
+                },
+                required: ['fileId', 'sectionHeading', 'newContent']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'add_section',
+            description: 'Add a new section relative to an existing heading.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileId: { type: 'string' },
+                    targetHeading: { type: 'string', description: 'Existing heading to position relative to' },
+                    relation: { type: 'string', enum: ['before', 'after'], description: 'Place new section before or after target' },
+                    newContent: { type: 'string', description: 'Content of the new section (including heading)' },
+                    description: { type: 'string' }
+                },
+                required: ['fileId', 'targetHeading', 'relation', 'newContent']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'remove_section',
+            description: 'Remove an entire section (heading and body).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileId: { type: 'string' },
+                    sectionHeading: { type: 'string', description: 'Exact text of the heading to remove' },
+                    description: { type: 'string' }
+                },
+                required: ['fileId', 'sectionHeading']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'move_section',
+            description: 'Move a section to a new location relative to another section.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fileId: { type: 'string' },
+                    sectionHeading: { type: 'string', description: 'Heading of the section to move' },
+                    targetHeading: { type: 'string', description: 'Heading to move relative to' },
+                    relation: { type: 'string', enum: ['before', 'after'] },
+                    description: { type: 'string' }
+                },
+                required: ['fileId', 'sectionHeading', 'targetHeading', 'relation']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
             name: 'list_files',
             description: 'List all available files in the workspace',
             parameters: {
@@ -342,60 +434,41 @@ const TOOLS = [
 
 // ==================== System Prompt ====================
 
-const SYSTEM_PROMPT = `You are an AI assistant integrated into a markdown editor application. You help users read, search, and edit their markdown documents.
+const SYSTEM_PROMPT = `You are an AI assistant integrated into a modern markdown editor. You help users organize, write, and refine their documents.
+
+## Core Philosophy
+You operate like a smart editor or "Canvas" assistant. Instead of just appending text, you understand the **structure** of the document (headings, sections, hierarchy). When requested to change something, you should:
+1. **Analyze Structure**: Use \`get_document_structure\` first to understand the outline.
+2. **Target Sections**: Use structureal tools like \`update_section\`, \`add_section\`, \`move_section\` whenever possible, rather than raw line edits.
+3. **Prevent Duplication**: By targeting specific sections by name, you ensure you replace old versions instead of appending new ones.
 
 ## Your Capabilities
-
 You have access to tools that allow you to:
-1. **Read documents** - Read full documents or specific sections
-2. **Search** - Search within a document or across all documents
-3. **Find headings** - Get document structure via headings
-4. **Propose edits** - Suggest changes that the user can approve or reject
+1. **Read & Analyze**: \`read_document\`, \`get_document_structure\` (Get tree view of sections), \`search_in_document\`.
+2. **Structural Editing** (Preferred):
+   - \`update_section\`: Rewrite a specific section.
+   - \`add_section\`: Insert a new section relative to another.
+   - \`remove_section\`: Delete a section.
+   - \`move_section\`: Reorder sections.
+3. **Fine-grained Editing**:
+   - \`propose_edit\`: Find & replace text (use sparingly for typos).
+   - \`propose_insert\`: Insert at line number (use only if structural tools don't fit).
 
 ## Important Guidelines
+1. **Always read structure**: Before making significant changes, call \`get_document_structure\` to see the current headings.
+2. **Avoid Raw Line Numbers**: Line numbers change. Headings are more stable anchors. Use section tools.
+3. **Rewriting Sections**: When asked to "rewrite introduction", use \`update_section(..., "Introduction", "## Introduction\nNew content...")\`. Include the heading in the new content!
+4. **No Duplication**: If adding a "Conclusion", check if one exists. If yes, use \`update_section\`. If no, use \`add_section\`.
 
-1. **Always read before editing**: Before proposing any edit, first read the relevant document content to understand the current state.
-
-2. **Be precise with edits**: When using propose_edit, the oldText must match EXACTLY what's in the document (including whitespace and newlines).
-
-3. **Explain your changes**: Always provide a clear description of what each proposed change does.
-
-4. **Use appropriate edit methods**:
-   - Use \`propose_edit\` for replacing specific text
-   - Use \`propose_insert\` for adding new content
-   - Use \`propose_delete\` for removing content
-   - Use \`propose_replace_section\` for replacing entire sections (pass the **exact** heading text from \`find_headings\` as \`sectionHeading\`)
-
-5. **Finding sections**: Before replacing or editing a section, always call \`find_headings\` to get the exact heading text and structure. Use the \`text\` and \`lineNumber\` from the result. The \`sectionHeading\` in \`propose_replace_section\` must match a heading in the document exactly.
-
-## Markdown formatting rules (editor-specific)
-
-Apply these rules to all markdown you produce or modify so the document renders correctly in this editor:
-
-- **Headings**: Do not use numbering on any headings. Write \`## Introduction\`, \`## Conclusion\`, etc.—never \`## 1. Introduction\` or \`## 6. Conclusion\`. When matching sections, use the exact heading text from \`find_headings\` (which will not include numbers).
-- **Block equations**: Use double dollar signs on one continuous line with a space after the opening \`$$\` and before the closing \`$$\`. Example: \`$$ E = mc^2 $$\` (no newlines inside; single line only).
-- **Inline equations**: Use a single dollar sign before and after: \`$...$\`. Example: \`The formula $E = mc^2$ is famous.\`
-- **Alert blocks**: Use blockquote syntax with \`> [!TYPE]\` on the first line, then \`>\` on each content line. Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Example: \`> [!NOTE]\n> Your alert content here. You can have multiple lines.\n> Each line is a blockquote line.\`
-- **Line breaks for readability**: Put each sentence on its own line in prose (one sentence per line). This keeps source mode readable instead of long continuous lines.
-- **Blank lines before blocks**: Add a blank line before block equations (\`$$ ... $$\`), headings (\`##\`), code blocks (\`\`\`\`), alert blocks (\`> [!NOTE]\`), and tables so blocks are visually separated in source mode.
-
-6. **File mentions**: When the user mentions a file with @filename, that file's content may be provided in context. Use this to understand what they're working on.
-
-7. **Be helpful**: Offer suggestions for improving document structure, formatting, or content when appropriate.
-
-8. **Markdown expertise**: You understand markdown syntax well. Help users with formatting, tables, code blocks, links, images, and other markdown features.
+## Markdown Formatting
+- **Headings**: Use \`## Title\` format. Do not use numbered lists for headings (e.g. no \`## 1. Title\`) unless the user explicitly asks for it.
+- **Math**: \`$$ ... $$\` for blocks, \`$...$\` for inline.
+- **Alerts**: \`> [!NOTE]\` syntax.
 
 ## Response Format
-
-- **Format your final reply** with bullet points (each change or key point on its own line).
-- Use **bold** for the most relevant parts: number of changes, main actions, file or section names (e.g. **3 changes** prepared, **expanded the introduction**).
-- Be concise but helpful. When proposing edits, explain what you're changing and why.
-- If you need to read a document first, do so before making suggestions.
-- Use code blocks only when showing markdown examples.
-
-## Long conversations
-
-- **Each new user message is a new request.** Use your tools (read, search, find_headings, propose_edit, etc.) whenever the user asks to read, edit, or change something—including on follow-up messages. Do not assume you should only reply in text after the first exchange; if the user wants changes, use your tools to propose them.`;
+- **Format your final reply** with bullet points summarizing changes.
+- **Bold** key actions (e.g. **Updated Introduction**, **Added Conclusion**).
+- Be concise.`;
 
 // ==================== Tool Execution ====================
 
@@ -406,7 +479,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 const content = await readDocument(args.fileId as string);
                 return content || '(empty document)';
             }
-            
+
             case 'read_document_section': {
                 const content = await readDocumentSection(
                     args.fileId as string,
@@ -415,12 +488,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 );
                 return content || '(empty section)';
             }
-            
+
             case 'get_document_metadata': {
                 const metadata = await getDocumentMetadata(args.fileId as string);
                 return JSON.stringify(metadata, null, 2);
             }
-            
+
             case 'search_in_document': {
                 const results = await searchInDocument(
                     args.fileId as string,
@@ -428,12 +501,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 );
                 return JSON.stringify(results, null, 2);
             }
-            
+
             case 'search_all_documents': {
                 const results = await searchAllDocuments(args.query as string);
                 return JSON.stringify(results, null, 2);
             }
-            
+
             case 'find_headings': {
                 const headings = await findHeadings(
                     args.fileId as string,
@@ -441,7 +514,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 );
                 return JSON.stringify(headings, null, 2);
             }
-            
+
             case 'propose_edit': {
                 const diff = await proposeEdit(
                     args.fileId as string,
@@ -454,11 +527,11 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 }
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
             }
-            
+
             case 'propose_insert': {
                 const position = args.position as { type: string; lineNumber?: number; headingText?: string };
                 let insertPos: import('./types').InsertPosition;
-                
+
                 switch (position.type) {
                     case 'start':
                         insertPos = { type: 'start' };
@@ -475,7 +548,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     default:
                         return JSON.stringify({ error: 'Invalid position type' });
                 }
-                
+
                 const diff = await proposeInsert(
                     args.fileId as string,
                     insertPos,
@@ -487,7 +560,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 }
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
             }
-            
+
             case 'propose_delete': {
                 const diff = await proposeDelete(
                     args.fileId as string,
@@ -500,7 +573,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 }
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
             }
-            
+
             case 'propose_replace_section': {
                 const diff = await proposeReplaceSection(
                     args.fileId as string,
@@ -513,7 +586,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 }
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
             }
-            
+
             case 'list_files': {
                 const { tree } = await browserStorage.list();
                 const files: string[] = [];
@@ -529,7 +602,57 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 collectFiles(tree);
                 return JSON.stringify({ files });
             }
-            
+
+            case 'get_document_structure': {
+                const structure = await getDocumentStructure(args.fileId as string);
+                return JSON.stringify(structure, null, 2);
+            }
+
+            case 'update_section': {
+                const diff = await proposeUpdateSection(
+                    args.fileId as string,
+                    args.sectionHeading as string,
+                    args.newContent as string,
+                    args.description as string | undefined
+                );
+                if (!diff) return JSON.stringify({ error: 'Section not found' });
+                return JSON.stringify({ success: true, diffId: diff.id, diff });
+            }
+
+            case 'add_section': {
+                const diff = await proposeAddSection(
+                    args.fileId as string,
+                    args.targetHeading as string,
+                    args.relation as 'before' | 'after',
+                    args.newContent as string,
+                    args.description as string | undefined
+                );
+                if (!diff) return JSON.stringify({ error: 'Target section not found' });
+                return JSON.stringify({ success: true, diffId: diff.id, diff });
+            }
+
+            case 'remove_section': {
+                const diff = await proposeRemoveSection(
+                    args.fileId as string,
+                    args.sectionHeading as string,
+                    args.description as string | undefined
+                );
+                if (!diff) return JSON.stringify({ error: 'Section not found' });
+                return JSON.stringify({ success: true, diffId: diff.id, diff });
+            }
+
+            case 'move_section': {
+                const diff = await proposeMoveSection(
+                    args.fileId as string,
+                    args.sectionHeading as string,
+                    args.targetHeading as string,
+                    args.relation as 'before' | 'after',
+                    args.description as string | undefined
+                );
+                if (!diff) return JSON.stringify({ error: 'Section or target not found, or invalid move' });
+                return JSON.stringify({ success: true, diffId: diff.id, diff });
+            }
+
             default:
                 return JSON.stringify({ error: `Unknown tool: ${name}` });
         }
@@ -790,7 +913,7 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
                     const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
-                
+
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -869,7 +992,7 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
         }
     }
     const systemPrompt = systemParts.join('\n\n');
-    
+
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -877,7 +1000,7 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
                 const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
-            
+
             const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -954,7 +1077,7 @@ export async function chatCompletion(options: {
                     const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
-                
+
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -990,7 +1113,7 @@ export async function chatCompletion(options: {
         if (m.role === 'system') systemParts.push(m.content);
         else anthropicMessages.push({ role: m.role as 'user' | 'assistant', content: m.content });
     }
-    
+
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -998,7 +1121,7 @@ export async function chatCompletion(options: {
                 const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
-            
+
             const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
@@ -1083,30 +1206,30 @@ export async function sendMessageToAI(
             }
         }
     }
-    
+
     // Convert AgentMessages to ChatMessages
     const chatMessages: ChatMessage[] = [
         { role: 'system', content: systemPrompt }
     ];
-    
+
     // Add file context to the first user message if available
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (msg.role === 'user' || msg.role === 'assistant') {
             let content = msg.content;
-            
+
             // Add file context to first user message
             if (i === 0 && msg.role === 'user' && fileContext) {
                 content = `${content}\n\n[Referenced files]:${fileContext}`;
             }
-            
+
             chatMessages.push({
                 role: msg.role,
                 content
             });
         }
     }
-    
+
     // Make API call with tools (provider-specific)
     const collectedDiffs: DocumentDiff[] = [];
     let maxIterations = 10; // Prevent infinite loops
@@ -1117,11 +1240,11 @@ export async function sendMessageToAI(
 
     const useOpenAIFormat = provider === 'openai' || provider === 'google';
     type MessageWithTools = { content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
-    
+
     while (maxIterations > 0) {
         maxIterations--;
         let message: MessageWithTools;
-        
+
         if (useOpenAIFormat) {
             // OpenAI and Google (OpenAI-compatible) use same request shape
             const response = await fetch(openaiCompatibleUrl, {
@@ -1139,12 +1262,12 @@ export async function sendMessageToAI(
                     max_tokens: maxTokens
                 })
             });
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(formatProviderError(provider, response.status, errorText));
             }
-            
+
             const data = await response.json();
             const choice = data.choices?.[0];
             const msg = choice?.message;
@@ -1233,7 +1356,7 @@ export async function sendMessageToAI(
                 tool_calls: toolCalls.length ? toolCalls : undefined,
             };
         }
-        
+
         // Check if there are tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
             agentLog.step('tool_calls', message.tool_calls.length, message.tool_calls.map((t: { function: { name: string } }) => t.function.name));
@@ -1247,13 +1370,13 @@ export async function sendMessageToAI(
                     function: tc.function
                 }))
             });
-            
+
             // Execute each tool call
             for (const toolCall of message.tool_calls) {
                 const args = JSON.parse(toolCall.function.arguments);
                 agentLog.tool(toolCall.function.name, args);
                 const result = await executeTool(toolCall.function.name, args);
-                
+
                 // Check if this was an edit operation that created a diff
                 if (toolCall.function.name.startsWith('propose_')) {
                     try {
@@ -1268,7 +1391,7 @@ export async function sendMessageToAI(
                         // Not a JSON response or no diff
                     }
                 }
-                
+
                 // Add tool result
                 chatMessages.push({
                     role: 'tool',
@@ -1276,11 +1399,11 @@ export async function sendMessageToAI(
                     content: result
                 });
             }
-            
+
             // Continue the loop to get the next response
             continue;
         }
-        
+
         // No more tool calls, return the final response
         agentLog.info('sendMessageToAI done', { diffs: collectedDiffs.length });
         return {
@@ -1288,7 +1411,7 @@ export async function sendMessageToAI(
             diffs: collectedDiffs.length > 0 ? collectedDiffs : undefined
         };
     }
-    
+
     agentLog.warn('sendMessageToAI max iterations reached');
     // If we hit max iterations, return what we have
     return {
