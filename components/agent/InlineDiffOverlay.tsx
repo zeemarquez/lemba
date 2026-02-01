@@ -4,13 +4,14 @@ import React, { useMemo, useRef, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { DocumentDiff, formatDiffForDisplay } from "@/lib/agent";
 import { cn } from "@/lib/utils";
+import { WysiwygDiffOverlay } from "./WysiwygDiffOverlay";
 
 interface InlineDiffOverlayProps {
     fileId: string;
 }
 
 export function InlineDiffOverlay({ fileId }: InlineDiffOverlayProps) {
-    const { getMergedPendingDiffs, pendingDiffs } = useStore();
+    const { getMergedPendingDiffs, pendingDiffs, editorViewMode } = useStore();
 
     const mergedDiff = useMemo(() => {
         const merged = getMergedPendingDiffs();
@@ -21,15 +22,20 @@ export function InlineDiffOverlay({ fileId }: InlineDiffOverlayProps) {
         return null;
     }
 
-    return <InlineDiffView diff={mergedDiff} />;
+    // Use WYSIWYG diff view for editing/viewing modes, source diff view for source mode
+    if (editorViewMode !== 'source') {
+        return <WysiwygDiffOverlay diff={mergedDiff} />;
+    }
+
+    return <SourceDiffView diff={mergedDiff} />;
 }
 
-interface InlineDiffViewProps {
+interface SourceDiffViewProps {
     diff: DocumentDiff;
 }
 
 /** Full document with diffs highlighted. Accept/Reject only in chat. */
-function InlineDiffView({ diff }: InlineDiffViewProps) {
+function SourceDiffView({ diff }: SourceDiffViewProps) {
     const formattedLines = formatDiffForDisplay(diff.originalContent, diff.proposedContent, 0, true);
     const lastChangeRef = useRef<HTMLDivElement | null>(null);
 

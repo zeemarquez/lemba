@@ -9,4 +9,6 @@ export { ChatInput } from './ChatInput';
 export { FileMentionSelector } from './FileMentionSelector';
 export { DiffPreview } from './DiffPreview';
 export { InlineDiffOverlay } from './InlineDiffOverlay';
+export { WysiwygDiffOverlay } from './WysiwygDiffOverlay';
 export { ChatsDialog } from './ChatsDialog';
+

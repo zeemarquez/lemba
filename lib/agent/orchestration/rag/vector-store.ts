@@ -279,7 +279,7 @@ export class VectorStore {
         for (const sentence of sentences) {
             const sentenceLower = sentence.toLowerCase();
             const matchCount = queryWords.filter(w => sentenceLower.includes(w)).length;
-            
+
             if (matchCount > 0 && sentence.trim().length > 10) {
                 highlights.push(sentence.trim());
             }

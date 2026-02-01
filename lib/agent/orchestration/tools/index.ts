@@ -4,11 +4,11 @@
  */
 
 import { DocumentDiff } from '../../types';
-import { 
-    readDocument, 
-    readDocumentSection, 
-    getDocumentMetadata, 
-    searchInDocument, 
+import {
+    readDocument,
+    readDocumentSection,
+    getDocumentMetadata,
+    searchInDocument,
     searchAllDocuments,
     findHeadings,
     proposeEdit,
@@ -75,7 +75,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId']
         }
     },
-    
+
     read_document_section: {
         name: 'read_document_section',
         description: 'Read a specific section of a document by line numbers',
@@ -98,7 +98,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'startLine', 'endLine']
         }
     },
-    
+
     get_document_metadata: {
         name: 'get_document_metadata',
         description: 'Get metadata about a document including line count, word count, and headings',
@@ -113,7 +113,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId']
         }
     },
-    
+
     find_headings: {
         name: 'find_headings',
         description: 'Find all headings in a document, optionally filtered by level',
@@ -132,7 +132,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId']
         }
     },
-    
+
     list_files: {
         name: 'list_files',
         description: 'List all available files in the workspace',
@@ -142,7 +142,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: []
         }
     },
-    
+
     // Search operations
     search_in_document: {
         name: 'search_in_document',
@@ -162,7 +162,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'query']
         }
     },
-    
+
     search_all_documents: {
         name: 'search_all_documents',
         description: 'Search for text across all documents',
@@ -177,7 +177,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['query']
         }
     },
-    
+
     // RAG operations
     rag_query: {
         name: 'rag_query',
@@ -201,7 +201,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['query']
         }
     },
-    
+
     rag_index: {
         name: 'rag_index',
         description: 'Index a document for RAG semantic search',
@@ -216,7 +216,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId']
         }
     },
-    
+
     get_rag_context: {
         name: 'get_rag_context',
         description: 'Get relevant context from a document for a specific query using RAG',
@@ -239,7 +239,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['query', 'fileId']
         }
     },
-    
+
     // Web search
     web_search: {
         name: 'web_search',
@@ -259,7 +259,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['query']
         }
     },
-    
+
     // Edit operations
     propose_edit: {
         name: 'propose_edit',
@@ -287,7 +287,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'oldText', 'newText']
         }
     },
-    
+
     propose_insert: {
         name: 'propose_insert',
         description: 'Propose inserting new content at a specific position in the document',
@@ -330,7 +330,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'position', 'content']
         }
     },
-    
+
     propose_delete: {
         name: 'propose_delete',
         description: 'Propose deleting lines from a document',
@@ -357,7 +357,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'startLine', 'endLine']
         }
     },
-    
+
     propose_replace_section: {
         name: 'propose_replace_section',
         description: 'Propose replacing an entire section (from heading to next heading of same/higher level)',
@@ -384,7 +384,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
             required: ['fileId', 'sectionHeading', 'newContent']
         }
     },
-    
+
     // Lint operations
     lint_markdown: {
         name: 'lint_markdown',
@@ -434,7 +434,7 @@ export async function executeTool(
                 const content = await readDocument(fileId);
                 return { success: true, data: content || '(empty document)' };
             }
-            
+
             case 'read_document_section': {
                 const fileId = await resolveFile(args.fileId as string);
                 const content = await readDocumentSection(
@@ -444,13 +444,13 @@ export async function executeTool(
                 );
                 return { success: true, data: content || '(empty section)' };
             }
-            
+
             case 'get_document_metadata': {
                 const fileId = await resolveFile(args.fileId as string);
                 const metadata = await getDocumentMetadata(fileId);
                 return { success: true, data: metadata };
             }
-            
+
             case 'find_headings': {
                 const fileId = await resolveFile(args.fileId as string);
                 const headings = await findHeadings(
@@ -459,7 +459,7 @@ export async function executeTool(
                 );
                 return { success: true, data: headings };
             }
-            
+
             case 'list_files': {
                 const { tree } = await browserStorage.list();
                 const files: string[] = [];
@@ -475,7 +475,7 @@ export async function executeTool(
                 collectFiles(tree);
                 return { success: true, data: { files } };
             }
-            
+
             case 'search_in_document': {
                 const fileId = await resolveFile(args.fileId as string);
                 const results = await searchInDocument(
@@ -484,12 +484,12 @@ export async function executeTool(
                 );
                 return { success: true, data: results };
             }
-            
+
             case 'search_all_documents': {
                 const results = await searchAllDocuments(args.query as string);
                 return { success: true, data: results };
             }
-            
+
             case 'rag_query': {
                 const result = await ragQuery(
                     args.query as string,
@@ -499,13 +499,13 @@ export async function executeTool(
                 );
                 return { success: true, data: result };
             }
-            
+
             case 'rag_index': {
                 const fileId = await resolveFile(args.fileId as string);
                 const result = await ragIndex(fileId, ragEngine);
                 return { success: true, data: result };
             }
-            
+
             case 'get_rag_context': {
                 const fileId = await resolveFile(args.fileId as string);
                 const result = await getRAGContext(
@@ -516,7 +516,7 @@ export async function executeTool(
                 );
                 return { success: true, data: result };
             }
-            
+
             case 'web_search': {
                 const results = await webSearch(
                     args.query as string,
@@ -524,7 +524,7 @@ export async function executeTool(
                 );
                 return { success: true, data: results };
             }
-            
+
             case 'propose_edit': {
                 const fileId = await resolveFile(args.fileId as string);
                 const diff = await proposeEdit(
@@ -538,12 +538,12 @@ export async function executeTool(
                 }
                 return { success: true, data: { diffId: diff.id }, diff };
             }
-            
+
             case 'propose_insert': {
                 const fileId = await resolveFile(args.fileId as string);
                 const position = args.position as { type: string; lineNumber?: number; headingText?: string };
                 let insertPos: InsertPosition;
-                
+
                 switch (position.type) {
                     case 'start':
                         insertPos = { type: 'start' };
@@ -560,7 +560,7 @@ export async function executeTool(
                     default:
                         return { success: false, error: 'Invalid position type' };
                 }
-                
+
                 const diff = await proposeInsert(
                     fileId,
                     insertPos,
@@ -572,7 +572,7 @@ export async function executeTool(
                 }
                 return { success: true, data: { diffId: diff.id }, diff };
             }
-            
+
             case 'propose_delete': {
                 const fileId = await resolveFile(args.fileId as string);
                 const diff = await proposeDelete(
@@ -586,7 +586,7 @@ export async function executeTool(
                 }
                 return { success: true, data: { diffId: diff.id }, diff };
             }
-            
+
             case 'propose_replace_section': {
                 const fileId = await resolveFile(args.fileId as string);
                 const diff = await proposeReplaceSection(
@@ -600,13 +600,13 @@ export async function executeTool(
                 }
                 return { success: true, data: { diffId: diff.id }, diff };
             }
-            
+
             case 'lint_markdown': {
                 const fileId = await resolveFile(args.fileId as string);
                 const lintResult = await lintMarkdown(fileId);
                 return { success: true, data: lintResult };
             }
-            
+
             default:
                 return { success: false, error: `Unknown tool: ${name}` };
         }
@@ -792,7 +792,7 @@ export class ToolRegistry {
 
     constructor(ragEngine: RAGEngine = defaultRAGEngine) {
         this.ragEngine = ragEngine;
-        
+
         // Register all default tools
         Object.entries(TOOL_DEFINITIONS).forEach(([name, def]) => {
             this.tools.set(name, def);
