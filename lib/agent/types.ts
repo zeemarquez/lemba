@@ -23,6 +23,8 @@ export interface AgentMessage {
     mentions?: FileMention[];
     // Associated diffs (for assistant messages proposing changes)
     diffIds?: string[];
+    // Full content sent to AI (if different from visible content)
+    fullContent?: string;
     // Loading state for streaming responses
     isStreaming?: boolean;
 }
@@ -93,7 +95,7 @@ export interface DocumentMetadata {
 
 // ==================== Insert Position Types ====================
 
-export type InsertPosition = 
+export type InsertPosition =
     | { type: 'line'; lineNumber: number }           // Insert at specific line
     | { type: 'afterHeading'; headingText: string }  // Insert after a heading
     | { type: 'start' }                              // Insert at document start
@@ -130,7 +132,8 @@ export function createMessage(
     role: MessageRole,
     content: string,
     mentions?: FileMention[],
-    diffIds?: string[]
+    diffIds?: string[],
+    fullContent?: string
 ): AgentMessage {
     return {
         id: generateId(),
@@ -139,6 +142,7 @@ export function createMessage(
         timestamp: Date.now(),
         mentions,
         diffIds,
+        fullContent,
     };
 }
 

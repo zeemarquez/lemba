@@ -534,7 +534,7 @@ export class OrchestratorAgent {
         maxRetries: number = 3
     ): Promise<AgentResult> {
         let lastError: Error | null = null;
-        
+
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 if (attempt > 0) {
@@ -543,24 +543,24 @@ export class OrchestratorAgent {
                     agentLog.info(`Retrying ${agentType} (attempt ${attempt + 1}/${maxRetries + 1}) after ${delay}ms`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
-                
+
                 return await this.executeAgent(agentType, instructions, context, onDiff, options);
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
                 const errorMsg = lastError.message;
-                
+
                 // Check if it's a retryable error
                 const isRetryable = this.isRetryableError(errorMsg);
-                
+
                 if (!isRetryable || attempt === maxRetries) {
                     agentLog.error(`${agentType} failed after ${attempt + 1} attempt(s)`, errorMsg);
                     throw lastError;
                 }
-                
+
                 agentLog.warn(`${agentType} failed (attempt ${attempt + 1}/${maxRetries + 1})`, errorMsg);
             }
         }
-        
+
         // Should never reach here, but TypeScript needs it
         throw lastError || new Error(`${agentType} failed after retries`);
     }
@@ -584,8 +584,8 @@ export class OrchestratorAgent {
             '503',
             '504',
         ];
-        
-        return retryablePatterns.some(pattern => 
+
+        return retryablePatterns.some(pattern =>
             errorMsg.toLowerCase().includes(pattern.toLowerCase())
         );
     }
@@ -728,5 +728,5 @@ export async function runOrchestration(
         apiKey,
     });
 
-    return orchestrator.run(lastUserMessage.content, context, options);
+    return orchestrator.run(lastUserMessage.fullContent || lastUserMessage.content, context, options);
 }

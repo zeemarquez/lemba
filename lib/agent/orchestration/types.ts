@@ -61,22 +61,22 @@ export interface DocumentContext {
 export interface AgentContext {
     /** Conversation history for context continuity */
     conversationHistory: AgentMessage[];
-    
+
     /** Currently active document being worked on */
     activeDocument?: DocumentContext;
-    
+
     /** RAG-retrieved relevant chunks for long documents */
     ragContext?: RAGChunk[];
-    
+
     /** Outline/plan from the Planner agent */
     planOutline?: string;
-    
+
     /** Research findings from the Researcher agent */
     researchFindings?: string;
-    
+
     /** Mentioned files from user input */
     mentionedFiles?: string[];
-    
+
     /** Previous agent results in the current workflow */
     previousResults?: AgentResult[];
 }
@@ -137,7 +137,7 @@ export interface Workflow {
 
 // ==================== Intent Classification ====================
 
-export type UserIntent = 
+export type UserIntent =
     | 'create_document'
     | 'edit_section'
     | 'expand_content'
@@ -216,7 +216,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentType, Omit<AgentConfig, 'systemP
 
 // ==================== Event Types ====================
 
-export type OrchestrationEvent = 
+export type OrchestrationEvent =
     | { type: 'workflow_started'; workflow: Workflow }
     | { type: 'step_started'; step: WorkflowStep }
     | { type: 'step_completed'; step: WorkflowStep; result: AgentResult }

@@ -1216,7 +1216,7 @@ export async function sendMessageToAI(
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (msg.role === 'user' || msg.role === 'assistant') {
-            let content = msg.content;
+            let content = msg.fullContent || msg.content;
 
             // Add file context to first user message
             if (i === 0 && msg.role === 'user' && fileContext) {

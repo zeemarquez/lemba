@@ -50,6 +50,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Open external links in default browser
   openExternal: (url) => ipcRenderer.send('open-external', url),
+
+  // Fetch URL content via main process (bypasses CORS)
+  fetchUrl: (url) => ipcRenderer.invoke('fetch-url', url),
 });
 
 // Log that we're running in Electron

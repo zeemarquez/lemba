@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
-import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, generateSyncId } from './types';
+import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
 import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL } from './agent';
 import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
-export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
+export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument };
 export type { AgentMessage, DocumentDiff, AgentChat };
 
 
@@ -55,6 +55,7 @@ interface AppState {
     agentTemperature: number;
     agentMaxTokens: number;
     agentUseOrchestration: boolean; // Enable multi-agent orchestration mode
+    ragDocuments: RagDocument[]; // Documents attached to the current chat
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -140,6 +141,11 @@ interface AppState {
     switchChat: (chatId: string) => void;
     clearAllChats: () => void;
     getChatsList: () => AgentChat[];
+
+    // RAG Actions
+    fetchRagDocuments: () => Promise<void>;
+    addRagDocument: (doc: RagDocument) => Promise<void>;
+    removeRagDocument: (id: string) => Promise<void>;
 
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -415,6 +421,7 @@ export const useStore = create<AppState>()(
                 agentTemperature: 0.7,
                 agentMaxTokens: 4096,
                 agentUseOrchestration: true,
+                ragDocuments: [],
 
                 // Actions implementation
                 fetchFileTree: async () => {
@@ -1043,13 +1050,54 @@ export const useStore = create<AppState>()(
                         state.currentView === 'file' && state.activeFileId
                             ? [state.activeFileId]
                             : [];
+
+                    // Build RAG context from attached documents
+                    let ragContext = '';
+                    if (state.ragDocuments.length > 0) {
+                        const ragParts: string[] = [];
+                        for (const doc of state.ragDocuments) {
+                            if (doc.type === 'text' && doc.content) {
+                                ragParts.push(`--- Attached Document: ${doc.name} ---\n${doc.content}\n--- End of ${doc.name} ---`);
+                            } else if (doc.type === 'url' && doc.url) {
+                                // For URLs, we include the URL and any fetched content if available
+                                if (doc.content) {
+                                    ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\nContent:\n${doc.content}\n--- End of ${doc.name} ---`);
+                                } else {
+                                    ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\n(Content not fetched)\n--- End of ${doc.name} ---`);
+                                }
+                            }
+                        }
+                        if (ragParts.length > 0) {
+                            ragContext = '\n\n[Attached Documents/Links for Context]:\n' + ragParts.join('\n\n');
+                        }
+                    }
+
+                    // Combine user content with RAG context
+                    const fullContent = ragContext
+                        ? `${content}${ragContext}`
+                        : content;
+
+                    // Create concise tags for visible display
+                    let displayTags = '';
+                    if (state.ragDocuments.length > 0) {
+                        const tags = state.ragDocuments.map(doc => {
+                            if (doc.type === 'text') return `[📄 ${doc.name}]`;
+                            const shortName = doc.name.length > 30 ? doc.name.substring(0, 27) + '...' : doc.name;
+                            return `[🔗 ${shortName}]`;
+                        });
+                        displayTags = '\n\n' + tags.join(' ');
+                    }
+                    const visibleContent = content + displayTags;
+
                     agentLog.info('sendAgentMessage', {
                         mode: state.agentUseOrchestration ? 'orchestration' : 'single-agent',
                         readOnly: state.agentReadOnly,
                         fileContext: filesForContext,
                         contentLength: content.length,
+                        ragDocuments: state.ragDocuments.length,
+                        ragContextLength: ragContext.length,
                     });
-                    const userMessage = createMessage('user', content, []);
+                    const userMessage = createMessage('user', visibleContent, [], undefined, fullContent);
                     const currentChatId = get().activeChatId;
                     set((s) => {
                         const nextMessages = [...s.agentMessages, userMessage];
@@ -1081,7 +1129,7 @@ export const useStore = create<AppState>()(
                     try {
                         const state = get();
                         const allMessages = [...state.agentMessages];
-                        
+
                         // Callback for handling diff creation
                         const onDiffCreated = (diff: DocumentDiff) => {
                             set((s) => {
@@ -1102,7 +1150,7 @@ export const useStore = create<AppState>()(
                         };
 
                         let response: { content: string; diffs?: DocumentDiff[] };
-                        
+
                         if (state.agentUseOrchestration) {
                             // Use multi-agent orchestration system (any provider)
                             const provider = modelToProvider(state.agentModel);
@@ -1156,7 +1204,7 @@ export const useStore = create<AppState>()(
                                 }
                             );
                         }
-                        
+
                         agentLog.info('response received', { contentLength: response.content?.length ?? 0, diffs: response.diffs?.length ?? 0 });
                         const assistantMessage = createMessage(
                             'assistant',
@@ -1391,6 +1439,7 @@ export const useStore = create<AppState>()(
                         pendingDiffs: {},
                         agentMentionedFiles: [],
                         agentError: null,
+                        ragDocuments: [],
                     }));
                     return id;
                 },
@@ -1406,16 +1455,60 @@ export const useStore = create<AppState>()(
                         agentMentionedFiles: [],
                         agentError: null,
                     });
+                    get().fetchRagDocuments();
                 },
 
-                clearAllChats: () => {
-                    set({ chats: {}, activeChatId: null, agentMessages: [], pendingDiffs: {}, agentMentionedFiles: [], agentError: null });
+                clearAllChats: async () => {
+                    const state = get();
+                    // Delete all RAG documents for all chats
+                    await Promise.all(Object.keys(state.chats).map(chatId =>
+                        browserStorage.deleteRagDocumentsByChatId(chatId)
+                    ));
+
+                    set({ chats: {}, activeChatId: null, agentMessages: [], pendingDiffs: {}, agentMentionedFiles: [], agentError: null, ragDocuments: [] });
                     get().createNewChat();
                 },
 
                 getChatsList: () => {
                     const state = get();
                     return Object.values(state.chats).sort((a, b) => b.updatedAt - a.updatedAt);
+                },
+
+                fetchRagDocuments: async () => {
+                    const { activeChatId } = get();
+                    if (!activeChatId) {
+                        set({ ragDocuments: [] });
+                        return;
+                    }
+                    try {
+                        const docs = await browserStorage.getRagDocumentsByChatId(activeChatId);
+                        set({ ragDocuments: docs });
+                    } catch (error) {
+                        console.error('Failed to fetch RAG documents:', error);
+                        set({ ragDocuments: [] });
+                    }
+                },
+
+                addRagDocument: async (doc: RagDocument) => {
+                    try {
+                        await browserStorage.storeRagDocument(doc);
+                        set(state => ({
+                            ragDocuments: [...state.ragDocuments, doc]
+                        }));
+                    } catch (error) {
+                        console.error('Failed to add RAG document:', error);
+                    }
+                },
+
+                removeRagDocument: async (id: string) => {
+                    try {
+                        await browserStorage.deleteRagDocument(id);
+                        set(state => ({
+                            ragDocuments: state.ragDocuments.filter(d => d.id !== id)
+                        }));
+                    } catch (error) {
+                        console.error('Failed to remove RAG document:', error);
+                    }
                 },
             };
         },
