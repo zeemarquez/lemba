@@ -270,9 +270,10 @@ function processWithDiff(
     if (contentCache.fullHash === newFullHash) {
         console.log('[MarkdownProcessor] processWithDiff completed (unchanged)', {
             totalTime: performance.now() - startTime,
-            cachedNodes: contentCache.lastNodes.length
+            cachedNodes: Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes.length : 0
         });
-        return { nodes: contentCache.lastNodes, unchanged: true };
+        const cachedNodes = Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes : [];
+        return { nodes: cachedNodes, unchanged: true };
     }
 
     // Differential update: only reprocess changed chunks
@@ -289,7 +290,7 @@ function processWithDiff(
         // Check if this chunk matches a cached chunk
         const cachedChunk = contentCache.chunks[i];
 
-        if (cachedChunk && cachedChunk.hash === newHash) {
+        if (cachedChunk && cachedChunk.hash === newHash && Array.isArray(cachedChunk.nodes)) {
             // Reuse cached nodes
             allNodes.push(...cachedChunk.nodes);
             newCachedChunks.push(cachedChunk);
@@ -342,7 +343,7 @@ export async function processMarkdownChunked(
         // Check if we have this chunk cached
         const cachedChunk = contentCache?.chunks.find(c => c.hash === hash);
 
-        if (cachedChunk) {
+        if (cachedChunk && Array.isArray(cachedChunk.nodes)) {
             allNodes.push(...cachedChunk.nodes);
             cachedChunks.push(cachedChunk);
         } else {
@@ -387,9 +388,10 @@ export function processMarkdownDiff(markdown: string): { nodes: any[]; unchanged
         if (contentCache.fullHash === newHash) {
             console.log('[MarkdownProcessor] processMarkdownDiff cache hit (fast path)', {
                 totalTime: performance.now() - startTime,
-                cachedNodes: contentCache.lastNodes.length
+                cachedNodes: Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes.length : 0
             });
-            return { nodes: contentCache.lastNodes, unchanged: true };
+            const cachedNodes = Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes : [];
+            return { nodes: cachedNodes, unchanged: true };
         }
     }
 
@@ -519,7 +521,7 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
         fullMarkdown: markdown,
         fullHash: hashString(markdown),
         chunks: cachedChunks,
-        lastNodes: nodes,
+        lastNodes: Array.isArray(nodes) ? nodes : [],
     };
 }
 
@@ -528,5 +530,5 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
  */
 export function isCacheValid(markdown: string): boolean {
     if (!contentCache) return false;
-    return contentCache.fullHash === hashString(markdown);
+    return contentCache.fullHash === hashString(markdown) && Array.isArray(contentCache.lastNodes);
 }
