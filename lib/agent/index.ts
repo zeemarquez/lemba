@@ -36,6 +36,7 @@ export {
     determineDiffType,
     generateDiff,
     mergeDiffsForFile,
+    withUpdatedProposedContent,
     applyDiff,
     applyHunk,
     applyHunks,
@@ -43,6 +44,9 @@ export {
     formatUnifiedDiff,
     calculateDiffStats,
 } from './diff-utils';
+
+// Math format normalizer (post-agent, code + regex only)
+export { normalizeMathInMarkdown } from './math-format';
 
 export type { FormattedLine, DiffStats } from './diff-utils';
 

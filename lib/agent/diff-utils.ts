@@ -115,6 +115,17 @@ export function determineDiffType(hunks: DiffHunk[]): DiffType {
 }
 
 /**
+ * Return a copy of a diff with updated proposedContent (and recomputed hunks/type).
+ * Preserves id, status, createdAt, description, fileId, fileName.
+ */
+export function withUpdatedProposedContent(diff: DocumentDiff, newProposedContent: string): DocumentDiff {
+    if (diff.proposedContent === newProposedContent) return diff;
+    const hunks = generateHunks(diff.originalContent, newProposedContent);
+    const type = determineDiffType(hunks);
+    return { ...diff, proposedContent: newProposedContent, hunks, type };
+}
+
+/**
  * Generate a complete DocumentDiff from old and new content
  */
 export function generateDiff(

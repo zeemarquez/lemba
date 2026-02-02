@@ -31,7 +31,8 @@ import { WriterAgent } from './agents/writer';
 import { StructureReviewAgent } from './agents/structure-review';
 import { LinterAgent } from './agents/linter';
 import { SummarizerAgent } from './agents/summarizer';
-import { mergeDiffsForFile } from '../diff-utils';
+import { mergeDiffsForFile, withUpdatedProposedContent } from '../diff-utils';
+import { normalizeMathInMarkdown } from '../math-format';
 
 import { ORCHESTRATOR_PROMPT } from './prompts';
 
@@ -242,6 +243,16 @@ export class OrchestratorAgent {
                     };
                     step.result = errorResult;
                     results.push(errorResult);
+                }
+            }
+
+            // Post-process: ensure markdown math formatting rules on all proposed content (code + regex, no AI)
+            for (let i = 0; i < collectedDiffs.length; i++) {
+                const d = collectedDiffs[i];
+                const normalized = normalizeMathInMarkdown(d.proposedContent);
+                if (normalized !== d.proposedContent) {
+                    collectedDiffs[i] = withUpdatedProposedContent(d, normalized);
+                    updateContentOverride(d.fileId);
                 }
             }
 
