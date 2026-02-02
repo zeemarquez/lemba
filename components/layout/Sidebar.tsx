@@ -13,7 +13,8 @@ import {
     FolderPlus,
     RefreshCw,
     ChevronRight,
-    ChevronDown
+    ChevronDown,
+    Bot
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/resizable";
 import { LoginButton } from "@/components/auth";
 import { SyncStatus } from "@/components/sync";
+import { AgentPanel } from "@/components/agent";
 
 export function Sidebar() {
     const {
@@ -343,6 +345,15 @@ export function Sidebar() {
                     >
                         <LayoutTemplate size={18} />
                     </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("h-8 w-8", sidebarView === 'agent' && "bg-accent text-accent-foreground")}
+                        onClick={() => setSidebarView('agent')}
+                        title="AI Assistant"
+                    >
+                        <Bot size={18} />
+                    </Button>
                     <div className="flex-1" />
                     <Button
                         variant="ghost"
@@ -528,6 +539,11 @@ export function Sidebar() {
                             )}
                         </div>
                     </ScrollArea>
+                )}
+
+                {/* AI Agent Panel */}
+                {sidebarView === 'agent' && (
+                    <AgentPanel />
                 )}
 
                 {/* Sidebar Footer - Auth, Sync, Settings */}

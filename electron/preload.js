@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID,
     NEXT_PUBLIC_AUTH_HANDLER_URL: process.env.NEXT_PUBLIC_AUTH_HANDLER_URL,
+    NEXT_PUBLIC_OPENAI_API_KEY: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+    NEXT_PUBLIC_TRIAL_OPENAI_API_KEY: process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY,
   },
 
   // Listen for deep links (e.g. for auth callbacks)
@@ -48,6 +50,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Open external links in default browser
   openExternal: (url) => ipcRenderer.send('open-external', url),
+
+  // Fetch URL content via main process (bypasses CORS)
+  fetchUrl: (url) => ipcRenderer.invoke('fetch-url', url),
 });
 
 // Log that we're running in Electron

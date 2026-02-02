@@ -7,6 +7,9 @@ import {
   Upload,
   Trash2,
   ChevronDown,
+  Loader2,
+  Check,
+  X,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
@@ -34,6 +37,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/plate-ui/dropdown-menu';
 import { useStore } from '@/lib/store';
+import { validateApiKey, hasEnvApiKey, isTrialOnlyOpenAI } from '@/lib/agent';
+import type { LLMProvider } from '@/lib/agent';
+import { useDebounce } from '@/hooks/use-debounce';
+import { getTrialUserId, checkTrialLimit, TRIAL_TOKEN_LIMIT } from '@/lib/agent/trial-usage';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
@@ -55,7 +62,57 @@ export function SettingsDialog() {
     sourceEditorFontSize,
     setSourceEditorFontFamily,
     setSourceEditorFontSize,
+    agentApiKeys,
+    setAgentApiKey,
+    agentProviderKeysValid,
+    setAgentProviderKeyValid,
   } = useStore();
+
+  const agentProviderConfig: Record<LLMProvider, { label: string; placeholder: string }> = {
+    openai: { label: 'OpenAI', placeholder: 'sk-...' },
+    anthropic: { label: 'Anthropic', placeholder: 'sk-ant-...' },
+    google: { label: 'Google Gemini', placeholder: 'API key' },
+  };
+
+  const [validating, setValidating] = React.useState<Record<LLMProvider, boolean>>({
+    openai: false,
+    anthropic: false,
+    google: false,
+  });
+  const validationSeqRef = React.useRef(0);
+
+  const debouncedOpenai = useDebounce(agentApiKeys?.openai ?? '', 600);
+  const debouncedAnthropic = useDebounce(agentApiKeys?.anthropic ?? '', 600);
+  const debouncedGoogle = useDebounce(agentApiKeys?.google ?? '', 600);
+
+  const runValidation = React.useCallback(
+    (provider: LLMProvider, key: string) => {
+      if (!key.trim()) {
+        setAgentProviderKeyValid(provider, false);
+        return;
+      }
+      setValidating((v) => ({ ...v, [provider]: true }));
+      const seq = ++validationSeqRef.current;
+      validateApiKey(provider, key)
+        .then((valid) => {
+          if (seq === validationSeqRef.current) setAgentProviderKeyValid(provider, valid);
+        })
+        .finally(() => {
+          if (seq === validationSeqRef.current) setValidating((v) => ({ ...v, [provider]: false }));
+        });
+    },
+    [setAgentProviderKeyValid]
+  );
+
+  React.useEffect(() => {
+    runValidation('openai', debouncedOpenai);
+  }, [debouncedOpenai, runValidation]);
+  React.useEffect(() => {
+    runValidation('anthropic', debouncedAnthropic);
+  }, [debouncedAnthropic, runValidation]);
+  React.useEffect(() => {
+    runValidation('google', debouncedGoogle);
+  }, [debouncedGoogle, runValidation]);
 
   const [isDragging, setIsDragging] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -152,6 +209,12 @@ export function SettingsDialog() {
               value="templates"
             >
               Templates
+            </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="agent"
+            >
+              Agent
             </TabsTrigger>
           </TabsList>
 
@@ -390,6 +453,80 @@ function hello() {
                   </div>
                 </div>
               </div>
+              </TabsContent>
+
+              <TabsContent className="mt-0 outline-none" value="agent">
+                <div className="space-y-6">
+                  {(() => {
+                    const inTrial = isTrialOnlyOpenAI(agentApiKeys?.openai ?? '');
+                    if (!inTrial) return null;
+                    const { used } = checkTrialLimit(getTrialUserId());
+                    const percent = Math.min(100, (used / TRIAL_TOKEN_LIMIT) * 100);
+                    return (
+                      <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">Free trial usage</span>
+                          <span className="text-muted-foreground">
+                            {percent.toFixed(1)}% used
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-primary transition-all duration-150"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-sm">API keys</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Configure one or more providers. Valid keys appear in the model dropdown in the agent panel.
+                    </p>
+                    {(['openai', 'anthropic', 'google'] as LLMProvider[]).map((provider) => {
+                      const cfg = agentProviderConfig[provider];
+                      const key = agentApiKeys?.[provider] ?? '';
+                      const envSet = hasEnvApiKey(provider);
+                      const trialOnlyOpenAI = provider === 'openai' && isTrialOnlyOpenAI(key);
+                      const showEnvPlaceholder = envSet && !key.trim() && !trialOnlyOpenAI;
+                      const isValidating = validating[provider];
+                      const isValid = agentProviderKeysValid?.[provider];
+                      return (
+                        <div key={provider} className="space-y-1">
+                          <label
+                            htmlFor={`agent-api-key-${provider}`}
+                            className="text-sm text-muted-foreground"
+                          >
+                            {cfg.label}
+                          </label>
+                          <div className="relative flex items-center">
+                            <Input
+                              id={`agent-api-key-${provider}`}
+                              type="password"
+                              placeholder={showEnvPlaceholder ? 'API KEY SET IN ENVIRONMENT' : (envSet && !trialOnlyOpenAI ? 'Override environment key' : cfg.placeholder)}
+                              value={key}
+                              onChange={(e) => setAgentApiKey(provider, e.target.value)}
+                              className={showEnvPlaceholder ? 'font-mono text-sm pr-9 placeholder:font-bold placeholder:text-foreground/80' : 'font-mono text-sm pr-9'}
+                              autoComplete="off"
+                            />
+                            <div className="absolute right-2.5 flex items-center justify-center w-5 h-5 pointer-events-none">
+                              {isValidating ? (
+                                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                              ) : key.trim() ? (
+                                isValid ? (
+                                  <Check className="size-4 text-green-600 dark:text-green-500" />
+                                ) : (
+                                  <X className="size-4 text-red-600 dark:text-red-500" />
+                                )
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </TabsContent>
 
               <TabsContent className="mt-0 outline-none" value="templates">

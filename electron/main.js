@@ -167,6 +167,43 @@ function createWindow() {
     await require('electron').shell.openExternal(url);
   });
 
+  ipcMain.handle('fetch-url', async (event, url) => {
+    console.log('[Main] Fetching URL:', url);
+    try {
+      const response = await net.fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const buffer = await response.arrayBuffer();
+      const text = Buffer.from(buffer).toString('utf8');
+
+      if (contentType.includes('text/html')) {
+        // Simple HTML to text extraction (very basic version for main process)
+        let processed = text
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        return { content: processed.substring(0, 50000) };
+      }
+
+      return { content: text.substring(0, 50000) };
+    } catch (error) {
+      console.error('[Main] Fetch URL error:', error);
+      return { error: error.message };
+    }
+  });
+
   // Handle Auth Popups and External Links
   mainWindow.webContents.setWindowOpenHandler(({ url, features }) => {
     // 1. Internal Application Pages (e.g., Export Panel)

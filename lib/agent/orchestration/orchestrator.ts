@@ -1,0 +1,816 @@
+/**
+ * Orchestrator Agent
+ * Central coordinator for the multi-agent system
+ */
+
+import { AgentMessage, DocumentDiff } from '../types';
+import { agentLog } from '../debug';
+import type { LLMProvider } from '../ai-service';
+import { getApiKey } from '../ai-service';
+import {
+    AgentType,
+    AgentContext,
+    AgentTask,
+    AgentResult,
+    Workflow,
+    WorkflowStep,
+    IntentAnalysis,
+    UserIntent,
+    TaskType,
+    TaskStatus,
+    OrchestrationEvent,
+    OrchestrationEventHandler,
+    DEFAULT_AGENT_CONFIGS,
+    generateId,
+} from './types';
+import { ToolRegistry, defaultToolRegistry, TOOL_DEFINITIONS } from './tools';
+import { RAGEngine, defaultRAGEngine } from './rag';
+import { PlannerAgent } from './agents/planner';
+import { ResearcherAgent } from './agents/researcher';
+import { WriterAgent } from './agents/writer';
+import { StructureReviewAgent } from './agents/structure-review';
+import { LinterAgent } from './agents/linter';
+import { SummarizerAgent } from './agents/summarizer';
+import { mergeDiffsForFile, withUpdatedProposedContent } from '../diff-utils';
+import { normalizeMathInMarkdown } from '../math-format';
+
+import { ORCHESTRATOR_PROMPT } from './prompts';
+
+// ==================== Types ====================
+
+export interface OrchestrationOptions {
+    provider?: LLMProvider;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    apiKey?: string;
+    readOnly?: boolean;
+    onEvent?: OrchestrationEventHandler;
+    onDiffCreated?: (diff: DocumentDiff) => void;
+}
+
+export interface OrchestrationResult {
+    success: boolean;
+    content: string;
+    diffs: DocumentDiff[];
+    workflow?: Workflow;
+    error?: string;
+}
+
+// ==================== Orchestrator Agent ====================
+
+export class OrchestratorAgent {
+    private toolRegistry: ToolRegistry;
+    private ragEngine: RAGEngine;
+    private plannerAgent: PlannerAgent;
+    private researcherAgent: ResearcherAgent;
+    private writerAgent: WriterAgent;
+    private structureReviewAgent: StructureReviewAgent;
+    private linterAgent: LinterAgent;
+    private summarizerAgent: SummarizerAgent;
+    private provider: LLMProvider;
+    private apiKey: string;
+    private eventHandler?: OrchestrationEventHandler;
+
+    constructor(
+        options: {
+            toolRegistry?: ToolRegistry;
+            ragEngine?: RAGEngine;
+            provider?: LLMProvider;
+            apiKey?: string;
+        } = {}
+    ) {
+        this.toolRegistry = options.toolRegistry || defaultToolRegistry;
+        this.ragEngine = options.ragEngine || defaultRAGEngine;
+        this.provider = options.provider ?? 'openai';
+        this.apiKey = getApiKey(this.provider, options.apiKey);
+
+        // Initialize specialist agents
+        this.plannerAgent = new PlannerAgent({
+            toolRegistry: this.toolRegistry,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
+        this.researcherAgent = new ResearcherAgent({
+            toolRegistry: this.toolRegistry,
+            ragEngine: this.ragEngine,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
+        this.writerAgent = new WriterAgent({
+            toolRegistry: this.toolRegistry,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
+        this.structureReviewAgent = new StructureReviewAgent({
+            toolRegistry: this.toolRegistry,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
+        this.linterAgent = new LinterAgent({
+            toolRegistry: this.toolRegistry,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
+        this.summarizerAgent = new SummarizerAgent({ provider: this.provider, apiKey: this.apiKey });
+    }
+
+    /**
+     * Main entry point for orchestration
+     */
+    async run(
+        userMessage: string,
+        context: AgentContext,
+        options: OrchestrationOptions = {}
+    ): Promise<OrchestrationResult> {
+        this.eventHandler = options.onEvent;
+        const collectedDiffs: DocumentDiff[] = [];
+        const collectedDiffIds = new Set<string>();
+        const contentOverrides: Record<string, string> = {};
+
+        const updateContentOverride = (fileId: string) => {
+            const fileDiffs = collectedDiffs.filter(d => d.fileId === fileId);
+            const merged = mergeDiffsForFile(fileDiffs);
+            if (merged) {
+                contentOverrides[fileId] = merged.proposedContent;
+            }
+        };
+
+        const addCollectedDiff = (diff: DocumentDiff) => {
+            if (collectedDiffIds.has(diff.id)) return;
+            const isDuplicate = collectedDiffs.some(
+                d => d.fileId === diff.fileId && d.proposedContent === diff.proposedContent
+            );
+            collectedDiffIds.add(diff.id);
+            if (isDuplicate) return;
+            collectedDiffs.push(diff);
+            updateContentOverride(diff.fileId);
+        };
+
+        const onDiff = (diff: DocumentDiff) => {
+            addCollectedDiff(diff);
+            if (options.onDiffCreated) {
+                options.onDiffCreated(diff);
+            }
+            this.emitEvent({ type: 'diff_created', diff });
+        };
+
+        try {
+            // Step 1: Analyze user intent
+            const intent = await this.analyzeIntent(userMessage, context);
+
+            // Step 2: Create workflow based on intent
+            const workflow = this.createWorkflow(userMessage, intent, context);
+            this.emitEvent({ type: 'workflow_started', workflow });
+
+            // Step 3: Execute workflow steps
+            let lastResult: AgentResult | null = null;
+            const results: AgentResult[] = [];
+
+            for (let i = 0; i < workflow.steps.length; i++) {
+                const step = workflow.steps[i];
+                workflow.currentStepIndex = i;
+                step.status = 'in_progress';
+                this.emitEvent({ type: 'step_started', step });
+                agentLog.step(`step ${i + 1}/${workflow.steps.length}: ${step.agentType}`, { taskType: step.taskType });
+
+                // Skip if read-only and step would make edits
+                if (options.readOnly && (step.agentType === 'writer' || step.agentType === 'structure_review' || step.agentType === 'linter')) {
+                    step.status = 'completed';
+                    const skipResult: AgentResult = {
+                        taskId: step.id,
+                        agentType: step.agentType,
+                        status: 'success',
+                        output: 'Skipped in read-only mode',
+                        startedAt: Date.now(),
+                        completedAt: Date.now(),
+                    };
+                    step.result = skipResult;
+                    results.push(skipResult);
+                    continue;
+                }
+
+                try {
+                    // Build context for this step
+                    const stepContext = this.buildStepContext(context, results, workflow, contentOverrides);
+
+                    // Execute the appropriate agent with retry logic
+                    const result = await this.executeAgentWithRetry(
+                        step.agentType,
+                        step.instructions,
+                        stepContext,
+                        onDiff,
+                        options,
+                        3 // max retries
+                    );
+
+                    step.status = result.status;
+                    step.result = result;
+                    results.push(result);
+                    lastResult = result;
+                    agentLog.step(`step ${step.agentType} done`, { status: result.status, outputLength: result.output?.length ?? 0, diffs: result.diffs?.length ?? 0 });
+
+                    // Collect diffs from result
+                    if (result.diffs) {
+                        result.diffs.forEach(addCollectedDiff);
+                    }
+
+                    this.emitEvent({ type: 'step_completed', step, result });
+
+                    // Update workflow context with results
+                    if (step.agentType === 'planner' && result.output) {
+                        workflow.context.planOutline = result.output;
+                    }
+                    if (step.agentType === 'researcher' && result.output) {
+                        workflow.context.researchFindings = result.output;
+                    }
+
+                } catch (error) {
+                    step.status = 'error';
+                    const errorMsg = String(error);
+                    agentLog.error(`step ${step.agentType} failed`, errorMsg);
+                    this.emitEvent({ type: 'step_failed', step, error: errorMsg });
+
+                    // Continue with other steps if possible
+                    const errorResult: AgentResult = {
+                        taskId: step.id,
+                        agentType: step.agentType,
+                        status: 'error',
+                        output: '',
+                        error: errorMsg,
+                        startedAt: Date.now(),
+                        completedAt: Date.now(),
+                    };
+                    step.result = errorResult;
+                    results.push(errorResult);
+                }
+            }
+
+            // Post-process: ensure markdown math formatting rules on all proposed content (code + regex, no AI)
+            for (let i = 0; i < collectedDiffs.length; i++) {
+                const d = collectedDiffs[i];
+                const normalized = normalizeMathInMarkdown(d.proposedContent);
+                if (normalized !== d.proposedContent) {
+                    collectedDiffs[i] = withUpdatedProposedContent(d, normalized);
+                    updateContentOverride(d.fileId);
+                }
+            }
+
+            // Step 5: Build concise chat message (no raw plan/linter output)
+            workflow.status = 'success';
+            let finalContent: string;
+            if (intent.primaryIntent === 'question') {
+                const researchResult = results.find(r => r.agentType === 'researcher');
+                finalContent = researchResult?.output ?? "I couldn't find an answer. Please try rephrasing.";
+            } else {
+                const summaryInput = this.buildSummaryForChat(results, intent, userMessage, collectedDiffs);
+                try {
+                    finalContent = await this.summarizerAgent.run(summaryInput, {
+                        model: options.model,
+                        temperature: options.temperature,
+                        maxTokens: options.maxTokens,
+                    });
+                } catch {
+                    finalContent = this.getFallbackResponse(collectedDiffs, results);
+                }
+            }
+
+            this.emitEvent({
+                type: 'workflow_completed',
+                workflow,
+                finalResult: lastResult || {
+                    taskId: workflow.id,
+                    agentType: 'orchestrator',
+                    status: 'success',
+                    output: finalContent,
+                    startedAt: workflow.createdAt,
+                    completedAt: Date.now(),
+                }
+            });
+
+            return {
+                success: true,
+                content: finalContent,
+                diffs: collectedDiffs,
+                workflow,
+            };
+
+        } catch (error) {
+            const errorMsg = String(error);
+            agentLog.error('orchestration failed', errorMsg);
+            return {
+                success: false,
+                content: `I encountered an error while processing your request: ${errorMsg}`,
+                diffs: collectedDiffs,
+                error: errorMsg,
+            };
+        }
+    }
+
+    /**
+     * Analyze user intent from the message.
+     * When no keyword matches, treat as content/edit request if user has a document open
+     * so the workflow always runs planner + writer instead of no-op.
+     */
+    private async analyzeIntent(
+        userMessage: string,
+        context: AgentContext
+    ): Promise<IntentAnalysis> {
+        // Simple keyword-based intent classification
+        // In a production system, this could use an LLM call
+        const message = userMessage.toLowerCase();
+
+        let primaryIntent: UserIntent = 'unknown';
+        let requiredAgents: AgentType[] = ['orchestrator'];
+
+        // Determine intent based on keywords and patterns
+        if (message.includes('create') || message.includes('write') || message.includes('draft')) {
+            if (message.includes('document') || message.includes('new file')) {
+                primaryIntent = 'create_document';
+                requiredAgents = ['planner', 'researcher', 'writer', 'linter'];
+            } else {
+                primaryIntent = 'expand_content';
+                requiredAgents = ['researcher', 'planner', 'writer', 'linter'];
+            }
+        } else if (message.includes('edit') || message.includes('modify') || message.includes('change') || message.includes('update')) {
+            primaryIntent = 'edit_section';
+            requiredAgents = ['researcher', 'writer', 'linter'];
+        } else if (
+            message.includes('expand') || message.includes('add more') || message.includes('elaborate') ||
+            message.includes('add ') || message.includes('insert ') || message.includes('include ')
+        ) {
+            primaryIntent = 'expand_content';
+            requiredAgents = ['researcher', 'planner', 'writer', 'linter'];
+        } else if (message.includes('summarize') || message.includes('summary') || message.includes('condense')) {
+            primaryIntent = 'summarize';
+            requiredAgents = ['researcher', 'writer'];
+        } else if (message.includes('research') || message.includes('find') || message.includes('search')) {
+            primaryIntent = 'research';
+            requiredAgents = ['researcher'];
+        } else if (message.includes('reorganize') || message.includes('restructure') || message.includes('reorder')) {
+            primaryIntent = 'reorganize';
+            requiredAgents = ['planner', 'writer', 'structure_review', 'linter'];
+        } else if (
+            message.includes('structure') || message.includes('sections') || message.includes('duplicate') ||
+            message.includes('section order') || message.includes('hierarchy') || message.includes('review document') ||
+            message.includes('fix structure') || message.includes('similar sections')
+        ) {
+            primaryIntent = 'review';
+            requiredAgents = ['structure_review', 'linter'];
+        } else if (message.includes('fix') || message.includes('error') || message.includes('broken')) {
+            primaryIntent = 'fix_errors';
+            requiredAgents = ['linter'];
+        } else if (message.includes('format') || message.includes('style') || message.includes('clean up')) {
+            primaryIntent = 'format';
+            requiredAgents = ['linter', 'writer'];
+        } else if (message.includes('review') || message.includes('check') || message.includes('analyze')) {
+            primaryIntent = 'review';
+            requiredAgents = ['researcher', 'structure_review', 'linter'];
+        } else if (message.includes('?') || message.includes('what') || message.includes('how') || message.includes('why')) {
+            primaryIntent = 'question';
+            requiredAgents = ['researcher'];
+        }
+
+        // When writer is used and the request suggests significant structure changes, add structure_review after writer
+        const structureKeywords = /section|heading|reorder|move section|new section|add section|structure/i;
+        if (
+            requiredAgents.includes('writer') &&
+            (primaryIntent === 'edit_section' || primaryIntent === 'expand_content' || primaryIntent === 'create_document') &&
+            structureKeywords.test(userMessage)
+        ) {
+            const writerIdx = requiredAgents.indexOf('writer');
+            if (writerIdx >= 0 && !requiredAgents.includes('structure_review')) {
+                requiredAgents = [...requiredAgents.slice(0, writerIdx + 1), 'structure_review', ...requiredAgents.slice(writerIdx + 1)];
+            }
+        }
+
+        // Unknown intent but user has a document open: assume they want to modify it (plan + write + lint)
+        if (primaryIntent === 'unknown' && context.activeDocument) {
+            primaryIntent = 'expand_content';
+            requiredAgents = ['planner', 'writer', 'linter'];
+        }
+
+        // Check if document is long (needs RAG)
+        if (context.activeDocument) {
+            const lineCount = context.activeDocument.content.split('\n').length;
+            if (lineCount > 100 && !requiredAgents.includes('researcher')) {
+                // Add researcher for RAG context on long documents
+                requiredAgents.unshift('researcher');
+            }
+        }
+
+        return {
+            primaryIntent,
+            confidence: 0.8, // Placeholder confidence
+            requiredAgents,
+            targetSections: this.extractTargetSections(userMessage),
+            suggestedWorkflow: this.createWorkflowSteps(requiredAgents, userMessage, primaryIntent),
+        };
+    }
+
+    /**
+     * Extract target sections from user message
+     */
+    private extractTargetSections(message: string): string[] {
+        const sections: string[] = [];
+
+        // Look for quoted section names
+        const quotedMatches = message.match(/"([^"]+)"/g);
+        if (quotedMatches) {
+            sections.push(...quotedMatches.map(m => m.replace(/"/g, '')));
+        }
+
+        // Look for "section" keyword
+        const sectionMatch = message.match(/(?:section|chapter|part)\s+(?:on|about|called|named)?\s*["']?(\w[\w\s]+)["']?/i);
+        if (sectionMatch) {
+            sections.push(sectionMatch[1].trim());
+        }
+
+        return sections;
+    }
+
+    /**
+     * Create workflow steps for required agents
+     */
+    private createWorkflowSteps(
+        agents: AgentType[],
+        userMessage: string,
+        intent: UserIntent
+    ): WorkflowStep[] {
+        return agents.map((agentType, index) => ({
+            id: generateId(),
+            agentType,
+            taskType: this.getTaskTypeForAgent(agentType),
+            instructions: this.generateInstructions(agentType, userMessage, intent),
+            dependsOn: index > 0 ? [agents[index - 1]] : undefined,
+            status: 'pending' as TaskStatus,
+        }));
+    }
+
+    /**
+     * Get task type for agent
+     */
+    private getTaskTypeForAgent(agentType: AgentType): TaskType {
+        switch (agentType) {
+            case 'planner': return 'plan';
+            case 'researcher': return 'research';
+            case 'writer': return 'write';
+            case 'structure_review': return 'structure_review';
+            case 'linter': return 'lint';
+            default: return 'orchestrate';
+        }
+    }
+
+    /**
+     * Generate instructions for an agent based on intent
+     */
+    private generateInstructions(
+        agentType: AgentType,
+        userMessage: string,
+        intent: UserIntent
+    ): string {
+        const baseContext = `User request: "${userMessage}"`;
+
+        switch (agentType) {
+            case 'planner':
+                return `${baseContext}\n\nCreate a structured plan for this request. Break down the task into clear, actionable steps.`;
+            case 'researcher':
+                if (intent === 'question') {
+                    return `${baseContext}\n\nFind information to answer this question. Use RAG to search documents and web search if needed.`;
+                }
+                return `${baseContext}\n\nGather relevant information for this task. Use RAG for document context and web search for external information.`;
+            case 'writer':
+                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line. Use one sentence per line in prose and blank lines before and after block equations, and before headings, code blocks, alert blocks, and tables.`;
+            case 'structure_review':
+                return `${baseContext}\n\nFix the entire document structure in this single run. Call get_document_structure first, then identify every duplicate section and every structural issue. Call remove_section (or update_section, move_section) for EACH duplicate and EACH issue before finishing. Do not stop after a few edits—fix everything in one go. Use occurrenceIndex when the same heading appears multiple times (e.g. occurrenceIndex 2 to remove the second occurrence).`;
+            case 'linter':
+                return `${baseContext}\n\nCheck the document for errors and style issues. Propose fixes for any problems found.`;
+            default:
+                return baseContext;
+        }
+    }
+
+    /**
+     * Create a workflow from intent analysis
+     */
+    private createWorkflow(
+        userMessage: string,
+        intent: IntentAnalysis,
+        context: AgentContext
+    ): Workflow {
+        return {
+            id: generateId(),
+            userRequest: userMessage,
+            steps: intent.suggestedWorkflow,
+            currentStepIndex: 0,
+            status: 'pending',
+            context: { ...context },
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
+    }
+
+    /**
+     * Build context for a workflow step
+     */
+    private buildStepContext(
+        baseContext: AgentContext,
+        previousResults: AgentResult[],
+        workflow: Workflow,
+        contentOverrides: Record<string, string>
+    ): AgentContext {
+        const nextContext: AgentContext = {
+            ...baseContext,
+            planOutline: workflow.context.planOutline,
+            researchFindings: workflow.context.researchFindings,
+            previousResults,
+            contentOverrides,
+        };
+        if (nextContext.activeDocument) {
+            const override = contentOverrides[nextContext.activeDocument.id];
+            if (override !== undefined) {
+                nextContext.activeDocument = {
+                    ...nextContext.activeDocument,
+                    content: override,
+                };
+            }
+        }
+        return nextContext;
+    }
+
+    /**
+     * Execute a specific agent
+     */
+    private async executeAgent(
+        agentType: AgentType,
+        instructions: string,
+        context: AgentContext,
+        onDiff: (diff: DocumentDiff) => void,
+        options: OrchestrationOptions
+    ): Promise<AgentResult> {
+        const startedAt = Date.now();
+
+        const agentOptions = {
+            model: options.model,
+            temperature: options.temperature,
+            maxTokens: options.maxTokens,
+            onDiffCreated: onDiff,
+        };
+
+        let output: string;
+        let diffs: DocumentDiff[] = [];
+
+        switch (agentType) {
+            case 'planner':
+                output = await this.plannerAgent.run(instructions, context, agentOptions);
+                break;
+
+            case 'researcher':
+                output = await this.researcherAgent.run(instructions, context, agentOptions);
+                break;
+
+            case 'writer': {
+                const writerResult = await this.writerAgent.run(instructions, context, agentOptions);
+                output = writerResult.output;
+                diffs = writerResult.diffs;
+                break;
+            }
+
+            case 'structure_review': {
+                const structureReviewResult = await this.structureReviewAgent.run(instructions, context, agentOptions);
+                output = structureReviewResult.output;
+                diffs = structureReviewResult.diffs;
+                break;
+            }
+
+            case 'linter': {
+                const linterResult = await this.linterAgent.run(instructions, context, agentOptions);
+                output = linterResult.output;
+                diffs = linterResult.diffs;
+                break;
+            }
+
+            default:
+                output = 'Unknown agent type';
+        }
+
+        return {
+            taskId: generateId(),
+            agentType,
+            status: 'success',
+            output,
+            diffs: diffs.length > 0 ? diffs : undefined,
+            startedAt,
+            completedAt: Date.now(),
+        };
+    }
+
+    /**
+     * Execute agent with retry logic for network failures
+     */
+    private async executeAgentWithRetry(
+        agentType: AgentType,
+        instructions: string,
+        context: AgentContext,
+        onDiff: (diff: DocumentDiff) => void,
+        options: OrchestrationOptions,
+        maxRetries: number = 3
+    ): Promise<AgentResult> {
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    // Exponential backoff: 1s, 2s, 4s
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+                    agentLog.info(`Retrying ${agentType} (attempt ${attempt + 1}/${maxRetries + 1}) after ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+
+                return await this.executeAgent(agentType, instructions, context, onDiff, options);
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                const errorMsg = lastError.message;
+
+                // Check if it's a retryable error
+                const isRetryable = this.isRetryableError(errorMsg);
+
+                if (!isRetryable || attempt === maxRetries) {
+                    agentLog.error(`${agentType} failed after ${attempt + 1} attempt(s)`, errorMsg);
+                    throw lastError;
+                }
+
+                agentLog.warn(`${agentType} failed (attempt ${attempt + 1}/${maxRetries + 1})`, errorMsg);
+            }
+        }
+
+        // Should never reach here, but TypeScript needs it
+        throw lastError || new Error(`${agentType} failed after retries`);
+    }
+
+    /**
+     * Check if an error is retryable
+     */
+    private isRetryableError(errorMsg: string): boolean {
+        const retryablePatterns = [
+            'Failed to fetch',
+            'Network request failed',
+            'ECONNREFUSED',
+            'ETIMEDOUT',
+            'ENOTFOUND',
+            'ECONNRESET',
+            'Rate limit',
+            'Too Many Requests',
+            'Service error',
+            '500',
+            '502',
+            '503',
+            '504',
+        ];
+
+        return retryablePatterns.some(pattern =>
+            errorMsg.toLowerCase().includes(pattern.toLowerCase())
+        );
+    }
+
+    /**
+     * Build a short structured summary for the summarizer agent (no raw plan markdown).
+     */
+    private buildSummaryForChat(
+        results: AgentResult[],
+        intent: IntentAnalysis,
+        userMessage: string,
+        collectedDiffs: DocumentDiff[]
+    ): string {
+        const lines: string[] = [];
+
+        lines.push(`User request: ${userMessage}`);
+
+        const totalDiffs = collectedDiffs.length;
+        if (totalDiffs > 0) {
+            lines.push(`Changes prepared: ${totalDiffs}`);
+            const descriptions = collectedDiffs
+                .slice(0, 5)
+                .map(d => d.description || d.type)
+                .filter(Boolean);
+            if (descriptions.length > 0) {
+                lines.push(`Change descriptions: ${descriptions.join('; ')}`);
+            }
+        } else {
+            lines.push('Changes prepared: 0');
+        }
+
+        const plannerResult = results.find(r => r.agentType === 'planner');
+        if (plannerResult?.output) {
+            const planOneLine = plannerResult.output.split('\n').find(l => l.startsWith('## Plan:') || l.startsWith('### Objective'));
+            if (planOneLine) {
+                lines.push(`Plan: ${planOneLine.replace(/^#+\s*/, '').trim()}`);
+            } else {
+                lines.push(`Plan: ${plannerResult.output.substring(0, 120).replace(/\n/g, ' ')}...`);
+            }
+        }
+
+        const researchResult = results.find(r => r.agentType === 'researcher');
+        if (researchResult?.output) {
+            lines.push(`Research: ${researchResult.output.substring(0, 80).replace(/\n/g, ' ')}...`);
+        }
+
+        const linterResult = results.find(r => r.agentType === 'linter');
+        if (linterResult?.status === 'error') {
+            lines.push(`Linter: encountered an issue. ${linterResult.error ?? ''}`);
+        } else if (linterResult?.output) {
+            lines.push('Linter: completed.');
+        }
+
+        const errors = results.filter(r => r.status === 'error');
+        if (errors.length > 0) {
+            lines.push(`Steps with issues: ${errors.map(e => e.agentType).join(', ')}`);
+        }
+
+        return lines.join('\n');
+    }
+
+    /**
+     * Fallback when summarizer fails
+     */
+    private getFallbackResponse(collectedDiffs: DocumentDiff[], results: AgentResult[]): string {
+        const totalDiffs = collectedDiffs.length;
+        if (totalDiffs > 0) {
+            const parts = [`I've prepared ${totalDiffs} change${totalDiffs > 1 ? 's' : ''} for your review.`];
+            const failed = results.filter(r => r.status === 'error');
+            if (failed.length > 0) {
+                parts.push(`${failed.map(f => `${f.agentType} encountered an issue.`).join(' ')}`);
+            }
+            return parts.join(' ');
+        }
+        return "I've processed your request. Please review any proposed changes.";
+    }
+
+    /**
+     * Emit an orchestration event
+     */
+    private emitEvent(event: OrchestrationEvent): void {
+        if (this.eventHandler) {
+            this.eventHandler(event);
+        }
+    }
+}
+
+// ==================== Main Export Function ====================
+
+/**
+ * Run the orchestration system
+ */
+export async function runOrchestration(
+    messages: AgentMessage[],
+    mentionedFiles: string[],
+    options: OrchestrationOptions = {}
+): Promise<OrchestrationResult> {
+    agentLog.info('runOrchestration', { messageCount: messages.length, fileContext: mentionedFiles });
+
+    // Get the last user message
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+    if (!lastUserMessage) {
+        agentLog.warn('runOrchestration: no user message');
+        return {
+            success: false,
+            content: 'No user message found',
+            diffs: [],
+            error: 'No user message found',
+        };
+    }
+
+    // Build context (include image attachments so orchestration agents can send vision content)
+    const context: AgentContext = {
+        conversationHistory: messages,
+        mentionedFiles,
+        imageAttachments: lastUserMessage.imageAttachments,
+    };
+
+    // If files are mentioned, load the first one as active document (even if empty, so writer/linter get defaultFileId)
+    if (mentionedFiles.length > 0) {
+        const { browserStorage } = await import('../../browser-storage');
+        let content: string;
+        try {
+            content = await browserStorage.readFile(mentionedFiles[0]) ?? '';
+        } catch {
+            content = '';
+        }
+        const fileName = mentionedFiles[0].split('/').pop() || mentionedFiles[0];
+        context.activeDocument = {
+            id: mentionedFiles[0],
+            name: fileName,
+            content,
+        };
+    }
+
+    const provider = options.provider ?? 'openai';
+    const apiKey = getApiKey(provider, options.apiKey);
+
+    const orchestrator = new OrchestratorAgent({
+        provider,
+        apiKey,
+    });
+
+    return orchestrator.run(lastUserMessage.fullContent || lastUserMessage.content, context, options);
+}

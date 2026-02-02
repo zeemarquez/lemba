@@ -1,12 +1,13 @@
-import { FileNode, Template, ImageEntry, FontEntry, FileEntry, generateSyncId } from './types';
+import { FileNode, Template, ImageEntry, FontEntry, FileEntry, RagDocument, generateSyncId } from './types';
 import { compressImage } from './image-compression';
 
 const DB_NAME = 'markdown-editor-db';
-const DB_VERSION = 12; // Bumped for sync metadata migration
+const DB_VERSION = 13; // Bumped for RAG documents
 const STORE_FILES = 'files';
 const STORE_TEMPLATES = 'templates';
 const STORE_IMAGES = 'images';
 const STORE_FONTS = 'fonts';
+const STORE_RAG = 'rag_documents';
 
 
 
@@ -146,6 +147,16 @@ class BrowserStorage {
                             }
                         });
                     };
+                }
+
+                // Add RAG documents store (v13+)
+                if (oldVersion < 13) {
+                    if (!db.objectStoreNames.contains(STORE_RAG)) {
+                        const ragStore = db.createObjectStore(STORE_RAG, { keyPath: 'id' });
+                        ragStore.createIndex('chatId', 'chatId', { unique: false });
+                        ragStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+                        ragStore.createIndex('syncId', 'syncId', { unique: false });
+                    }
                 }
 
                 if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
@@ -1007,6 +1018,46 @@ class BrowserStorage {
         } catch (e) {
             return null;
         }
+    }
+
+    // ==================== RAG Document Methods ====================
+
+    async storeRagDocument(doc: RagDocument): Promise<void> {
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            store.put(doc);
+        });
+    }
+
+    async getRagDocumentsByChatId(chatId: string): Promise<RagDocument[]> {
+        const db = await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_RAG, 'readonly');
+            const store = tx.objectStore(STORE_RAG);
+            const index = store.index('chatId');
+            const request = index.getAll(chatId);
+
+            request.onsuccess = () => {
+                resolve(request.result as RagDocument[]);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async deleteRagDocument(id: string): Promise<void> {
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            store.delete(id);
+        });
+    }
+
+    async deleteRagDocumentsByChatId(chatId: string): Promise<void> {
+        const docs = await this.getRagDocumentsByChatId(chatId);
+        if (docs.length === 0) return;
+
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            docs.forEach(doc => {
+                store.delete(doc.id);
+            });
+        });
     }
 }
 

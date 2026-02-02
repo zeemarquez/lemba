@@ -254,3 +254,18 @@ export interface FontEntry extends SyncMetadata {
     format: string;       // e.g., 'truetype', 'opentype', 'woff', 'woff2'
     createdAt: number;    // Timestamp when stored
 }
+
+/**
+ * RAG Document entry stored in IndexedDB (rag_documents store).
+ * Associated with a specific Agent Chat.
+ */
+export interface RagDocument extends SyncMetadata {
+    id: string;           // Unique ID
+    chatId: string;       // ID of the chat instance this document belongs to
+    name: string;         // Display name
+    type: 'text' | 'pdf' | 'url' | 'image' | 'other';
+    content?: string;     // Text content, or for image: data URL (data:image/...;base64,...)
+    blob?: Blob;          // Original file data (if file)
+    url?: string;         // URL (if link)
+    createdAt: number;
+}
