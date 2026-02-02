@@ -3,13 +3,13 @@
  * Type definitions for the agent orchestration system
  */
 
-import { AgentMessage, DocumentDiff } from '../types';
+import { AgentMessage, DocumentDiff, ImageAttachment } from '../types';
 
 // ==================== Agent Types ====================
 
-export type AgentType = 'orchestrator' | 'planner' | 'researcher' | 'writer' | 'linter' | 'summarizer';
+export type AgentType = 'orchestrator' | 'planner' | 'researcher' | 'writer' | 'structure_review' | 'linter' | 'summarizer';
 
-export type TaskType = 'plan' | 'research' | 'write' | 'lint' | 'orchestrate';
+export type TaskType = 'plan' | 'research' | 'write' | 'structure_review' | 'lint' | 'orchestrate';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'success' | 'error' | 'partial';
 
@@ -77,8 +77,14 @@ export interface AgentContext {
     /** Mentioned files from user input */
     mentionedFiles?: string[];
 
+    /** Image attachments from the user message (for vision in agent mode) */
+    imageAttachments?: ImageAttachment[];
+
     /** Previous agent results in the current workflow */
     previousResults?: AgentResult[];
+
+    /** Optional in-memory content overrides for tool execution */
+    contentOverrides?: Record<string, string>;
 }
 
 // ==================== Agent Tasks ====================
@@ -197,6 +203,13 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentType, Omit<AgentConfig, 'systemP
         maxTokens: 8192,
         temperature: 0.7,
         tools: ['propose_edit', 'propose_insert', 'propose_delete', 'propose_replace_section', 'read_document', 'read_document_section'],
+    },
+    structure_review: {
+        type: 'structure_review',
+        model: 'gpt-4o',
+        maxTokens: 4096,
+        temperature: 0.2,
+        tools: ['get_document_structure', 'read_document', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
     },
     linter: {
         type: 'linter',

@@ -30,7 +30,8 @@ export interface SectionNode {
 /**
  * Read the full content of a document
  */
-export async function readDocument(fileId: string): Promise<string> {
+export async function readDocument(fileId: string, contentOverride?: string): Promise<string> {
+    if (contentOverride !== undefined) return contentOverride;
     return browserStorage.readFile(fileId);
 }
 
@@ -43,9 +44,10 @@ export async function readDocument(fileId: string): Promise<string> {
 export async function readDocumentSection(
     fileId: string,
     startLine: number,
-    endLine: number
+    endLine: number,
+    contentOverride?: string
 ): Promise<string> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const lines = splitLines(content);
 
     // Clamp to valid range
@@ -58,8 +60,8 @@ export async function readDocumentSection(
 /**
  * Get metadata about a document
  */
-export async function getDocumentMetadata(fileId: string): Promise<DocumentMetadata> {
-    const content = await browserStorage.readFile(fileId);
+export async function getDocumentMetadata(fileId: string, contentOverride?: string): Promise<DocumentMetadata> {
+    const content = await readDocument(fileId, contentOverride);
     const lines = splitLines(content);
     const headings = findHeadingsInContent(content);
 
@@ -120,9 +122,10 @@ function findHeadingsInContent(content: string): Heading[] {
  */
 export async function findHeadings(
     fileId: string,
-    level?: number
+    level?: number,
+    contentOverride?: string
 ): Promise<Heading[]> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
 
     if (level !== undefined) {
@@ -141,9 +144,10 @@ export async function findHeadings(
 export async function searchInDocument(
     fileId: string,
     query: string | RegExp,
-    contextLines: number = 2
+    contextLines: number = 2,
+    contentOverride?: string
 ): Promise<SearchResult> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const lines = splitLines(content);
     const regex = typeof query === 'string'
         ? new RegExp(escapeRegex(query), 'gi')
@@ -244,9 +248,10 @@ export async function proposeEdit(
     fileId: string,
     oldText: string,
     newText: string,
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
 
     if (!content.includes(oldText)) {
         return null; // Text not found
@@ -275,9 +280,10 @@ export async function proposeInsert(
     fileId: string,
     position: InsertPosition,
     contentToInsert: string,
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const lines = splitLines(content);
     let insertIndex: number;
 
@@ -344,9 +350,10 @@ export async function proposeDelete(
     fileId: string,
     startLine: number,
     endLine: number,
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const lines = splitLines(content);
 
     // Validate range
@@ -404,9 +411,10 @@ export async function proposeReplaceSection(
     fileId: string,
     sectionHeading: string,
     newSectionContent: string,
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
 
@@ -478,8 +486,8 @@ export async function proposeFullReplace(
 /**
  * Get the hierarchical structure of a document
  */
-export async function getDocumentStructure(fileId: string): Promise<SectionNode[]> {
-    const content = await browserStorage.readFile(fileId);
+export async function getDocumentStructure(fileId: string, contentOverride?: string): Promise<SectionNode[]> {
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
 
@@ -521,24 +529,42 @@ export async function getDocumentStructure(fileId: string): Promise<SectionNode[
 }
 
 /**
+ * Find the index of the Nth occurrence of a heading matching sectionHeading (1-based).
+ */
+function findHeadingOccurrenceIndex(headings: Array<{ text: string; level: number; lineNumber: number }>, sectionHeading: string, occurrenceIndex: number): number {
+    let count = 0;
+    for (let i = 0; i < headings.length; i++) {
+        if (headingMatchesSection(headings[i].text, sectionHeading)) {
+            count++;
+            if (count === occurrenceIndex) return i;
+        }
+    }
+    return -1;
+}
+
+/**
  * Propose updating a specific section's content
  * @param fileId - File path/ID
  * @param sectionHeading - Heading text to find
  * @param newContent - New content for the section (including the heading if desired, usually yes)
+ * @param description - Optional description
+ * @param occurrenceIndex - 1-based; when the same heading appears multiple times, which occurrence to update (default 1)
  */
 export async function proposeUpdateSection(
     fileId: string,
     sectionHeading: string,
     newContent: string,
-    description?: string
+    description?: string,
+    occurrenceIndex: number = 1,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
 
-    const headingIndex = headings.findIndex(h =>
-        headingMatchesSection(h.text, sectionHeading)
-    );
+    const headingIndex = occurrenceIndex <= 1
+        ? headings.findIndex(h => headingMatchesSection(h.text, sectionHeading))
+        : findHeadingOccurrenceIndex(headings, sectionHeading, occurrenceIndex);
 
     if (headingIndex === -1) return null;
 
@@ -580,9 +606,10 @@ export async function proposeAddSection(
     targetHeading: string,
     relation: 'before' | 'after',
     newContent: string,
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
 
@@ -639,13 +666,16 @@ export async function proposeAddSection(
 
 /**
  * Propose removing a section
+ * @param occurrenceIndex - 1-based; when the same heading appears multiple times (duplicates), which occurrence to remove (default 1)
  */
 export async function proposeRemoveSection(
     fileId: string,
     sectionHeading: string,
-    description?: string
+    description?: string,
+    occurrenceIndex: number = 1,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    return proposeUpdateSection(fileId, sectionHeading, "", description || `Remove section "${truncate(sectionHeading, 30)}"`);
+    return proposeUpdateSection(fileId, sectionHeading, "", description || `Remove section "${truncate(sectionHeading, 30)}"`, occurrenceIndex, contentOverride);
 }
 
 /**
@@ -656,9 +686,10 @@ export async function proposeMoveSection(
     sectionHeading: string,
     targetHeading: string,
     relation: 'before' | 'after',
-    description?: string
+    description?: string,
+    contentOverride?: string
 ): Promise<DocumentDiff | null> {
-    const content = await browserStorage.readFile(fileId);
+    const content = await readDocument(fileId, contentOverride);
     const headings = findHeadingsInContent(content);
     const lines = splitLines(content);
 

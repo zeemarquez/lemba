@@ -138,6 +138,11 @@ export function generateDiff(
     );
 }
 
+/** Normalize line endings for stable comparison. */
+function normalizeContent(s: string): string {
+    return (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 /**
  * Merge multiple diffs for the same file into a single diff.
  * Applies diffs in createdAt order: each diff's hunks are applied to the running content.
@@ -147,25 +152,21 @@ export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
     if (diffs.length === 0) return null;
     if (diffs.length === 1) return diffs[0];
 
-    // Check if all diffs are based on the same original content
-    const first = diffs[0];
-    const allSameBase = diffs.every(d => d.originalContent === first.originalContent);
+    // Sort by createdAt so order is deterministic
+    const sorted = [...diffs].sort((a, b) => a.createdAt - b.createdAt);
+    const first = sorted[0];
+
+    // Check if all diffs are based on the same original content (value equality, normalized line endings)
+    const baseNorm = normalizeContent(first.originalContent);
+    const allSameBase = sorted.every(d => normalizeContent(d.originalContent) === baseNorm);
 
     if (allSameBase) {
-        // Parallel edits against the same version: Merge all hunks
+        // Parallel edits against the same version: merge all hunks and apply in one pass
         const allHunks: DiffHunk[] = [];
-        for (const d of diffs) {
+        for (const d of sorted) {
             allHunks.push(...d.hunks);
         }
-
-        // Sort by startLine descending to handle overlaps? No, applyHunks expects ascending.
-        // But if we have Overlaps (collisions), simply sorting might interleaving them weirdly.
-        // We generally assume the agent avoids editing the same lines.
-        // If we sort ascending, and use the offset logic in applyHunks, it works perfectly for disjoint regions.
-
-        // Note: applyHunks implementation sorts internally, but we can do it here too.
-        // We pass ALL hunks to applyHunks, which applies them and tracks offset.
-
+        // applyHunks sorts by startLine and applies with offset; works for disjoint regions
         const content = applyHunks(first.originalContent, allHunks);
 
         return generateDiff(
@@ -176,26 +177,16 @@ export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
             'Merged changes'
         );
     } else {
-        // Sequential edits against evolving content?
-        // This effectively rebases later diffs on top of earlier ones blindly.
-        // This is what the previous code did, and it causes issues if the versions don't match.
-        // Ideally we should warn or fail, but falling back to sequential application 
-        // (assuming the user accepted one, then another) is the best effort if bases differ.
-        // But in the "pending diffs" view, they are usually all "pending" at once.
-
-        const sorted = [...diffs].sort((a, b) => a.createdAt - b.createdAt);
+        // Sequential: each diff's hunks are relative to its own originalContent.
+        // Apply in order; later diffs' hunks are applied to already-modified content (best effort).
         let content = sorted[0].originalContent;
-
         for (const d of sorted) {
-            // If d.originalContent matches current content, just apply.
-            // If not, we are applying patches blindly.
             content = applyHunks(content, d.hunks);
         }
-
         return generateDiff(
-            sorted[0].fileId,
-            sorted[0].fileName,
-            sorted[0].originalContent,
+            first.fileId,
+            first.fileName,
+            first.originalContent,
             content,
             'Merged changes'
         );

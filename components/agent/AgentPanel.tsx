@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useStore } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,15 @@ export function AgentPanel() {
         setAgentReadOnly,
         setAgentUseOrchestration,
         createNewChat,
+        ensureActiveChatForDocument,
+        activeFileId,
+        currentView,
     } = useStore();
+
+    const hasFile = currentView === "file" && !!activeFileId;
+    const activeFileName = hasFile
+        ? (activeFileId?.split("/").pop() || activeFileId)
+        : null;
 
     const currentModels = useMemo(() => {
         const list: { value: string; label: string; provider: LLMProvider }[] = [];
@@ -95,8 +103,19 @@ export function AgentPanel() {
         }
     }, [currentModels, agentModel, setAgentModel, setAgentProvider]);
 
+    // Sync active chat to the current document (when switching file/tab or on mount after rehydration)
+    useEffect(() => {
+        ensureActiveChatForDocument();
+    }, [activeFileId, currentView, ensureActiveChatForDocument]);
+
     const [chatsDialogOpen, setChatsDialogOpen] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Scroll chat to bottom when messages or loading/error state change
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, [agentMessages, agentLoading, agentError]);
 
     // Merged pending diffs (one per file) for single accept/reject; recompute when pendingDiffs changes
     const mergedPendingDiffs = useMemo(() => {
@@ -121,10 +140,17 @@ export function AgentPanel() {
     return (
         <div className="h-full flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="p-3 border-b flex items-center justify-between shrink-0">
-                <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
-                    AI Assistant
-                </span>
+            <div className="p-3 flex items-center justify-between shrink-0">
+                {hasFile ? (
+                    <span className="text-[10px] text-muted-foreground truncate min-w-0">
+                        Let&apos;s work on{" "}
+                        <span className="font-medium text-foreground bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                            {activeFileName}
+                        </span>
+                    </span>
+                ) : (
+                    <span className="text-[10px] text-muted-foreground">Select a file</span>
+                )}
                 <div className="flex items-center gap-0.5">
                     <Button
                         variant="ghost"
@@ -180,10 +206,11 @@ export function AgentPanel() {
                             {agentError}
                         </div>
                     )}
+                    <div ref={messagesEndRef} aria-hidden="true" className="h-0 w-full shrink-0" />
                 </div>
             </ScrollArea>
 
-            {/* Pending Changes Section - single merged accept/reject */}
+            {/* Pending Changes Section - progress bar while loading, accept/reject when done */}
             {hasPendingDiffs && (
                 <div className="border-t bg-amber-500/5 shrink-0 overflow-hidden">
                     <div className="px-3 py-2">
@@ -199,31 +226,35 @@ export function AgentPanel() {
                             ))}
                         </div>
                     </div>
-                    <div className="px-3 py-2 border-t border-amber-500/20 flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleReject}
-                            className="flex-1 h-8 text-xs gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50 border-red-200 dark:border-red-800"
-                        >
-                            <X size={14} />
-                            Reject
-                        </Button>
-                        <Button
-                            size="sm"
-                            onClick={handleAccept}
-                            disabled={isApproving}
-                            className="flex-1 h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
-                        >
-                            <Check size={14} />
-                            {isApproving ? "Applying…" : "Accept"}
-                        </Button>
-                    </div>
+                    {!agentLoading && (
+                        <div className="px-3 py-2 border-t border-amber-500/20">
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleReject}
+                                    className="flex-1 h-8 text-xs gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50 border-red-200 dark:border-red-800"
+                                >
+                                    <X size={14} />
+                                    Reject
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    onClick={handleAccept}
+                                    disabled={isApproving}
+                                    className="flex-1 h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                    <Check size={14} />
+                                    {isApproving ? "Applying…" : "Accept"}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* Input Area */}
-            <div className="p-3 border-t shrink-0 space-y-3">
+            <div className="p-3 shrink-0 space-y-3">
                 <ChatInput />
                 {/* Model and mode (Ask / Quick edit / Agent) */}
                 <div className="flex items-center gap-3 flex-wrap">

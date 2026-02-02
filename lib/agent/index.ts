@@ -7,6 +7,7 @@
 export type {
     MessageRole,
     FileMention,
+    ImageAttachment,
     AgentMessage,
     AgentChat,
     DiffType,

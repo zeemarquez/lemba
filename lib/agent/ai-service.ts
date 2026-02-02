@@ -11,7 +11,8 @@ import {
     DocumentDiff,
     createMessage,
     FileMention,
-    generateId
+    generateId,
+    type ImageAttachment,
 } from './types';
 import {
     readDocument,
@@ -53,9 +54,13 @@ interface AIResponse {
     diffs?: DocumentDiff[];
 }
 
+type VisionContentPart =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } };
+
 interface ChatMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string;
+    content: string | VisionContentPart[];
     tool_call_id?: string;
     tool_calls?: {
         id: string;
@@ -388,12 +393,13 @@ const TOOLS = [
         type: 'function' as const,
         function: {
             name: 'remove_section',
-            description: 'Remove an entire section (heading and body).',
+            description: 'Remove an entire section (heading and body). When the same heading appears multiple times, use occurrenceIndex (1 = first, 2 = second) to remove the duplicate.',
             parameters: {
                 type: 'object',
                 properties: {
                     fileId: { type: 'string' },
                     sectionHeading: { type: 'string', description: 'Exact text of the heading to remove' },
+                    occurrenceIndex: { type: 'number', description: 'Which occurrence to remove when heading appears multiple times (1-based). Default 1.' },
                     description: { type: 'string' }
                 },
                 required: ['fileId', 'sectionHeading']
@@ -462,7 +468,7 @@ You have access to tools that allow you to:
 
 ## Markdown Formatting
 - **Headings**: Use \`## Title\` format. Do not use numbered lists for headings (e.g. no \`## 1. Title\`) unless the user explicitly asks for it.
-- **Math**: \`$$ ... $$\` for blocks, \`$...$\` for inline.
+- **Math**: \`$$ ... $$\` for blocks, \`$...$\` for inline. Block equations (\`$$...$$\`) must have an empty line before and after.
 - **Alerts**: \`> [!NOTE]\` syntax.
 
 ## Response Format
@@ -632,10 +638,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
             }
 
             case 'remove_section': {
+                const occurrenceIndex = (args.occurrenceIndex as number) ?? 1;
                 const diff = await proposeRemoveSection(
                     args.fileId as string,
                     args.sectionHeading as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    occurrenceIndex
                 );
                 if (!diff) return JSON.stringify({ error: 'Section not found' });
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
@@ -840,11 +848,28 @@ export function modelToProvider(model: string): LLMProvider {
 
 // ==================== Shared LLM client (one round) for orchestration ====================
 
+export type VisionContentPartForChat =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatCompletionMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string;
+    content: string | VisionContentPartForChat[];
     tool_call_id?: string;
     tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+/**
+ * Build user message content for vision: text only, or text + image parts for orchestration agents.
+ */
+export function buildVisionUserContent(text: string, imageAttachments?: ImageAttachment[]): string | VisionContentPartForChat[] {
+    if (!imageAttachments?.length) return text;
+    const parts: VisionContentPartForChat[] = [{ type: 'text', text }];
+    for (const img of imageAttachments) {
+        const dataUrl = img.base64.startsWith('data:') ? img.base64 : `data:${img.mimeType};base64,${img.base64}`;
+        parts.push({ type: 'image_url', image_url: { url: dataUrl } });
+    }
+    return parts;
 }
 
 export interface ChatCompletionTool {
@@ -961,15 +986,29 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
         description: (t.function as { description?: string }).description ?? '',
         input_schema: t.function.parameters as Record<string, unknown>,
     }));
-    const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: string | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
+    type AnthropicUserContent = string | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>;
+    const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: AnthropicUserContent | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
     const systemParts: string[] = [];
     for (const m of messages) {
         if (m.role === 'system') {
-            systemParts.push(m.content);
+            systemParts.push(typeof m.content === 'string' ? m.content : m.content.map(p => p.type === 'text' ? p.text : '').join(''));
             continue;
         }
         if (m.role === 'user') {
-            anthropicMessages.push({ role: 'user', content: m.content });
+            const content = m.content;
+            if (Array.isArray(content)) {
+                const blocks: AnthropicUserContent = content.map((part) => {
+                    if (part.type === 'text') return { type: 'text' as const, text: part.text };
+                    const url = part.image_url.url;
+                    const match = url.match(/^data:image\/([^;]+);base64,(.+)$/);
+                    const mediaType = match ? `image/${match[1]}` : 'image/png';
+                    const data = match ? match[2] : url.replace(/^data:[^;]+;base64,/, '');
+                    return { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data } };
+                });
+                anthropicMessages.push({ role: 'user', content: blocks });
+            } else {
+                anthropicMessages.push({ role: 'user', content });
+            }
         } else if (m.role === 'assistant') {
             if (m.tool_calls?.length) {
                 anthropicMessages.push({
@@ -982,12 +1021,14 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
                     })),
                 });
             } else {
-                anthropicMessages.push({ role: 'assistant', content: m.content || '' });
+                const text = typeof m.content === 'string' ? m.content : '';
+                anthropicMessages.push({ role: 'assistant', content: text || '' });
             }
         } else if (m.role === 'tool') {
+            const toolContent = typeof m.content === 'string' ? m.content : '';
             anthropicMessages.push({
                 role: 'user',
-                content: [{ type: 'tool_result' as const, tool_use_id: m.tool_call_id!, content: m.content }],
+                content: [{ type: 'tool_result' as const, tool_use_id: m.tool_call_id!, content: toolContent }],
             });
         }
     }
@@ -1212,7 +1253,7 @@ export async function sendMessageToAI(
         { role: 'system', content: systemPrompt }
     ];
 
-    // Add file context to the first user message if available
+    // Add file context and image attachments to the first user message if available
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (msg.role === 'user' || msg.role === 'assistant') {
@@ -1223,10 +1264,18 @@ export async function sendMessageToAI(
                 content = `${content}\n\n[Referenced files]:${fileContext}`;
             }
 
-            chatMessages.push({
-                role: msg.role,
-                content
-            });
+            // Build vision multipart content for first user message with image attachments
+            const imageAttachments = msg.role === 'user' && i === 0 ? (msg as AgentMessage).imageAttachments : undefined;
+            if (imageAttachments && imageAttachments.length > 0) {
+                const parts: VisionContentPart[] = [{ type: 'text', text: content }];
+                for (const img of imageAttachments) {
+                    const dataUrl = img.base64.startsWith('data:') ? img.base64 : `data:${img.mimeType};base64,${img.base64}`;
+                    parts.push({ type: 'image_url', image_url: { url: dataUrl } });
+                }
+                chatMessages.push({ role: msg.role, content: parts });
+            } else {
+                chatMessages.push({ role: msg.role, content });
+            }
         }
     }
 
@@ -1285,11 +1334,25 @@ export async function sendMessageToAI(
                 description: (t.function as { description?: string }).description ?? '',
                 input_schema: t.function.parameters as Record<string, unknown>,
             }));
-            const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: string | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
+            type AnthropicUserContent = string | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>;
+            const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: AnthropicUserContent | Array<{ type: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: string }> }> = [];
             for (let i = 1; i < chatMessages.length; i++) {
                 const m = chatMessages[i];
                 if (m.role === 'user') {
-                    anthropicMessages.push({ role: 'user', content: m.content as string });
+                    const content = m.content;
+                    if (Array.isArray(content)) {
+                        const blocks: AnthropicUserContent = content.map((part) => {
+                            if (part.type === 'text') return { type: 'text' as const, text: part.text };
+                            const url = part.image_url.url;
+                            const match = url.match(/^data:image\/([^;]+);base64,(.+)$/);
+                            const mediaType = match ? `image/${match[1]}` : 'image/png';
+                            const data = match ? match[2] : url.replace(/^data:[^;]+;base64,/, '');
+                            return { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data } };
+                        });
+                        anthropicMessages.push({ role: 'user', content: blocks });
+                    } else {
+                        anthropicMessages.push({ role: 'user', content });
+                    }
                 } else if (m.role === 'assistant') {
                     if ((m as { tool_calls?: unknown[] }).tool_calls?.length) {
                         const blocks = (m as { tool_calls: Array<{ id: string; function: { name: string; arguments: string } }> }).tool_calls.map((tc) => ({
@@ -1377,19 +1440,17 @@ export async function sendMessageToAI(
                 agentLog.tool(toolCall.function.name, args);
                 const result = await executeTool(toolCall.function.name, args);
 
-                // Check if this was an edit operation that created a diff
-                if (toolCall.function.name.startsWith('propose_')) {
-                    try {
-                        const resultObj = JSON.parse(result);
-                        if (resultObj.success && resultObj.diff) {
-                            collectedDiffs.push(resultObj.diff);
-                            if (onDiff) {
-                                onDiff(resultObj.diff);
-                            }
+                // Collect diffs from any edit tool (propose_*, update_section, add_section, remove_section, move_section)
+                try {
+                    const resultObj = JSON.parse(result);
+                    if (resultObj.success && resultObj.diff) {
+                        collectedDiffs.push(resultObj.diff);
+                        if (onDiff) {
+                            onDiff(resultObj.diff);
                         }
-                    } catch {
-                        // Not a JSON response or no diff
                     }
+                } catch {
+                    // Not a JSON response or no diff
                 }
 
                 // Add tool result

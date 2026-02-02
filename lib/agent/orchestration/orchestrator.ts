@@ -16,6 +16,7 @@ import {
     WorkflowStep,
     IntentAnalysis,
     UserIntent,
+    TaskType,
     TaskStatus,
     OrchestrationEvent,
     OrchestrationEventHandler,
@@ -27,8 +28,10 @@ import { RAGEngine, defaultRAGEngine } from './rag';
 import { PlannerAgent } from './agents/planner';
 import { ResearcherAgent } from './agents/researcher';
 import { WriterAgent } from './agents/writer';
+import { StructureReviewAgent } from './agents/structure-review';
 import { LinterAgent } from './agents/linter';
 import { SummarizerAgent } from './agents/summarizer';
+import { mergeDiffsForFile } from '../diff-utils';
 
 import { ORCHESTRATOR_PROMPT } from './prompts';
 
@@ -61,6 +64,7 @@ export class OrchestratorAgent {
     private plannerAgent: PlannerAgent;
     private researcherAgent: ResearcherAgent;
     private writerAgent: WriterAgent;
+    private structureReviewAgent: StructureReviewAgent;
     private linterAgent: LinterAgent;
     private summarizerAgent: SummarizerAgent;
     private provider: LLMProvider;
@@ -97,6 +101,11 @@ export class OrchestratorAgent {
             provider: this.provider,
             apiKey: this.apiKey,
         });
+        this.structureReviewAgent = new StructureReviewAgent({
+            toolRegistry: this.toolRegistry,
+            provider: this.provider,
+            apiKey: this.apiKey,
+        });
         this.linterAgent = new LinterAgent({
             toolRegistry: this.toolRegistry,
             provider: this.provider,
@@ -115,9 +124,30 @@ export class OrchestratorAgent {
     ): Promise<OrchestrationResult> {
         this.eventHandler = options.onEvent;
         const collectedDiffs: DocumentDiff[] = [];
+        const collectedDiffIds = new Set<string>();
+        const contentOverrides: Record<string, string> = {};
+
+        const updateContentOverride = (fileId: string) => {
+            const fileDiffs = collectedDiffs.filter(d => d.fileId === fileId);
+            const merged = mergeDiffsForFile(fileDiffs);
+            if (merged) {
+                contentOverrides[fileId] = merged.proposedContent;
+            }
+        };
+
+        const addCollectedDiff = (diff: DocumentDiff) => {
+            if (collectedDiffIds.has(diff.id)) return;
+            const isDuplicate = collectedDiffs.some(
+                d => d.fileId === diff.fileId && d.proposedContent === diff.proposedContent
+            );
+            collectedDiffIds.add(diff.id);
+            if (isDuplicate) return;
+            collectedDiffs.push(diff);
+            updateContentOverride(diff.fileId);
+        };
 
         const onDiff = (diff: DocumentDiff) => {
-            collectedDiffs.push(diff);
+            addCollectedDiff(diff);
             if (options.onDiffCreated) {
                 options.onDiffCreated(diff);
             }
@@ -144,7 +174,7 @@ export class OrchestratorAgent {
                 agentLog.step(`step ${i + 1}/${workflow.steps.length}: ${step.agentType}`, { taskType: step.taskType });
 
                 // Skip if read-only and step would make edits
-                if (options.readOnly && (step.agentType === 'writer' || step.agentType === 'linter')) {
+                if (options.readOnly && (step.agentType === 'writer' || step.agentType === 'structure_review' || step.agentType === 'linter')) {
                     step.status = 'completed';
                     const skipResult: AgentResult = {
                         taskId: step.id,
@@ -161,7 +191,7 @@ export class OrchestratorAgent {
 
                 try {
                     // Build context for this step
-                    const stepContext = this.buildStepContext(context, results, workflow);
+                    const stepContext = this.buildStepContext(context, results, workflow, contentOverrides);
 
                     // Execute the appropriate agent with retry logic
                     const result = await this.executeAgentWithRetry(
@@ -181,7 +211,7 @@ export class OrchestratorAgent {
 
                     // Collect diffs from result
                     if (result.diffs) {
-                        collectedDiffs.push(...result.diffs);
+                        result.diffs.forEach(addCollectedDiff);
                     }
 
                     this.emitEvent({ type: 'step_completed', step, result });
@@ -308,7 +338,14 @@ export class OrchestratorAgent {
             requiredAgents = ['researcher'];
         } else if (message.includes('reorganize') || message.includes('restructure') || message.includes('reorder')) {
             primaryIntent = 'reorganize';
-            requiredAgents = ['planner', 'writer', 'linter'];
+            requiredAgents = ['planner', 'writer', 'structure_review', 'linter'];
+        } else if (
+            message.includes('structure') || message.includes('sections') || message.includes('duplicate') ||
+            message.includes('section order') || message.includes('hierarchy') || message.includes('review document') ||
+            message.includes('fix structure') || message.includes('similar sections')
+        ) {
+            primaryIntent = 'review';
+            requiredAgents = ['structure_review', 'linter'];
         } else if (message.includes('fix') || message.includes('error') || message.includes('broken')) {
             primaryIntent = 'fix_errors';
             requiredAgents = ['linter'];
@@ -317,10 +354,23 @@ export class OrchestratorAgent {
             requiredAgents = ['linter', 'writer'];
         } else if (message.includes('review') || message.includes('check') || message.includes('analyze')) {
             primaryIntent = 'review';
-            requiredAgents = ['researcher', 'linter'];
+            requiredAgents = ['researcher', 'structure_review', 'linter'];
         } else if (message.includes('?') || message.includes('what') || message.includes('how') || message.includes('why')) {
             primaryIntent = 'question';
             requiredAgents = ['researcher'];
+        }
+
+        // When writer is used and the request suggests significant structure changes, add structure_review after writer
+        const structureKeywords = /section|heading|reorder|move section|new section|add section|structure/i;
+        if (
+            requiredAgents.includes('writer') &&
+            (primaryIntent === 'edit_section' || primaryIntent === 'expand_content' || primaryIntent === 'create_document') &&
+            structureKeywords.test(userMessage)
+        ) {
+            const writerIdx = requiredAgents.indexOf('writer');
+            if (writerIdx >= 0 && !requiredAgents.includes('structure_review')) {
+                requiredAgents = [...requiredAgents.slice(0, writerIdx + 1), 'structure_review', ...requiredAgents.slice(writerIdx + 1)];
+            }
         }
 
         // Unknown intent but user has a document open: assume they want to modify it (plan + write + lint)
@@ -389,11 +439,12 @@ export class OrchestratorAgent {
     /**
      * Get task type for agent
      */
-    private getTaskTypeForAgent(agentType: AgentType): 'plan' | 'research' | 'write' | 'lint' | 'orchestrate' {
+    private getTaskTypeForAgent(agentType: AgentType): TaskType {
         switch (agentType) {
             case 'planner': return 'plan';
             case 'researcher': return 'research';
             case 'writer': return 'write';
+            case 'structure_review': return 'structure_review';
             case 'linter': return 'lint';
             default: return 'orchestrate';
         }
@@ -418,7 +469,9 @@ export class OrchestratorAgent {
                 }
                 return `${baseContext}\n\nGather relevant information for this task. Use RAG for document context and web search for external information.`;
             case 'writer':
-                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line. Use one sentence per line in prose and blank lines before block equations, headings, code blocks, alert blocks, and tables.`;
+                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line. Use one sentence per line in prose and blank lines before and after block equations, and before headings, code blocks, alert blocks, and tables.`;
+            case 'structure_review':
+                return `${baseContext}\n\nFix the entire document structure in this single run. Call get_document_structure first, then identify every duplicate section and every structural issue. Call remove_section (or update_section, move_section) for EACH duplicate and EACH issue before finishing. Do not stop after a few edits—fix everything in one go. Use occurrenceIndex when the same heading appears multiple times (e.g. occurrenceIndex 2 to remove the second occurrence).`;
             case 'linter':
                 return `${baseContext}\n\nCheck the document for errors and style issues. Propose fixes for any problems found.`;
             default:
@@ -452,14 +505,26 @@ export class OrchestratorAgent {
     private buildStepContext(
         baseContext: AgentContext,
         previousResults: AgentResult[],
-        workflow: Workflow
+        workflow: Workflow,
+        contentOverrides: Record<string, string>
     ): AgentContext {
-        return {
+        const nextContext: AgentContext = {
             ...baseContext,
             planOutline: workflow.context.planOutline,
             researchFindings: workflow.context.researchFindings,
             previousResults,
+            contentOverrides,
         };
+        if (nextContext.activeDocument) {
+            const override = contentOverrides[nextContext.activeDocument.id];
+            if (override !== undefined) {
+                nextContext.activeDocument = {
+                    ...nextContext.activeDocument,
+                    content: override,
+                };
+            }
+        }
+        return nextContext;
     }
 
     /**
@@ -497,6 +562,13 @@ export class OrchestratorAgent {
                 const writerResult = await this.writerAgent.run(instructions, context, agentOptions);
                 output = writerResult.output;
                 diffs = writerResult.diffs;
+                break;
+            }
+
+            case 'structure_review': {
+                const structureReviewResult = await this.structureReviewAgent.run(instructions, context, agentOptions);
+                output = structureReviewResult.output;
+                diffs = structureReviewResult.diffs;
                 break;
             }
 
@@ -697,10 +769,11 @@ export async function runOrchestration(
         };
     }
 
-    // Build context
+    // Build context (include image attachments so orchestration agents can send vision content)
     const context: AgentContext = {
         conversationHistory: messages,
         mentionedFiles,
+        imageAttachments: lastUserMessage.imageAttachments,
     };
 
     // If files are mentioned, load the first one as active document (even if empty, so writer/linter get defaultFileId)

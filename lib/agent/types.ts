@@ -14,6 +14,13 @@ export interface FileMention {
     contentSnapshot?: string;
 }
 
+/** Image attachment for vision (base64 or data URL). */
+export interface ImageAttachment {
+    base64: string;   // Raw base64 or full data URL
+    mimeType: string;
+    name?: string;
+}
+
 export interface AgentMessage {
     id: string;
     role: MessageRole;
@@ -25,6 +32,8 @@ export interface AgentMessage {
     diffIds?: string[];
     // Full content sent to AI (if different from visible content)
     fullContent?: string;
+    // Image attachments for vision (user message)
+    imageAttachments?: ImageAttachment[];
     // Loading state for streaming responses
     isStreaming?: boolean;
 }
@@ -106,6 +115,8 @@ export type InsertPosition =
 export interface AgentChat {
     id: string;
     title: string;                               // Derived from first user message or "New chat"
+    /** File path this chat is linked to; null when started with no document open */
+    documentId: string | null;
     messages: AgentMessage[];
     pendingDiffs: Record<string, DocumentDiff>;
     createdAt: number;
@@ -133,7 +144,8 @@ export function createMessage(
     content: string,
     mentions?: FileMention[],
     diffIds?: string[],
-    fullContent?: string
+    fullContent?: string,
+    imageAttachments?: ImageAttachment[]
 ): AgentMessage {
     return {
         id: generateId(),
@@ -143,6 +155,7 @@ export function createMessage(
         mentions,
         diffIds,
         fullContent,
+        imageAttachments,
     };
 }
 

@@ -136,11 +136,13 @@ interface AppState {
     setAgentTemperature: (temperature: number) => void;
     setAgentMaxTokens: (maxTokens: number) => void;
     setAgentUseOrchestration: (useOrchestration: boolean) => void;
-    // Chat history
+    // Chat history (chats are linked to the active document when created)
     createNewChat: () => string;
     switchChat: (chatId: string) => void;
     clearAllChats: () => void;
     getChatsList: () => AgentChat[];
+    /** Sync active chat to the current document (latest chat for this document, or new chat) */
+    ensureActiveChatForDocument: () => void;
 
     // RAG Actions
     fetchRagDocuments: () => Promise<void>;
@@ -868,6 +870,7 @@ export const useStore = create<AppState>()(
                     } else {
                         set({ activeFileId: path, currentView: 'file' });
                     }
+                    get().ensureActiveChatForDocument();
                 },
 
                 saveFile: async (path: string, content: string) => {
@@ -1051,7 +1054,7 @@ export const useStore = create<AppState>()(
                             ? [state.activeFileId]
                             : [];
 
-                    // Build RAG context from attached documents
+                    // Build RAG context from attached documents (text/url only; images go as vision parts)
                     let ragContext = '';
                     if (state.ragDocuments.length > 0) {
                         const ragParts: string[] = [];
@@ -1059,13 +1062,13 @@ export const useStore = create<AppState>()(
                             if (doc.type === 'text' && doc.content) {
                                 ragParts.push(`--- Attached Document: ${doc.name} ---\n${doc.content}\n--- End of ${doc.name} ---`);
                             } else if (doc.type === 'url' && doc.url) {
-                                // For URLs, we include the URL and any fetched content if available
                                 if (doc.content) {
                                     ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\nContent:\n${doc.content}\n--- End of ${doc.name} ---`);
                                 } else {
                                     ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\n(Content not fetched)\n--- End of ${doc.name} ---`);
                                 }
                             }
+                            // type === 'image' is sent as vision attachment, not in ragContext
                         }
                         if (ragParts.length > 0) {
                             ragContext = '\n\n[Attached Documents/Links for Context]:\n' + ragParts.join('\n\n');
@@ -1082,12 +1085,24 @@ export const useStore = create<AppState>()(
                     if (state.ragDocuments.length > 0) {
                         const tags = state.ragDocuments.map(doc => {
                             if (doc.type === 'text') return `[📄 ${doc.name}]`;
+                            if (doc.type === 'image') return `[🖼 ${doc.name}]`;
                             const shortName = doc.name.length > 30 ? doc.name.substring(0, 27) + '...' : doc.name;
                             return `[🔗 ${shortName}]`;
                         });
                         displayTags = '\n\n' + tags.join(' ');
                     }
                     const visibleContent = content + displayTags;
+
+                    // Build image attachments for vision (data URL -> base64 + mimeType)
+                    const imageAttachments = state.ragDocuments
+                        .filter((d): d is typeof d & { type: 'image'; content: string } => d.type === 'image' && !!d.content)
+                        .map(doc => {
+                            const dataUrl = doc.content!;
+                            const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+                            const base64 = match ? match[2] : dataUrl;
+                            const mimeType = match ? match[1] : 'image/png';
+                            return { base64, mimeType, name: doc.name };
+                        });
 
                     agentLog.info('sendAgentMessage', {
                         mode: state.agentUseOrchestration ? 'orchestration' : 'single-agent',
@@ -1096,8 +1111,9 @@ export const useStore = create<AppState>()(
                         contentLength: content.length,
                         ragDocuments: state.ragDocuments.length,
                         ragContextLength: ragContext.length,
+                        imageAttachments: imageAttachments.length,
                     });
-                    const userMessage = createMessage('user', visibleContent, [], undefined, fullContent);
+                    const userMessage = createMessage('user', visibleContent, [], undefined, fullContent, imageAttachments.length > 0 ? imageAttachments : undefined);
                     const currentChatId = get().activeChatId;
                     const ragDocsToClear = state.ragDocuments;
                     set((s) => {
@@ -1164,6 +1180,7 @@ export const useStore = create<AppState>()(
                                 researcher: '🔍 Researching',
                                 planner: '📋 Planning',
                                 writer: '✍️ Writing',
+                                structure_review: '📐 Reviewing structure',
                                 linter: '✨ Linting',
                                 summarizer: '💬 Summarizing',
                             };
@@ -1211,6 +1228,10 @@ export const useStore = create<AppState>()(
                         }
 
                         agentLog.info('response received', { contentLength: response.content?.length ?? 0, diffs: response.diffs?.length ?? 0 });
+                        // Ensure all returned diffs are in pendingDiffs (fallback if onDiffCreated missed any)
+                        for (const diff of response.diffs ?? []) {
+                            get().addPendingDiff(diff);
+                        }
                         const assistantMessage = createMessage(
                             'assistant',
                             response.content,
@@ -1427,18 +1448,24 @@ export const useStore = create<AppState>()(
                 setAgentUseOrchestration: (useOrchestration) => set({ agentUseOrchestration: useOrchestration }),
 
                 createNewChat: () => {
+                    const state = get();
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
                     const id = generateId();
                     const now = Date.now();
                     const chat: AgentChat = {
                         id,
                         title: 'New chat',
+                        documentId,
                         messages: [],
                         pendingDiffs: {},
                         createdAt: now,
                         updatedAt: now,
                     };
-                    set((state) => ({
-                        chats: { ...state.chats, [id]: chat },
+                    set((s) => ({
+                        chats: { ...s.chats, [id]: chat },
                         activeChatId: id,
                         agentMessages: [],
                         pendingDiffs: {},
@@ -1465,18 +1492,65 @@ export const useStore = create<AppState>()(
 
                 clearAllChats: async () => {
                     const state = get();
-                    // Delete all RAG documents for all chats
-                    await Promise.all(Object.keys(state.chats).map(chatId =>
-                        browserStorage.deleteRagDocumentsByChatId(chatId)
-                    ));
-
-                    set({ chats: {}, activeChatId: null, agentMessages: [], pendingDiffs: {}, agentMentionedFiles: [], agentError: null, ragDocuments: [] });
-                    get().createNewChat();
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    const chatIdsToRemove = Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === documentId)
+                        .map((c) => c.id);
+                    await Promise.all(
+                        chatIdsToRemove.map((chatId) =>
+                            browserStorage.deleteRagDocumentsByChatId(chatId)
+                        )
+                    );
+                    set((s) => {
+                        const nextChats = { ...s.chats };
+                        chatIdsToRemove.forEach((id) => delete nextChats[id]);
+                        return {
+                            chats: nextChats,
+                            activeChatId: null,
+                            agentMessages: [],
+                            pendingDiffs: {},
+                            agentMentionedFiles: [],
+                            agentError: null,
+                            ragDocuments: [],
+                        };
+                    });
+                    get().ensureActiveChatForDocument();
                 },
 
                 getChatsList: () => {
                     const state = get();
-                    return Object.values(state.chats).sort((a, b) => b.updatedAt - a.updatedAt);
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    return Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === documentId)
+                        .sort((a, b) => b.updatedAt - a.updatedAt);
+                },
+
+                ensureActiveChatForDocument: () => {
+                    const state = get();
+                    const targetDocumentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    const currentChat = state.activeChatId
+                        ? state.chats[state.activeChatId]
+                        : null;
+                    const currentChatDocumentId = currentChat?.documentId ?? null;
+                    if (currentChatDocumentId === targetDocumentId) return;
+
+                    const chatsForDoc = Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === targetDocumentId)
+                        .sort((a, b) => b.updatedAt - a.updatedAt);
+                    if (chatsForDoc.length > 0) {
+                        get().switchChat(chatsForDoc[0].id);
+                    } else {
+                        get().createNewChat();
+                    }
                 },
 
                 fetchRagDocuments: async () => {

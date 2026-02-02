@@ -12,10 +12,10 @@ function formatUrlForDisplay(url: string): string {
     return url.replace(/^https?:\/\//i, "").replace(/^www\./i, "").trim();
 }
 
-type AttachmentSegment = { type: "file"; label: string } | { type: "url"; label: string };
+type AttachmentSegment = { type: "file"; label: string } | { type: "url"; label: string } | { type: "image"; label: string };
 
 function splitByAttachmentTags(content: string): (string | AttachmentSegment)[] {
-    const re = /\[(📄|🔗)\s+([^\]]+)\]/g;
+    const re = /\[(📄|🔗|🖼)\s+([^\]]+)\]/g;
     const segments: (string | AttachmentSegment)[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -31,7 +31,9 @@ function splitByAttachmentTags(content: string): (string | AttachmentSegment)[] 
                 : rawLabel.length > 24
                   ? rawLabel.slice(0, 21) + "…"
                   : rawLabel;
-        segments.push(emoji === "📄" ? { type: "file", label } : { type: "url", label });
+        if (emoji === "📄") segments.push({ type: "file", label });
+        else if (emoji === "🔗") segments.push({ type: "url", label });
+        else segments.push({ type: "image", label });
         lastIndex = match.index + match[0].length;
     }
     if (lastIndex < content.length) {
@@ -45,8 +47,10 @@ function AttachmentChip({ segment }: { segment: AttachmentSegment }) {
         <span className={CHIP_CLASSES} title={segment.label}>
             {segment.type === "file" ? (
                 <FileText size={10} className="shrink-0" />
-            ) : (
+            ) : segment.type === "url" ? (
                 <span className="shrink-0" aria-hidden>🔗</span>
+            ) : (
+                <span className="shrink-0" aria-hidden>🖼</span>
             )}
             <span className="truncate">{segment.label}</span>
         </span>

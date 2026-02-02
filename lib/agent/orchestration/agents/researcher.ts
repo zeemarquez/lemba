@@ -4,7 +4,7 @@
  */
 
 import type { LLMProvider } from '../../ai-service';
-import { chatCompletionOneRound } from '../../ai-service';
+import { chatCompletionOneRound, buildVisionUserContent } from '../../ai-service';
 import type { ChatCompletionMessage } from '../../ai-service';
 import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
 import { ToolRegistry } from '../tools';
@@ -109,10 +109,10 @@ export class ResearcherAgent {
             });
         }
 
-        // Add current instructions
+        // Add current instructions (with optional image attachments for vision)
         messages.push({
             role: 'user' as const,
-            content: instructions,
+            content: buildVisionUserContent(instructions, context.imageAttachments),
         });
 
         // Get available tools
@@ -154,7 +154,9 @@ export class ResearcherAgent {
                 });
                 for (const toolCall of result.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
-                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args);
+                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args, {
+                        contentOverrides: context.contentOverrides,
+                    });
                     currentMessages.push({
                         role: 'tool',
                         tool_call_id: toolCall.id,

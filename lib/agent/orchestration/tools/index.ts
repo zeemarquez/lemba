@@ -8,6 +8,7 @@ import {
     readDocument,
     readDocumentSection,
     getDocumentMetadata,
+    getDocumentStructure,
     searchInDocument,
     searchAllDocuments,
     findHeadings,
@@ -15,6 +16,10 @@ import {
     proposeInsert,
     proposeDelete,
     proposeReplaceSection,
+    proposeUpdateSection,
+    proposeAddSection,
+    proposeRemoveSection,
+    proposeMoveSection,
     InsertPosition
 } from '../../document-ops';
 import { browserStorage } from '../../../browser-storage';
@@ -55,6 +60,8 @@ export interface ExecuteToolOptions {
     ragEngine?: RAGEngine;
     /** When set, tools that take fileId will use this path if the agent's fileId doesn't exist (e.g. active document). */
     defaultFileId?: string | null;
+    /** Optional in-memory content overrides keyed by fileId. */
+    contentOverrides?: Record<string, string>;
 }
 
 // ==================== Tool Definitions ====================
@@ -102,6 +109,21 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
     get_document_metadata: {
         name: 'get_document_metadata',
         description: 'Get metadata about a document including line count, word count, and headings',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                }
+            },
+            required: ['fileId']
+        }
+    },
+
+    get_document_structure: {
+        name: 'get_document_structure',
+        description: 'Get the hierarchical structure of a document (tree of sections with headings, levels, line numbers). Use this to analyze document outline, detect duplicates, and plan structure fixes.',
         parameters: {
             type: 'object',
             properties: {
@@ -385,6 +407,124 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
         }
     },
 
+    update_section: {
+        name: 'update_section',
+        description: 'Update the content of a specific section. Replaces everything from the section heading to the next heading. Use exact heading text from find_headings.',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                },
+                sectionHeading: {
+                    type: 'string',
+                    description: 'Exact text of the heading to update'
+                },
+                newContent: {
+                    type: 'string',
+                    description: 'New content for the section (including the heading)'
+                },
+                description: {
+                    type: 'string',
+                    description: 'Reason for the change'
+                }
+            },
+            required: ['fileId', 'sectionHeading', 'newContent']
+        }
+    },
+
+    add_section: {
+        name: 'add_section',
+        description: 'Add a new section relative to an existing heading.',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                },
+                targetHeading: {
+                    type: 'string',
+                    description: 'Existing heading to position relative to'
+                },
+                relation: {
+                    type: 'string',
+                    enum: ['before', 'after'],
+                    description: 'Place new section before or after target'
+                },
+                newContent: {
+                    type: 'string',
+                    description: 'Content of the new section (including heading)'
+                },
+                description: {
+                    type: 'string',
+                    description: 'Brief description of the change'
+                }
+            },
+            required: ['fileId', 'targetHeading', 'relation', 'newContent']
+        }
+    },
+
+    remove_section: {
+        name: 'remove_section',
+        description: 'Remove an entire section (heading and body). When the same heading appears multiple times (duplicates), use occurrenceIndex (1 = first, 2 = second, etc.) to remove the duplicate you want.',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                },
+                sectionHeading: {
+                    type: 'string',
+                    description: 'Exact text of the heading to remove'
+                },
+                occurrenceIndex: {
+                    type: 'number',
+                    description: 'When this heading appears multiple times, which occurrence to remove (1 = first, 2 = second). Default 1.'
+                },
+                description: {
+                    type: 'string',
+                    description: 'Reason for the change'
+                }
+            },
+            required: ['fileId', 'sectionHeading']
+        }
+    },
+
+    move_section: {
+        name: 'move_section',
+        description: 'Move a section to a new location relative to another section.',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                },
+                sectionHeading: {
+                    type: 'string',
+                    description: 'Heading of the section to move'
+                },
+                targetHeading: {
+                    type: 'string',
+                    description: 'Heading to move relative to'
+                },
+                relation: {
+                    type: 'string',
+                    enum: ['before', 'after'],
+                    description: 'Place section before or after target'
+                },
+                description: {
+                    type: 'string',
+                    description: 'Reason for the change'
+                }
+            },
+            required: ['fileId', 'sectionHeading', 'targetHeading', 'relation']
+        }
+    },
+
     // Lint operations
     lint_markdown: {
         name: 'lint_markdown',
@@ -431,31 +571,44 @@ export async function executeTool(
         switch (name) {
             case 'read_document': {
                 const fileId = await resolveFile(args.fileId as string);
-                const content = await readDocument(fileId);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const content = await readDocument(fileId, contentOverride);
                 return { success: true, data: content || '(empty document)' };
             }
 
             case 'read_document_section': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const content = await readDocumentSection(
                     fileId,
                     args.startLine as number,
-                    args.endLine as number
+                    args.endLine as number,
+                    contentOverride
                 );
                 return { success: true, data: content || '(empty section)' };
             }
 
             case 'get_document_metadata': {
                 const fileId = await resolveFile(args.fileId as string);
-                const metadata = await getDocumentMetadata(fileId);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const metadata = await getDocumentMetadata(fileId, contentOverride);
                 return { success: true, data: metadata };
+            }
+
+            case 'get_document_structure': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const structure = await getDocumentStructure(fileId, contentOverride);
+                return { success: true, data: structure };
             }
 
             case 'find_headings': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const headings = await findHeadings(
                     fileId,
-                    args.level as number | undefined
+                    args.level as number | undefined,
+                    contentOverride
                 );
                 return { success: true, data: headings };
             }
@@ -478,9 +631,12 @@ export async function executeTool(
 
             case 'search_in_document': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const results = await searchInDocument(
                     fileId,
-                    args.query as string
+                    args.query as string,
+                    undefined,
+                    contentOverride
                 );
                 return { success: true, data: results };
             }
@@ -527,11 +683,13 @@ export async function executeTool(
 
             case 'propose_edit': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const diff = await proposeEdit(
                     fileId,
                     args.oldText as string,
                     args.newText as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    contentOverride
                 );
                 if (!diff) {
                     return { success: false, error: 'Text not found in document' };
@@ -541,6 +699,7 @@ export async function executeTool(
 
             case 'propose_insert': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const position = args.position as { type: string; lineNumber?: number; headingText?: string };
                 let insertPos: InsertPosition;
 
@@ -565,7 +724,8 @@ export async function executeTool(
                     fileId,
                     insertPos,
                     args.content as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    contentOverride
                 );
                 if (!diff) {
                     return { success: false, error: 'Could not insert at specified position' };
@@ -575,11 +735,13 @@ export async function executeTool(
 
             case 'propose_delete': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const diff = await proposeDelete(
                     fileId,
                     args.startLine as number,
                     args.endLine as number,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    contentOverride
                 );
                 if (!diff) {
                     return { success: false, error: 'Invalid line range' };
@@ -589,11 +751,13 @@ export async function executeTool(
 
             case 'propose_replace_section': {
                 const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
                 const diff = await proposeReplaceSection(
                     fileId,
                     args.sectionHeading as string,
                     args.newContent as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    contentOverride
                 );
                 if (!diff) {
                     return { success: false, error: 'Section heading not found' };
@@ -601,9 +765,79 @@ export async function executeTool(
                 return { success: true, data: { diffId: diff.id }, diff };
             }
 
+            case 'update_section': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const occurrenceIndex = (args.occurrenceIndex as number) ?? 1;
+                const diff = await proposeUpdateSection(
+                    fileId,
+                    args.sectionHeading as string,
+                    args.newContent as string,
+                    args.description as string | undefined,
+                    occurrenceIndex,
+                    contentOverride
+                );
+                if (!diff) {
+                    return { success: false, error: 'Section not found' };
+                }
+                return { success: true, data: { diffId: diff.id }, diff };
+            }
+
+            case 'add_section': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const diff = await proposeAddSection(
+                    fileId,
+                    args.targetHeading as string,
+                    args.relation as 'before' | 'after',
+                    args.newContent as string,
+                    args.description as string | undefined,
+                    contentOverride
+                );
+                if (!diff) {
+                    return { success: false, error: 'Target section not found' };
+                }
+                return { success: true, data: { diffId: diff.id }, diff };
+            }
+
+            case 'remove_section': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const occurrenceIndex = (args.occurrenceIndex as number) ?? 1;
+                const diff = await proposeRemoveSection(
+                    fileId,
+                    args.sectionHeading as string,
+                    args.description as string | undefined,
+                    occurrenceIndex,
+                    contentOverride
+                );
+                if (!diff) {
+                    return { success: false, error: 'Section not found' };
+                }
+                return { success: true, data: { diffId: diff.id }, diff };
+            }
+
+            case 'move_section': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const diff = await proposeMoveSection(
+                    fileId,
+                    args.sectionHeading as string,
+                    args.targetHeading as string,
+                    args.relation as 'before' | 'after',
+                    args.description as string | undefined,
+                    contentOverride
+                );
+                if (!diff) {
+                    return { success: false, error: 'Section or target not found, or invalid move' };
+                }
+                return { success: true, data: { diffId: diff.id }, diff };
+            }
+
             case 'lint_markdown': {
                 const fileId = await resolveFile(args.fileId as string);
-                const lintResult = await lintMarkdown(fileId);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const lintResult = await lintMarkdown(fileId, contentOverride);
                 return { success: true, data: lintResult };
             }
 
@@ -641,8 +875,8 @@ interface LintResult {
     passed: boolean;
 }
 
-async function lintMarkdown(fileId: string): Promise<LintResult> {
-    const content = await readDocument(fileId);
+async function lintMarkdown(fileId: string, contentOverride?: string): Promise<LintResult> {
+    const content = await readDocument(fileId, contentOverride);
     if (!content) {
         return {
             fileId,
@@ -807,8 +1041,9 @@ export class ToolRegistry {
             orchestrator: ['list_files', 'get_document_metadata'],
             planner: ['get_document_metadata', 'find_headings', 'read_document_section', 'list_files'],
             researcher: ['rag_query', 'rag_index', 'get_rag_context', 'web_search', 'search_in_document', 'search_all_documents', 'read_document', 'list_files'],
-            writer: ['propose_edit', 'propose_insert', 'propose_delete', 'propose_replace_section', 'read_document', 'read_document_section', 'find_headings'],
-            linter: ['lint_markdown', 'propose_edit', 'read_document', 'find_headings']
+            writer: ['propose_edit', 'propose_insert', 'propose_delete', 'propose_replace_section', 'update_section', 'add_section', 'remove_section', 'move_section', 'read_document', 'read_document_section', 'find_headings'],
+            structure_review: ['get_document_structure', 'read_document', 'read_document_section', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
+            linter: ['lint_markdown', 'propose_edit', 'update_section', 'add_section', 'remove_section', 'move_section', 'read_document', 'find_headings']
         };
 
         const toolNames = toolSets[agentType] || [];

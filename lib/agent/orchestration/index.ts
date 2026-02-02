@@ -18,6 +18,7 @@ export type { OrchestrationOptions, OrchestrationResult } from './orchestrator';
 export { PlannerAgent } from './agents/planner';
 export { ResearcherAgent } from './agents/researcher';
 export { WriterAgent } from './agents/writer';
+export { StructureReviewAgent } from './agents/structure-review';
 export { LinterAgent } from './agents/linter';
 export { SummarizerAgent } from './agents/summarizer';
 
@@ -28,4 +29,4 @@ export type { WebSearchResult, WebSearchResponse } from './tools/web-search';
 export { ragQuery, ragIndex, getRAGContext, formatRAGResults, formatRAGContext, getRAGStats } from './tools/rag-tools';
 
 // Export prompts
-export { getAgentPrompt, ORCHESTRATOR_PROMPT, PLANNER_PROMPT, RESEARCHER_PROMPT, WRITER_PROMPT, LINTER_PROMPT, SUMMARIZER_PROMPT } from './prompts';
+export { getAgentPrompt, ORCHESTRATOR_PROMPT, PLANNER_PROMPT, RESEARCHER_PROMPT, WRITER_PROMPT, STRUCTURE_REVIEW_PROMPT, LINTER_PROMPT, SUMMARIZER_PROMPT } from './prompts';

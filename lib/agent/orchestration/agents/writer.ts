@@ -4,9 +4,10 @@
  */
 
 import type { LLMProvider } from '../../ai-service';
-import { chatCompletionOneRound } from '../../ai-service';
+import { chatCompletionOneRound, buildVisionUserContent } from '../../ai-service';
 import type { ChatCompletionMessage } from '../../ai-service';
 import { DocumentDiff } from '../../types';
+import { mergeDiffsForFile } from '../../diff-utils';
 import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
 import { ToolRegistry, ToolResult } from '../tools';
 import { WRITER_PROMPT } from '../prompts';
@@ -48,6 +49,7 @@ export class WriterAgent {
         const maxTokens = options.maxTokens || this.config.maxTokens;
 
         const collectedDiffs: DocumentDiff[] = [];
+        const contentOverrides: Record<string, string> = { ...(context.contentOverrides ?? {}) };
 
         // Build system prompt
         let systemPrompt = WRITER_PROMPT;
@@ -113,14 +115,14 @@ export class WriterAgent {
             messages.push({ role: 'user', content: ragContent });
         }
 
-        // Add instructions (reinforce target file)
+        // Add instructions (reinforce target file; with optional image attachments for vision)
         let finalInstructions = instructions;
         if (context.activeDocument) {
             finalInstructions += `\n\n**Target file for all edits:** Use fileId \`${context.activeDocument.id}\` in every propose_* and read_* tool call.`;
         }
         messages.push({
             role: 'user',
-            content: finalInstructions,
+            content: buildVisionUserContent(finalInstructions, context.imageAttachments),
         });
 
         // Get available tools
@@ -163,18 +165,27 @@ export class WriterAgent {
                 });
                 for (const toolCall of result.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
-                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args, { defaultFileId });
+                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args, {
+                        defaultFileId,
+                        contentOverrides,
+                    });
                     let isDuplicate = false;
                     if (execResult.diff) {
+                        // Only treat as duplicate when it's the exact same edit (same proposed result).
+                        // Do not use description alone: multiple different edits can share the same description.
                         isDuplicate = collectedDiffs.some(
                             d =>
                                 d.fileId === execResult.diff!.fileId &&
-                                (d.description && execResult.diff!.description
-                                    ? d.description === execResult.diff!.description
-                                    : d.proposedContent === execResult.diff!.proposedContent)
+                                d.proposedContent === execResult.diff!.proposedContent
                         );
                         if (!isDuplicate) {
                             collectedDiffs.push(execResult.diff);
+                            const merged = mergeDiffsForFile(
+                                collectedDiffs.filter(d => d.fileId === execResult.diff!.fileId)
+                            );
+                            if (merged) {
+                                contentOverrides[merged.fileId] = merged.proposedContent;
+                            }
                             if (options.onDiffCreated) options.onDiffCreated(execResult.diff);
                         }
                     }

@@ -39,7 +39,7 @@ Transform plans and research into clean, well-structured markdown content. You a
 - Keep headings concise and descriptive
 
 #### Equations (editor-specific)
-- **Block equations**: Use double dollar signs on one continuous line with a space after the opening `$$` and before the closing `$$`. Example: `$$ E = mc^2 $$` (no newlines inside; single line only).
+- **Block equations**: Use double dollar signs on one continuous line with a space after the opening `$$` and before the closing `$$`. Example: `$$ E = mc^2 $$` (no newlines inside; single line only). Block equations (`$$...$$`) must have an empty line before and after.
 - **Inline equations**: Use a single dollar sign before and after: `$...$`. Example: `The formula $E = mc^2$ is famous.`
 
 #### Alert blocks (editor-specific)
@@ -53,7 +53,7 @@ Five alert types: NOTE, TIP, IMPORTANT, WARNING, CAUTION. Use blockquote syntax:
 
 #### Source-mode readability (editor-specific)
 - **One sentence per line**: Put each sentence on its own line in prose so source mode does not show long continuous lines.
-- **Blank lines before blocks**: Add a blank line before block equations (`$$ ... $$`), headings (`##`, `###`), code blocks (`` ``` ``), alert blocks (`> [!NOTE]`), and tables so blocks are visually separated in source mode.
+- **Blank lines before blocks**: Add a blank line before and after block equations (`$$ ... $$`); add a blank line before headings (`##`, `###`), code blocks (`` ``` ``), alert blocks (`> [!NOTE]`), and tables so blocks are visually separated in source mode.
 
 #### Paragraphs
 - Keep paragraphs focused on one idea

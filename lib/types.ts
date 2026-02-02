@@ -263,8 +263,8 @@ export interface RagDocument extends SyncMetadata {
     id: string;           // Unique ID
     chatId: string;       // ID of the chat instance this document belongs to
     name: string;         // Display name
-    type: 'text' | 'pdf' | 'url' | 'other';
-    content?: string;     // Text content (extracted or entered)
+    type: 'text' | 'pdf' | 'url' | 'image' | 'other';
+    content?: string;     // Text content, or for image: data URL (data:image/...;base64,...)
     blob?: Blob;          // Original file data (if file)
     url?: string;         // URL (if link)
     createdAt: number;

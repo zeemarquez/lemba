@@ -4,9 +4,10 @@
  */
 
 import type { LLMProvider } from '../../ai-service';
-import { chatCompletionOneRound } from '../../ai-service';
+import { chatCompletionOneRound, buildVisionUserContent } from '../../ai-service';
 import type { ChatCompletionMessage } from '../../ai-service';
 import { DocumentDiff } from '../../types';
+import { mergeDiffsForFile } from '../../diff-utils';
 import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
 import { ToolRegistry, ToolResult } from '../tools';
 import { LINTER_PROMPT } from '../prompts';
@@ -56,6 +57,7 @@ export class LinterAgent {
 
         const collectedDiffs: DocumentDiff[] = [];
         let issueCount = { errors: 0, warnings: 0, suggestions: 0 };
+        const contentOverrides: Record<string, string> = { ...(agentContext.contentOverrides ?? {}) };
 
         // Capture once so async/tool code never references agentContext
         const activeDocument = agentContext.activeDocument;
@@ -100,14 +102,14 @@ export class LinterAgent {
             }
         }
 
-        // Add instructions (reinforce target file)
+        // Add instructions (reinforce target file; with optional image attachments for vision)
         let fullInstructions = instructions;
         if (activeDocument) {
             fullInstructions += `\n\nLint ONLY this document. Use fileId \`${activeDocument.id}\` in the lint_markdown tool call.`;
         }
         messages.push({
             role: 'user',
-            content: fullInstructions,
+            content: buildVisionUserContent(fullInstructions, agentContext.imageAttachments),
         });
 
         // Get available tools
@@ -149,7 +151,10 @@ export class LinterAgent {
                 });
                 for (const toolCall of result.tool_calls) {
                     const args = JSON.parse(toolCall.function.arguments);
-                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args, { defaultFileId });
+                    const execResult = await this.toolRegistry.execute(toolCall.function.name, args, {
+                        defaultFileId,
+                        contentOverrides,
+                    });
                     if (toolCall.function.name === 'lint_markdown' && execResult.data && issueCount) {
                         const lintData = execResult.data as { summary?: { errors: number; warnings: number; suggestions: number } };
                         if (lintData.summary) {
@@ -160,6 +165,12 @@ export class LinterAgent {
                     }
                     if (execResult.diff) {
                         collectedDiffs.push(execResult.diff);
+                        const merged = mergeDiffsForFile(
+                            collectedDiffs.filter(d => d.fileId === execResult.diff!.fileId)
+                        );
+                        if (merged) {
+                            contentOverrides[merged.fileId] = merged.proposedContent;
+                        }
                         if (options.onDiffCreated) options.onDiffCreated(execResult.diff);
                     }
                     currentMessages.push({

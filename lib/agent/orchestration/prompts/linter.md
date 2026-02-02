@@ -42,7 +42,7 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 ```
 
 #### 1b. Equations (editor-specific)
-- **Block equations**: Must use `$$ ... $$` on one continuous line (space after opening `$$` and before closing `$$`; no newlines inside). Fix `\[ ... \]` or other block math to `$$ E = mc^2 $$` style.
+- **Block equations**: Must use `$$ ... $$` on one continuous line (space after opening `$$` and before closing `$$`; no newlines inside). Fix `\[ ... \]` or other block math to `$$ E = mc^2 $$` style. Block equations must have an empty line before and after.
 - **Inline equations**: Must use `$...$` (single dollar before and after)
 
 #### 1c. Alert blocks (editor-specific)
@@ -57,7 +57,7 @@ Ensure markdown documents are error-free, consistently formatted, and follow bes
 
 #### 1d. Source-mode readability (editor-specific)
 - **One sentence per line**: Prose should have one sentence per line (no long continuous lines).
-- **Blank lines before blocks**: Ensure a blank line before block equations, headings, code blocks, alert blocks, and tables.
+- **Blank lines before blocks**: Ensure a blank line before and after block equations; ensure a blank line before headings, code blocks, alert blocks, and tables.
 
 #### 2. Broken Links/Images
 - Check for malformed link syntax

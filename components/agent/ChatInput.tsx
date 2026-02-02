@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Send, Plus, FileText, Link as LinkIcon, X } from "lucide-react";
+import { Send, Plus, FileText, Link as LinkIcon, X, ImageIcon } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -43,6 +43,9 @@ function getChipLabel(doc: RagDocument): string {
         const raw = doc.url ?? doc.name;
         const display = formatUrlForDisplay(raw);
         return display.length > 24 ? display.slice(0, 21) + "…" : display;
+    }
+    if (doc.type === "image") {
+        return doc.name.length > 20 ? doc.name.slice(0, 17) + "…" : doc.name;
     }
     return doc.name.length > 20 ? doc.name.slice(0, 17) + "…" : doc.name;
 }
@@ -134,14 +137,12 @@ export function ChatInput() {
     const editableRef = useRef<HTMLDivElement>(null);
     const lastRangeRef = useRef<Range | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const imageInputRef = useRef<HTMLInputElement>(null);
     const [contentVersion, setContentVersion] = useState(0);
     const [linkDialogOpen, setLinkDialogOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState("");
 
     const hasFile = currentView === "file" && !!activeFileId;
-    const activeFileName = hasFile
-        ? (activeFileId?.split("/").pop() || activeFileId)
-        : null;
 
     const saveSelection = useCallback(() => {
         const sel = window.getSelection();
@@ -236,6 +237,47 @@ export function ChatInput() {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const addImageFromFile = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const dataUrl = reader.result as string;
+                resolve(dataUrl);
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !file.type.startsWith("image/") || !activeChatId) return;
+        try {
+            const content = await addImageFromFile(file);
+            const doc: RagDocument = {
+                id: crypto.randomUUID(),
+                chatId: activeChatId,
+                name: file.name,
+                type: "image",
+                content,
+                createdAt: Date.now(),
+                syncId: generateSyncId(),
+                updatedAt: Date.now(),
+                isDeleted: false,
+                userId: null,
+            };
+            if (editableRef.current) {
+                saveSelection();
+                insertChipAtRange(editableRef.current, doc, lastRangeRef.current);
+                setContentVersion((v) => v + 1);
+            }
+            await addRagDocument(doc);
+        } catch (err) {
+            console.error("Failed to add image:", err);
+        }
+        if (imageInputRef.current) imageInputRef.current.value = "";
+    };
+
     const addLinkFromUrl = async (url: string) => {
         const trimmed = url.trim();
         if (!trimmed || !activeChatId) return;
@@ -297,7 +339,35 @@ export function ChatInput() {
         }
     };
 
-    const handlePaste = (e: React.ClipboardEvent) => {
+    const handlePaste = async (e: React.ClipboardEvent) => {
+        const files = e.clipboardData.files;
+        if (files?.length && files[0].type.startsWith("image/") && activeChatId) {
+            e.preventDefault();
+            try {
+                const content = await addImageFromFile(files[0]);
+                const doc: RagDocument = {
+                    id: crypto.randomUUID(),
+                    chatId: activeChatId,
+                    name: files[0].name || "image.png",
+                    type: "image",
+                    content,
+                    createdAt: Date.now(),
+                    syncId: generateSyncId(),
+                    updatedAt: Date.now(),
+                    isDeleted: false,
+                    userId: null,
+                };
+                if (editableRef.current) {
+                    saveSelection();
+                    insertChipAtRange(editableRef.current, doc, lastRangeRef.current);
+                    setContentVersion((v) => v + 1);
+                }
+                await addRagDocument(doc);
+            } catch (err) {
+                console.error("Failed to add pasted image:", err);
+            }
+            return;
+        }
         const text = e.clipboardData.getData("text/plain");
         if (isPastedUrl(text)) {
             e.preventDefault();
@@ -331,19 +401,6 @@ export function ChatInput() {
 
     return (
         <div className="space-y-2">
-            {hasFile ? (
-                <div className="text-[10px] text-muted-foreground">
-                    Let&apos;s work on{" "}
-                    <span className="font-medium text-foreground bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                        {activeFileName}
-                    </span>
-                </div>
-            ) : (
-                <div className="text-[10px] text-muted-foreground">
-                    Select a file
-                </div>
-            )}
-
             <div
                 className={cn(
                     "relative flex items-center rounded-md border overflow-hidden",
@@ -358,7 +415,15 @@ export function ChatInput() {
                     type="file"
                     ref={fileInputRef}
                     className="hidden"
+                    accept=".md,.txt,.json,.js,.ts,.tsx,text/*"
                     onChange={handleFileUpload}
+                />
+                <input
+                    type="file"
+                    ref={imageInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleImageUpload}
                 />
 
                 <DropdownMenu>
@@ -375,6 +440,10 @@ export function ChatInput() {
                         <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
                             <FileText className="mr-2 h-4 w-4" />
                             <span>Upload Document</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+                            <ImageIcon className="mr-2 h-4 w-4" />
+                            <span>Upload Image</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={handleAddLinkClick}>
                             <LinkIcon className="mr-2 h-4 w-4" />
