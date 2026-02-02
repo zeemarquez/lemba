@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-static';
+export const revalidate = 0;
+
 /**
  * API Route: Fetch URL Content
  * Fetches content from a URL and extracts text for RAG context

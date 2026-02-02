@@ -696,8 +696,8 @@ function getMainOpenAIKey(): string {
 
 function getTrialOpenAIKey(): string {
     const key = typeof window !== 'undefined'
-        ? (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? getElectronEnv('NEXT_PUBLIC_TRIAL_OPENAI_API_KEY'))
-        : (process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY ?? '');
+        ? (process.env.TRIAL_OPENAI_API_KEY ?? getElectronEnv('TRIAL_OPENAI_API_KEY'))
+        : (process.env.TRIAL_OPENAI_API_KEY ?? '');
     return (key ?? '').trim();
 }
 

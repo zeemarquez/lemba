@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('window-maximized', (event, isMaximized) => callback(isMaximized));
   },
 
-  // Expose environment variables (only NEXT_PUBLIC ones for security)
+  // Expose environment variables (limited set for security)
   env: {
     NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID,
     NEXT_PUBLIC_AUTH_HANDLER_URL: process.env.NEXT_PUBLIC_AUTH_HANDLER_URL,
     NEXT_PUBLIC_OPENAI_API_KEY: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-    NEXT_PUBLIC_TRIAL_OPENAI_API_KEY: process.env.NEXT_PUBLIC_TRIAL_OPENAI_API_KEY,
+    TRIAL_OPENAI_API_KEY: process.env.TRIAL_OPENAI_API_KEY,
   },
 
   // Listen for deep links (e.g. for auth callbacks)

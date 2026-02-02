@@ -1,6 +1,6 @@
 Loading environment variables from .env.local...
-Current Hash: 43a278f0d955a6d4a4ac6e152e6b5729a121e381
-Using current version: 0.1.16
+Current Hash: b185f1a5915c9c7baeb067c6ea970aa7fb50a50b
+Using current version: 0.1.17
 Preparing dist/win directory...
 Starting Windows build...
   • electron-builder  version=26.4.0 os=23.6.0
@@ -10,12 +10,3 @@ Starting Windows build...
   • skipped dependencies rebuild  reason=npmRebuild is set to false
   • packaging       platform=win32 arch=x64 electron=40.0.0 appOutDir=dist/win/win-unpacked
   • cannot find path for dependency  name=undefined reference=undefined
-  • updating asar integrity executable resource  executablePath=dist/win/win-unpacked/Modern Markdown Editor.exe
-  • building        target=nsis file=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.exe archs=x64 oneClick=false perMachine=false
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.__uninstaller.exe
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.exe
-  • building block map  blockMapFile=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.exe.blockmap
-  • building        target=portable file=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.exe archs=x64
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.16-Windows-x64.exe
-Updating build history...
-Build complete! Artifacts are in dist/
