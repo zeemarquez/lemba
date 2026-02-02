@@ -302,9 +302,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
           }
         }
         
-        // Recursively check children if they exist
+        // Recursively check children if they exist (node.children may be text or element nodes)
         if ('children' in node && Array.isArray(node.children)) {
-          findHeadingNode(node.children as typeof editor.children, path);
+          findHeadingNode(node.children as unknown as typeof editor.children, path);
         }
       }
     };
