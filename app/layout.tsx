@@ -33,12 +33,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const trialEnabled = Boolean(process.env.TRIAL_OPENAI_API_KEY);
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__TRIAL_OPENAI_AVAILABLE__=${trialEnabled ? 'true' : 'false'};`,
+          }}
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

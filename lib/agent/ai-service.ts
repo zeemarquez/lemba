@@ -679,6 +679,13 @@ const PROVIDER_LABELS: Record<LLMProvider, string> = {
 };
 
 const TRIAL_MODEL = 'gpt-4o';
+const TRIAL_PROXY_KEY = '__TRIAL_OPENAI_PROXY__';
+const TRIAL_BROWSER_FLAG = '__TRIAL_OPENAI_AVAILABLE__';
+
+function isBrowserTrialAvailable(): boolean {
+    if (typeof window === 'undefined') return false;
+    return Boolean((window as unknown as Record<string, unknown>)[TRIAL_BROWSER_FLAG]);
+}
 
 function getElectronEnv(key: string): string | undefined {
     if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: { env?: Record<string, string> } }).electronAPI?.env?.[key]) {
@@ -695,10 +702,12 @@ function getMainOpenAIKey(): string {
 }
 
 function getTrialOpenAIKey(): string {
-    const key = typeof window !== 'undefined'
-        ? (process.env.TRIAL_OPENAI_API_KEY ?? getElectronEnv('TRIAL_OPENAI_API_KEY'))
-        : (process.env.TRIAL_OPENAI_API_KEY ?? '');
-    return (key ?? '').trim();
+    if (typeof window !== 'undefined') {
+        const electronKey = getElectronEnv('TRIAL_OPENAI_API_KEY');
+        if (electronKey) return electronKey.trim();
+        return isBrowserTrialAvailable() ? TRIAL_PROXY_KEY : '';
+    }
+    return (process.env.TRIAL_OPENAI_API_KEY ?? '').trim();
 }
 
 /**
@@ -806,6 +815,9 @@ export async function validateApiKey(provider: LLMProvider, apiKey: string): Pro
     const key = apiKey?.trim();
     if (!key) return false;
     try {
+        if (provider === 'openai' && key === TRIAL_PROXY_KEY) {
+            return true;
+        }
         if (provider === 'openai') {
             const res = await fetch('https://api.openai.com/v1/models', {
                 headers: { 'Authorization': `Bearer ${key}` },
@@ -924,9 +936,11 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
     const { provider, apiKey, model, messages, tools = [], temperature = 0.7, maxTokens = 4096 } = options;
     const useOpenAIFormat = provider === 'openai' || provider === 'google';
     const effectiveModel = provider === 'openai' && isTrialApiKey(apiKey) ? TRIAL_MODEL : model;
+    const isTrialProxy = provider === 'openai' && apiKey === TRIAL_PROXY_KEY;
     const url = provider === 'google'
         ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
         : 'https://api.openai.com/v1/chat/completions';
+    const requestUrl = isTrialProxy ? '/api/trial-openai/chat' : url;
 
     await assertTrialLimit(provider, apiKey);
 
@@ -939,9 +953,13 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
-                const response = await fetch(url, {
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (!isTrialProxy) {
+                    headers['Authorization'] = `Bearer ${apiKey}`;
+                }
+                const response = await fetch(requestUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                    headers,
                     body: JSON.stringify({
                         model: effectiveModel,
                         messages,
@@ -1286,6 +1304,8 @@ export async function sendMessageToAI(
     const openaiCompatibleUrl = provider === 'google'
         ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
         : 'https://api.openai.com/v1/chat/completions';
+    const isTrialProxy = provider === 'openai' && apiKey === TRIAL_PROXY_KEY;
+    const requestUrl = isTrialProxy ? '/api/trial-openai/chat' : openaiCompatibleUrl;
 
     const useOpenAIFormat = provider === 'openai' || provider === 'google';
     type MessageWithTools = { content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
@@ -1296,12 +1316,13 @@ export async function sendMessageToAI(
 
         if (useOpenAIFormat) {
             // OpenAI and Google (OpenAI-compatible) use same request shape
-            const response = await fetch(openaiCompatibleUrl, {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (!isTrialProxy) {
+                headers['Authorization'] = `Bearer ${apiKey}`;
+            }
+            const response = await fetch(requestUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
+                headers,
                 body: JSON.stringify({
                     model,
                     messages: chatMessages,

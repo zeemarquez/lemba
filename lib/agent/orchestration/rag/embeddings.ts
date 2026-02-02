@@ -5,6 +5,14 @@
 
 import { getTrialUserId, checkTrialLimit, addTrialTokenUsage } from '../../trial-usage';
 
+const TRIAL_PROXY_KEY = '__TRIAL_OPENAI_PROXY__';
+const TRIAL_BROWSER_FLAG = '__TRIAL_OPENAI_AVAILABLE__';
+
+function isBrowserTrialAvailable(): boolean {
+    if (typeof window === 'undefined') return false;
+    return Boolean((window as unknown as Record<string, unknown>)[TRIAL_BROWSER_FLAG]);
+}
+
 function getElectronEnv(key: string): string | undefined {
     if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: { env?: Record<string, string> } }).electronAPI?.env?.[key]) {
         return (window as unknown as { electronAPI: { env: Record<string, string> } }).electronAPI.env[key];
@@ -20,10 +28,12 @@ function getMainOpenAIKey(): string {
 }
 
 function getTrialOpenAIKey(): string {
-    const key = typeof window !== 'undefined'
-        ? (process.env.TRIAL_OPENAI_API_KEY ?? getElectronEnv('TRIAL_OPENAI_API_KEY'))
-        : (process.env.TRIAL_OPENAI_API_KEY ?? '');
-    return (key ?? '').trim();
+    if (typeof window !== 'undefined') {
+        const electronKey = getElectronEnv('TRIAL_OPENAI_API_KEY');
+        if (electronKey) return electronKey.trim();
+        return isBrowserTrialAvailable() ? TRIAL_PROXY_KEY : '';
+    }
+    return (process.env.TRIAL_OPENAI_API_KEY ?? '').trim();
 }
 
 function isTrialApiKey(apiKey: string): boolean {
@@ -168,15 +178,17 @@ export class EmbeddingService {
      */
     private async fetchEmbeddings(texts: string[]): Promise<number[][]> {
         const apiKey = this.getApiKey();
+        const useTrialProxy = apiKey === TRIAL_PROXY_KEY;
 
         await assertTrialLimitEmbeddings(apiKey);
 
-        const response = await fetch('https://api.openai.com/v1/embeddings', {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (!useTrialProxy) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+        const response = await fetch(useTrialProxy ? '/api/trial-openai/embeddings' : 'https://api.openai.com/v1/embeddings', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
+            headers,
             body: JSON.stringify({
                 model: this.options.model,
                 input: texts,
