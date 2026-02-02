@@ -1631,6 +1631,22 @@ export const useStore = create<AppState>()(
                     customFonts: currentState.customFonts,
                     fontsLoaded: currentState.fontsLoaded,
                 };
+                // Ensure persisted array/object shapes are valid
+                if (!Array.isArray(merged.openTabs)) {
+                    merged.openTabs = [];
+                }
+                if (!merged.chats || typeof merged.chats !== 'object') {
+                    merged.chats = {};
+                }
+                if (!Array.isArray(merged.agentMessages)) {
+                    merged.agentMessages = [];
+                }
+                if (!merged.pendingDiffs || typeof merged.pendingDiffs !== 'object') {
+                    merged.pendingDiffs = {};
+                }
+                if (!Array.isArray(merged.agentMentionedFiles)) {
+                    merged.agentMentionedFiles = [];
+                }
                 // Migrate old single API key to per-provider keys
                 if (!merged.agentApiKeys || typeof merged.agentApiKeys !== 'object') {
                     merged.agentApiKeys = { openai: '', anthropic: '', google: '' };
