@@ -264,6 +264,8 @@ function escapeTypst(text: string): string {
         .replace(/#/g, '\\#')
         .replace(/\[/g, '\\[')
         .replace(/\]/g, '\\]')
+        .replace(/\{/g, '\\{')
+        .replace(/\}/g, '\\}')
         .replace(/@/g, '\\@')
         .replace(/=/g, '\\=');
 }

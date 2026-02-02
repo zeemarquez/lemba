@@ -22,7 +22,7 @@ export function InlineDiffOverlay({ fileId }: InlineDiffOverlayProps) {
         return null;
     }
 
-    // Use WYSIWYG diff view for editing/viewing modes, source diff view for source mode
+    // Source mode: raw markdown diff. Editing mode: WYSIWYG preview of same diff.
     if (editorViewMode !== 'source') {
         return <WysiwygDiffOverlay diff={mergedDiff} />;
     }

@@ -283,6 +283,8 @@ function escapeTypst(text: string): string {
         .replace(/#/g, '\\#')
         .replace(/\[/g, '\\[')
         .replace(/\]/g, '\\]')
+        .replace(/\{/g, '\\{')
+        .replace(/\}/g, '\\}')
         .replace(/@/g, '\\@')
         .replace(/=/g, '\\=');
 }
@@ -837,11 +839,14 @@ function convertLatexToTypst(latex: string): string {
     if (!latex) return '';
     try {
         const result = texToTypst(latex);
-        return result.value || latex;
+        let value = result.value || latex;
+        // Prevent unclosed delimiter: escape any $ in converted math so our $ ... $ wrapper stays balanced
+        if (value.includes('$')) value = value.replace(/\$/g, '\\$');
+        return value;
     } catch (error) {
         console.error('[Typst] Failed to convert LaTeX to Typst:', error);
-        // Return the original if conversion fails
-        return latex;
+        // Return the original if conversion fails (escape $ so it doesn't break outer math delimiters)
+        return latex.replace(/\$/g, '\\$');
     }
 }
 
