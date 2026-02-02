@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
+const isVercel = process.env.VERCEL === '1';
+export const dynamic = 'force-static';
 export const revalidate = 0;
 
 export async function POST(request: Request) {
+  if (!isVercel) {
+    return NextResponse.json({ error: 'Trial proxy unavailable in static builds' }, { status: 404 });
+  }
   const apiKey = process.env.TRIAL_OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'Trial OpenAI API key not configured' }, { status: 500 });

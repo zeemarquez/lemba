@@ -19,6 +19,7 @@ import {
   updateCacheFromMarkdown,
   isCacheValid 
 } from '@/lib/markdown-processor';
+import { mergeFrontmatter, parseFrontmatter, type FrontmatterData } from '@/lib/frontmatter';
 
 interface PlateEditorProps {
   content: string;
@@ -31,9 +32,14 @@ const ASYNC_LOAD_THRESHOLD = 5000;
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode, setActiveHeadingId } = useStore();
   const mounted = useMounted();
+
+  const { data: frontmatterData, content: bodyContent } = useMemo(
+    () => parseFrontmatter(content),
+    [content]
+  );
   
   // Loading state for large documents
-  const [isLoading, setIsLoading] = useState(() => content.length > ASYNC_LOAD_THRESHOLD);
+  const [isLoading, setIsLoading] = useState(() => bodyContent.length > ASYNC_LOAD_THRESHOLD);
   const [loadProgress, setLoadProgress] = useState(0);
 
   // Use a ref to track if we're currently updating from Plate to avoid infinite loops
@@ -49,21 +55,23 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   // Refs to store latest values for debounced function
   const editorRef = useRef<any>(null);
   const contentRef = useRef(content);
+  const frontmatterRef = useRef<FrontmatterData>({});
   const onChangeRef = useRef(onChange);
 
   // Update refs when values change
   useEffect(() => {
     contentRef.current = content;
+    frontmatterRef.current = frontmatterData;
     onChangeRef.current = onChange;
-  }, [content, onChange]);
+  }, [content, bodyContent, frontmatterData, onChange]);
 
   // Compute initialValue - use placeholder for large docs, full parse for small docs
   // This prevents blocking the main thread on startup
   const initialValue = useMemo(() => {
     // For small documents, parse synchronously (fast enough)
-    if (content.length <= ASYNC_LOAD_THRESHOLD) {
-      const { nodes } = processMarkdownDiff(content);
-      lastDeserializedContent.current = content;
+    if (bodyContent.length <= ASYNC_LOAD_THRESHOLD) {
+      const { nodes } = processMarkdownDiff(bodyContent);
+      lastDeserializedContent.current = bodyContent;
       lastSetNodesRef.current = nodes;
       initialLoadComplete.current = true;
       return nodes;
@@ -86,19 +94,19 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   // Async loading for large documents - runs after mount to avoid blocking
   useEffect(() => {
     // Skip if already loaded or small document
-    if (initialLoadComplete.current || content.length <= ASYNC_LOAD_THRESHOLD) {
+    if (initialLoadComplete.current || bodyContent.length <= ASYNC_LOAD_THRESHOLD) {
       return;
     }
 
     let cancelled = false;
     
     const loadContentAsync = async () => {
-      console.log('[PlateEditor] Starting async content load', { contentLength: content.length });
+      console.log('[PlateEditor] Starting async content load', { contentLength: bodyContent.length });
       const startTime = performance.now();
       
       try {
         // Use chunked processing that yields to main thread
-        const nodes = await processMarkdownChunked(content, (progress) => {
+        const nodes = await processMarkdownChunked(bodyContent, (progress) => {
           if (!cancelled) {
             setLoadProgress(Math.round(progress));
           }
@@ -113,7 +121,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         
         // Set the editor value with loaded content
         editor.tf.setValue(nodes);
-        lastDeserializedContent.current = content;
+        lastDeserializedContent.current = bodyContent;
         lastSetNodesRef.current = nodes;
         initialLoadComplete.current = true;
         setIsLoading(false);
@@ -121,9 +129,9 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         console.error('[PlateEditor] Async load failed:', error);
         if (!cancelled) {
           // Fallback to sync load if async fails
-          const { nodes } = processMarkdownDiff(content);
+          const { nodes } = processMarkdownDiff(bodyContent);
           editor.tf.setValue(nodes);
-          lastDeserializedContent.current = content;
+          lastDeserializedContent.current = bodyContent;
           lastSetNodesRef.current = nodes;
           initialLoadComplete.current = true;
           setIsLoading(false);
@@ -138,7 +146,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [content, editor]); // Only run on mount (content won't change during initial load)
+  }, [bodyContent, editor]); // Only run on mount (content won't change during initial load)
 
   // Create debounced serialization function using refs to always use latest values
   const debouncedSerialize = useMemo(
@@ -147,6 +155,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // Use refs to get latest values at execution time
         const currentEditor = editorRef.current;
         const currentContent = contentRef.current;
+        const currentFrontmatter = frontmatterRef.current;
         const currentOnChange = onChangeRef.current;
 
         if (!currentEditor) return;
@@ -154,11 +163,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // Serialize and postprocess to normalize block equation format
         const rawMd = currentEditor.api.markdown.serialize({ value });
         const md = postprocessMathDelimiters(rawMd);
-        if (md !== currentContent) {
+        const fullMd = mergeFrontmatter(md, currentFrontmatter);
+        if (fullMd !== currentContent) {
           // Update cache with the serialized content and current nodes
           // This keeps the cache in sync during WYSIWYG editing
           updateCacheFromMarkdown(md, value);
-          currentOnChange(md);
+          currentOnChange(fullMd);
         }
       }, 300),
     [] // Empty deps - function uses refs for latest values
@@ -185,7 +195,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     }
 
     // Check if cache is already valid for this content (fast hash comparison)
-    const cacheValid = isCacheValid(content);
+    const cacheValid = isCacheValid(bodyContent);
     
     // Only deserialize when switching FROM source mode or when content changed
     // Note: We already checked editorViewMode !== 'source' above, so this is just checking prevEditorViewMode
@@ -200,7 +210,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
     if (!isUpdatingFromPlate.current) {
       // Capture values at scheduling time to avoid stale closures
-      const contentToDeserialize = content;
+      const contentToDeserialize = bodyContent;
 
       // Defer deserialization to prevent blocking the main thread
       // Use requestIdleCallback if available for better performance, otherwise setTimeout
@@ -253,7 +263,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     } else {
       prevEditorViewMode.current = editorViewMode;
     }
-  }, [content, editor, editorViewMode, isLoading]);
+  }, [bodyContent, editor, editorViewMode, isLoading]);
 
   // Listen for navigation events from the outline (for WYSIWYG mode)
   const handleNavigateToLine = useCallback((event: CustomEvent<{ line: number }>) => {
@@ -261,7 +271,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     if (editorViewMode === 'source') return;
     
     const { line } = event.detail;
-    const lines = content.split('\n');
+    const lines = bodyContent.split('\n');
     
     // Find the heading text at the target line
     const targetLine = lines[line - 1];
@@ -306,7 +316,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     };
     
     findHeadingNode(editor.children);
-  }, [editorViewMode, content, editor]);
+  }, [editorViewMode, bodyContent, editor]);
 
   useEffect(() => {
     window.addEventListener('navigate-to-line', handleNavigateToLine as EventListener);
@@ -317,12 +327,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   // Helper function to find heading in markdown content and set active heading ID
   const findHeadingInMarkdown = useCallback((headingText: string, headingType: string) => {
-    if (!content) {
+    if (!bodyContent) {
       setActiveHeadingId(null);
       return;
     }
 
-    const lines = content.split('\n');
+    const lines = bodyContent.split('\n');
     let inCodeBlock = false;
 
     // Determine the expected number of # symbols
@@ -353,7 +363,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
     // Heading not found
     setActiveHeadingId(null);
-  }, [content, setActiveHeadingId]);
+  }, [bodyContent, setActiveHeadingId]);
 
   // Function to find the active heading based on cursor position in Plate editor
   const findActiveHeadingFromPlate = useCallback(() => {
@@ -586,10 +596,11 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
             }}
           >
             <SourceEditor
-              content={content}
+              content={bodyContent}
               onChange={(val) => {
                 isUpdatingFromPlate.current = false; // Source edit
-                onChange(val);
+                const fullMd = mergeFrontmatter(val, frontmatterRef.current);
+                onChange(fullMd);
               }}
             />
           </div>

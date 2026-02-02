@@ -2,6 +2,7 @@ import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { texToTypst } from 'tex-to-typst';
 import { escapeSvgForTypst, colorToHex, DEFAULT_ALERT_ICONS } from './lucide-svg';
+import { stripFrontmatter } from '@/lib/frontmatter';
 
 export interface MarkdownToTypstOptions {
     tables?: {
@@ -83,12 +84,14 @@ export interface MarkdownToTypstOptions {
     };
     /** Resolved Lucide icon SVGs (icon name -> SVG string) for custom alert icons */
     resolvedLucideSvgs?: Record<string, string>;
-}
-
-// Strip frontmatter from markdown content
-function stripFrontmatter(content: string): string {
-    const frontmatterRegex = /^---\n[\s\S]*?\n---\n?/;
-    return content.replace(frontmatterRegex, '');
+    /** Document title for title placeholders */
+    title?: string;
+    /** Variables from frontmatter for variable placeholders */
+    variables?: Record<string, string>;
+    /** Page number offset for page placeholder */
+    pageNumberOffset?: number;
+    /** True when already inside a Typst context (header/footer) */
+    insideContext?: boolean;
 }
 
 // Track figure numbers globally within a document compilation
@@ -120,6 +123,142 @@ function parseTokens(tokens: any[], options: MarkdownToTypstOptions = {}): strin
     for (const token of tokens) {
         output += processToken(token, options);
     }
+    return output;
+}
+
+const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
+
+type PlaceholderParseResult = {
+    placeholderType: 'page' | 'totalPages' | 'date' | 'title' | 'variable';
+    format?: string;
+    variableName?: string;
+};
+
+function parsePlaceholderToken(token: string): PlaceholderParseResult | null {
+    const trimmed = token.trim();
+    if (!trimmed) return null;
+
+    if (trimmed === 'page') {
+        return { placeholderType: 'page' };
+    }
+    if (trimmed.startsWith('page:')) {
+        return { placeholderType: 'page', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+    }
+    if (trimmed === 'totalPages') {
+        return { placeholderType: 'totalPages' };
+    }
+    if (trimmed.startsWith('totalPages:')) {
+        return { placeholderType: 'totalPages', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+    }
+    if (trimmed === 'date') {
+        return { placeholderType: 'date' };
+    }
+    if (trimmed.startsWith('date:')) {
+        return { placeholderType: 'date', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+    }
+    if (trimmed === 'title') {
+        return { placeholderType: 'title' };
+    }
+    if (trimmed.startsWith('var:') || trimmed.startsWith('variable:')) {
+        const parts = trimmed.split(':');
+        const variableName = parts.slice(1).join(':').trim();
+        if (!variableName) return null;
+        return { placeholderType: 'variable', variableName };
+    }
+
+    return null;
+}
+
+function formatToTypstNumbering(format: string | undefined): string {
+    switch (format) {
+        case 'lower-roman': return '"i"';
+        case 'upper-roman': return '"I"';
+        case 'lower-alpha': return '"a"';
+        case 'upper-alpha': return '"A"';
+        case 'decimal':
+        default: return '"1"';
+    }
+}
+
+function formatDateTypst(format: string | undefined): string {
+    switch (format) {
+        case 'iso':
+            return '"[year]-[month padding:zero]-[day padding:zero]"';
+        case 'long':
+            return '"[month repr:long] [day], [year]"';
+        case 'short':
+            return '"[month padding:none]/[day padding:none]/[year repr:last_two]"';
+        case 'default':
+        default:
+            return '"[month padding:zero]/[day padding:zero]/[year]"';
+    }
+}
+
+function placeholderToTypst(parsed: PlaceholderParseResult, options: MarkdownToTypstOptions): string {
+    const needsContext = parsed.placeholderType === 'page' || parsed.placeholderType === 'totalPages' || parsed.placeholderType === 'date';
+    const wrapContext = needsContext && !options.insideContext;
+    const offset = options.pageNumberOffset || 0;
+
+    let content = '';
+    if (parsed.placeholderType === 'page') {
+        const numbering = formatToTypstNumbering(parsed.format);
+        if (offset !== 0) {
+            content = `#{ let p = counter(page).get().first() + ${offset}; if p >= 1 { numbering(${numbering}, p) } }`;
+        } else {
+            content = `#counter(page).display(${numbering})`;
+        }
+    } else if (parsed.placeholderType === 'totalPages') {
+        const numbering = formatToTypstNumbering(parsed.format);
+        content = `#numbering(${numbering}, counter(page).final().first())`;
+    } else if (parsed.placeholderType === 'date') {
+        const dateFormat = formatDateTypst(parsed.format);
+        content = `#datetime.today().display(${dateFormat})`;
+    } else if (parsed.placeholderType === 'title') {
+        content = processTextWithEmojis(options.title || '');
+    } else if (parsed.placeholderType === 'variable') {
+        const value = parsed.variableName ? options.variables?.[parsed.variableName] || '' : '';
+        content = processTextWithEmojis(value);
+    }
+
+    if (!wrapContext) {
+        return content;
+    }
+
+    const expr = content.startsWith('#') ? content.slice(1) : content;
+    return `#context ${expr}`;
+}
+
+function processTextWithPlaceholders(text: string, options: MarkdownToTypstOptions): string {
+    if (!text) return '';
+
+    let output = '';
+    let lastIndex = 0;
+    PLACEHOLDER_REGEX.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = PLACEHOLDER_REGEX.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const rawToken = match[1];
+
+        if (start > lastIndex) {
+            output += processTextWithEmojis(text.slice(lastIndex, start));
+        }
+
+        const parsed = parsePlaceholderToken(rawToken);
+        if (parsed) {
+            output += placeholderToTypst(parsed, options);
+        } else {
+            output += processTextWithEmojis(match[0]);
+        }
+
+        lastIndex = end;
+    }
+
+    if (lastIndex < text.length) {
+        output += processTextWithEmojis(text.slice(lastIndex));
+    }
+
     return output;
 }
 
@@ -347,11 +486,11 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             return '';
         case 'heading':
             let prefix = '='.repeat(token.depth);
-            return `${prefix} ${parseInline(token.tokens)}\n\n`;
+            return `${prefix} ${parseInline(token.tokens, options)}\n\n`;
         case 'paragraph':
-            return `${parseInline(token.tokens)}\n\n`;
+            return `${parseInline(token.tokens, options)}\n\n`;
         case 'text':
-            return parseInline(token.tokens || []);
+            return parseInline(token.tokens || [], options);
         case 'list':
             const listType = token.ordered ? '+' : '-';
             return token.items.map((item: any) => {
@@ -583,7 +722,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
 
             token.header.forEach((cell: any) => {
-                const cellContent = parseInline(cell.tokens);
+                const cellContent = parseInline(cell.tokens, options);
                 let formattedContent = cellContent;
 
                 // Count lines in this cell: explicit newlines + estimated wrapping
@@ -612,7 +751,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             });
             token.rows.forEach((row: any) => {
                 row.forEach((cell: any) => {
-                    const cellContent = parseInline(cell.tokens);
+                    const cellContent = parseInline(cell.tokens, options);
                     let formattedContent = cellContent;
 
                     // Count lines in this cell: explicit newlines + estimated wrapping
@@ -850,7 +989,7 @@ function convertLatexToTypst(latex: string): string {
     }
 }
 
-function parseInline(tokens: any[]): string {
+function parseInline(tokens: any[], options: MarkdownToTypstOptions): string {
     if (!tokens) return '';
     let output = '';
     for (let i = 0; i < tokens.length; i++) {
@@ -858,18 +997,18 @@ function parseInline(tokens: any[]): string {
         const nextToken = tokens[i + 1];
         switch (token.type) {
             case 'text':
-                output += processTextWithEmojis(token.text);
+                output += processTextWithPlaceholders(token.text, options);
                 break;
             case 'strong':
                 // In Typst, *bold* followed immediately by a word character causes "unclosed delimiter"
                 // We need to add #[] (empty content) to separate the closing * from the following text
                 const needsSeparator = nextToken?.type === 'text' && /^[a-zA-Z0-9]/.test(nextToken.text || '');
-                output += `*${parseInline(token.tokens)}*${needsSeparator ? '#[]' : ''}`;
+                output += `*${parseInline(token.tokens, options)}*${needsSeparator ? '#[]' : ''}`;
                 break;
             case 'em':
                 // Same issue applies to italic with underscore
                 const needsItalicSeparator = nextToken?.type === 'text' && /^[a-zA-Z0-9]/.test(nextToken.text || '');
-                output += `_${parseInline(token.tokens)}_${needsItalicSeparator ? '#[]' : ''}`;
+                output += `_${parseInline(token.tokens, options)}_${needsItalicSeparator ? '#[]' : ''}`;
                 break;
             case 'codespan':
                 output += `\`${token.text.replace(/`/g, '\\`')}\``;
@@ -878,7 +1017,7 @@ function parseInline(tokens: any[]): string {
                 output += ' \n';
                 break;
             case 'link':
-                output += `#link("${escapeTypstString(token.href)}")[${parseInline(token.tokens)}]`;
+                output += `#link("${escapeTypstString(token.href)}")[${parseInline(token.tokens, options)}]`;
                 break;
             case 'image':
                 // Inline images in typst are just #image calls
@@ -901,10 +1040,10 @@ function parseInline(tokens: any[]): string {
                 }
                 break;
             case 'escape':
-                output += processTextWithEmojis(token.text);
+                output += processTextWithPlaceholders(token.text, options);
                 break;
             case 'del':
-                output += `#strike[${parseInline(token.tokens)}]`;
+                output += `#strike[${parseInline(token.tokens, options)}]`;
                 break;
             default:
                 if (token.raw) output += processTextWithEmojis(token.raw);

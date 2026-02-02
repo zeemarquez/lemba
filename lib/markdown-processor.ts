@@ -8,9 +8,11 @@
  * 3. Differential processing to only re-process changed sections
  */
 
+import { KEYS } from 'platejs';
 import { createPlateEditor } from 'platejs/react';
 import { EditorKit } from '@/components/plate-editor/editor-kit';
-import { preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
+import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
+import { parsePlaceholderToken, preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 
 // Type for cached chunk data
 interface CachedChunk {
@@ -35,6 +37,96 @@ function hashString(str: string): string {
         hash = hash & hash; // Convert to 32bit integer
     }
     return hash.toString(36);
+}
+
+const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
+
+function splitTextWithPlaceholders(value: string): Array<{ type: 'text'; text: string } | ({ type: 'placeholder' } & Record<string, unknown>)> {
+    const parts: Array<{ type: 'text'; text: string } | ({ type: 'placeholder' } & Record<string, unknown>)> = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    PLACEHOLDER_REGEX.lastIndex = 0;
+    while ((match = PLACEHOLDER_REGEX.exec(value)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const rawToken = match[1];
+
+        if (start > lastIndex) {
+            parts.push({ type: 'text', text: value.slice(lastIndex, start) });
+        }
+
+        const parsed = parsePlaceholderToken(rawToken);
+        if (parsed) {
+            parts.push({ type: 'placeholder', ...parsed });
+        } else {
+            parts.push({ type: 'text', text: match[0] });
+        }
+
+        lastIndex = end;
+    }
+
+    if (lastIndex < value.length) {
+        parts.push({ type: 'text', text: value.slice(lastIndex) });
+    }
+
+    return parts;
+}
+
+function normalizePlaceholdersInNodes(nodes: any[], inCodeBlock = false): any[] {
+    const normalized: any[] = [];
+
+    for (const node of nodes) {
+        const transformed = normalizePlaceholdersInNode(node, inCodeBlock);
+        if (Array.isArray(transformed)) {
+            normalized.push(...transformed);
+        } else {
+            normalized.push(transformed);
+        }
+    }
+
+    return normalized;
+}
+
+function normalizePlaceholdersInNode(node: any, inCodeBlock: boolean): any | any[] {
+    if (!node || typeof node !== 'object') return node;
+
+    if (node.type === KEY_PLACEHOLDER) {
+        return node;
+    }
+
+    const isCodeContext = inCodeBlock || node.type === KEYS.codeBlock || node.type === KEYS.codeLine;
+
+    if (typeof node.text === 'string') {
+        if (isCodeContext || node.code) {
+            return node;
+        }
+
+        const parts = splitTextWithPlaceholders(node.text);
+        if (parts.length === 1 && parts[0].type === 'text') {
+            return node;
+        }
+
+        const { text: _text, ...marks } = node;
+        return parts.map((part) => {
+            if (part.type === 'text') {
+                return { ...marks, text: part.text };
+            }
+            const { type: _type, ...parsed } = part;
+            return {
+                type: KEY_PLACEHOLDER,
+                children: [{ text: '' }],
+                ...parsed,
+            };
+        });
+    }
+
+    if (Array.isArray(node.children)) {
+        const children = normalizePlaceholdersInNodes(node.children, isCodeContext);
+        return { ...node, children };
+    }
+
+    return node;
 }
 
 // Split markdown into semantic chunks (by headers or significant blocks)
@@ -92,7 +184,7 @@ function deserializeChunk(chunk: string, tempEditor: any): any[] {
     try {
         const preprocessed = preprocessMathDelimiters(chunk);
         const nodes = tempEditor.api.markdown.deserialize(preprocessed);
-        return nodes;
+        return normalizePlaceholdersInNodes(nodes);
     } catch (e) {
         console.error('Error deserializing chunk:', e);
         // Return a simple paragraph with the raw text on error

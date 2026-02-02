@@ -17,7 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/plate-ui/input";
-import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/components/export/ExportSidebar";
+import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/lib/frontmatter";
 import { useCustomFonts } from "@/hooks/use-custom-fonts";
 
 // Helper to filter tree

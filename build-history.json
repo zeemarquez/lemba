@@ -1,12 +1,12 @@
 {
     "win": {
-        "hash": "b185f1a5915c9c7baeb067c6ea970aa7fb50a50b",
-        "version": "0.1.17",
-        "date": "2026-02-02 14:40:19"
+        "hash": "f83f9051e9be2bd8c619736f7c927eede361c513",
+        "version": "0.1.18",
+        "date": "2026-02-02 16:03:35"
     },
     "mac": {
-        "hash": "b185f1a5915c9c7baeb067c6ea970aa7fb50a50b",
-        "version": "0.1.17",
-        "date": "2026-02-02 15:16:51"
+        "hash": "f83f9051e9be2bd8c619736f7c927eede361c513",
+        "version": "0.1.18",
+        "date": "2026-02-02 16:11:07"
     }
 }

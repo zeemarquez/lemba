@@ -17,58 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/plate-ui/input";
-
-// Helper to parse frontmatter from markdown content
-export function parseVariablesFromFrontmatter(content: string): Record<string, string> {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-    const match = content.match(frontmatterRegex);
-    if (!match) return {};
-
-    const frontmatter = match[1];
-    const variables: Record<string, string> = {};
-
-    // Parse YAML-like key: value pairs
-    const lines = frontmatter.split('\n');
-    for (const line of lines) {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex > 0) {
-            const key = line.slice(0, colonIndex).trim();
-            const value = line.slice(colonIndex + 1).trim();
-            // Remove quotes if present
-            variables[key] = value.replace(/^["']|["']$/g, '');
-        }
-    }
-
-    return variables;
-}
-
-// Helper to update frontmatter with variable values
-export function updateFrontmatterVariables(content: string, variables: Record<string, string>): string {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-
-    // Build new frontmatter content
-    const entries = Object.entries(variables).filter(([_, v]) => v.trim() !== '');
-    if (entries.length === 0) {
-        // Remove frontmatter if no variables
-        return content.replace(frontmatterRegex, '');
-    }
-
-    const newFrontmatter = entries.map(([key, value]) => {
-        // Quote values that contain special characters
-        const needsQuotes = /[:#\[\]{}|>&*!?]/.test(value) || value.includes('\n');
-        return `${key}: ${needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value}`;
-    }).join('\n');
-
-    const frontmatterBlock = `---\n${newFrontmatter}\n---\n`;
-
-    if (frontmatterRegex.test(content)) {
-        // Replace existing frontmatter
-        return content.replace(frontmatterRegex, frontmatterBlock);
-    } else {
-        // Add frontmatter at the beginning
-        return frontmatterBlock + content;
-    }
-}
+import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/lib/frontmatter";
 
 // Helper to filter tree
 const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] => {
