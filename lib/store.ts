@@ -1099,6 +1099,7 @@ export const useStore = create<AppState>()(
                     });
                     const userMessage = createMessage('user', visibleContent, [], undefined, fullContent);
                     const currentChatId = get().activeChatId;
+                    const ragDocsToClear = state.ragDocuments;
                     set((s) => {
                         const nextMessages = [...s.agentMessages, userMessage];
                         const updates: Partial<AppState> = {
@@ -1107,6 +1108,7 @@ export const useStore = create<AppState>()(
                             agentLoading: true,
                             agentCurrentStep: null,
                             agentError: null,
+                            ragDocuments: [],
                         };
                         if (currentChatId && s.chats[currentChatId]) {
                             const chat = s.chats[currentChatId];
@@ -1125,6 +1127,9 @@ export const useStore = create<AppState>()(
                         }
                         return updates;
                     });
+                    if (ragDocsToClear.length > 0) {
+                        await Promise.all(ragDocsToClear.map((d) => browserStorage.deleteRagDocument(d.id)));
+                    }
 
                     try {
                         const state = get();
