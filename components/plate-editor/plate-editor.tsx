@@ -29,6 +29,9 @@ interface PlateEditorProps {
 // Threshold for using async loading (characters)
 const ASYNC_LOAD_THRESHOLD = 5000;
 
+// Safe default value so we never pass undefined to usePlateEditor (avoids "undefined is not iterable" in platejs)
+const DEFAULT_EDITOR_VALUE = [{ type: 'p', children: [{ text: '' }] }];
+
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode, setActiveHeadingId } = useStore();
   const mounted = useMounted();
@@ -65,61 +68,56 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     onChangeRef.current = onChange;
   }, [content, bodyContent, frontmatterData, onChange]);
 
-  // Compute initialValue - use placeholder for large docs, full parse for small docs
-  // This prevents blocking the main thread on startup
-  const initialValue = useMemo(() => {
-    // For small documents, parse synchronously (fast enough)
-    if (bodyContent.length <= ASYNC_LOAD_THRESHOLD) {
-      const { nodes } = processMarkdownDiff(bodyContent);
-      lastDeserializedContent.current = bodyContent;
-      lastSetNodesRef.current = nodes;
-      initialLoadComplete.current = true;
-      return nodes;
-    }
-    
-    // For large documents, start with a loading placeholder
-    // Actual content will be loaded asynchronously after mount
-    return [{ type: 'p', children: [{ text: '' }] }];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps - only compute once on mount
+  // Always use a safe placeholder for initial render. Never call processMarkdownDiff here:
+  // - It triggers createTempEditor() which uses EditorKit; in some bundle orders EditorKit
+  //   can be undefined during first paint, causing "undefined is not iterable" in platejs.
+  // - Real content is applied in useEffect after mount (see effect below).
+  const initialValue = useMemo(() => DEFAULT_EDITOR_VALUE, []);
 
   const editor = usePlateEditor({
-    plugins: EditorKit,
-    value: initialValue,
+    plugins: Array.isArray(EditorKit) ? EditorKit : [],
+    value: Array.isArray(initialValue) ? initialValue : DEFAULT_EDITOR_VALUE,
   });
 
   // Update editor ref
   editorRef.current = editor;
 
-  // Async loading for large documents - runs after mount to avoid blocking
+  // Load real content after mount (never during first render - avoids "undefined is not iterable" in platejs)
   useEffect(() => {
-    // Skip if already loaded or small document
-    if (initialLoadComplete.current || bodyContent.length <= ASYNC_LOAD_THRESHOLD) {
+    if (initialLoadComplete.current) return;
+
+    const isSmallDoc = bodyContent.length <= ASYNC_LOAD_THRESHOLD;
+
+    if (isSmallDoc) {
+      // Small doc: sync parse after mount so createTempEditor runs outside React render
+      try {
+        const { nodes } = processMarkdownDiff(bodyContent);
+        if (Array.isArray(nodes) && nodes.length > 0) {
+          editor.tf.setValue(nodes);
+          lastSetNodesRef.current = nodes;
+        }
+        lastDeserializedContent.current = bodyContent;
+        initialLoadComplete.current = true;
+        setIsLoading(false);
+      } catch (e) {
+        console.error('[PlateEditor] Sync load failed:', e);
+        initialLoadComplete.current = true;
+        setIsLoading(false);
+      }
       return;
     }
 
+    // Large doc: async chunked load
     let cancelled = false;
-    
     const loadContentAsync = async () => {
       console.log('[PlateEditor] Starting async content load', { contentLength: bodyContent.length });
       const startTime = performance.now();
-      
       try {
-        // Use chunked processing that yields to main thread
         const nodes = await processMarkdownChunked(bodyContent, (progress) => {
-          if (!cancelled) {
-            setLoadProgress(Math.round(progress));
-          }
+          if (!cancelled) setLoadProgress(Math.round(progress));
         });
-        
         if (cancelled) return;
-        
-        console.log('[PlateEditor] Async load complete', { 
-          time: performance.now() - startTime,
-          nodeCount: nodes.length 
-        });
-        
-        // Set the editor value with loaded content
+        console.log('[PlateEditor] Async load complete', { time: performance.now() - startTime, nodeCount: nodes.length });
         editor.tf.setValue(nodes);
         lastDeserializedContent.current = bodyContent;
         lastSetNodesRef.current = nodes;
@@ -128,9 +126,8 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       } catch (error) {
         console.error('[PlateEditor] Async load failed:', error);
         if (!cancelled) {
-          // Fallback to sync load if async fails
           const { nodes } = processMarkdownDiff(bodyContent);
-          editor.tf.setValue(nodes);
+          editor.tf.setValue(Array.isArray(nodes) ? nodes : DEFAULT_EDITOR_VALUE);
           lastDeserializedContent.current = bodyContent;
           lastSetNodesRef.current = nodes;
           initialLoadComplete.current = true;
@@ -138,15 +135,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         }
       }
     };
-
-    // Start loading after a brief delay to let the UI render first
     const timeoutId = setTimeout(loadContentAsync, 50);
-    
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [bodyContent, editor]); // Only run on mount (content won't change during initial load)
+  }, [bodyContent, editor]);
 
   // Create debounced serialization function using refs to always use latest values
   const debouncedSerialize = useMemo(

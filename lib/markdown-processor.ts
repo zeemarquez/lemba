@@ -176,9 +176,11 @@ function splitIntoChunks(markdown: string): string[] {
 // The main cache instance
 let contentCache: ContentCache | null = null;
 
-// Create a temporary editor for deserialization
+// Create a temporary editor for deserialization.
+// Guard EditorKit so we never pass undefined to createPlateEditor (avoids "undefined is not iterable" in platejs).
 function createTempEditor() {
-    return createPlateEditor({ plugins: EditorKit });
+    const plugins = Array.isArray(EditorKit) ? EditorKit : [];
+    return createPlateEditor({ plugins });
 }
 
 /**
