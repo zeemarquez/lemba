@@ -73,7 +73,11 @@ function splitTextWithPlaceholders(value: string): Array<{ type: 'text'; text: s
     return parts;
 }
 
-function normalizePlaceholdersInNodes(nodes: any[], inCodeBlock = false): any[] {
+function normalizePlaceholdersInNodes(nodes: any, inCodeBlock = false): any[] {
+    if (!Array.isArray(nodes)) {
+        return [];
+    }
+
     const normalized: any[] = [];
 
     for (const node of nodes) {
@@ -184,7 +188,14 @@ function deserializeChunk(chunk: string, tempEditor: any): any[] {
     try {
         const preprocessed = preprocessMathDelimiters(chunk);
         const nodes = tempEditor.api.markdown.deserialize(preprocessed);
-        return normalizePlaceholdersInNodes(nodes);
+        const normalized = normalizePlaceholdersInNodes(nodes);
+        if (normalized.length > 0) {
+            return normalized;
+        }
+        if (Array.isArray(nodes) && nodes.length > 0) {
+            return nodes;
+        }
+        return [{ type: 'p', children: [{ text: chunk }] }];
     } catch (e) {
         console.error('Error deserializing chunk:', e);
         // Return a simple paragraph with the raw text on error
