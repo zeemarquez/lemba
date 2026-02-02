@@ -275,11 +275,17 @@ export const useStore = create<AppState>()(
 
                             // Sync other persisted fields - only if actually different
                             if (newState.state.openTabs !== undefined) {
+                                if (!Array.isArray(newState.state.openTabs)) {
+                                    console.error('[Store] openTabs from storage is not array', newState.state.openTabs);
+                                }
+                                const nextOpenTabs = Array.isArray(newState.state.openTabs)
+                                    ? newState.state.openTabs
+                                    : [];
                                 // Deep compare openTabs to avoid unnecessary updates that could cause loops
                                 const currentTabs = JSON.stringify(currentState.openTabs);
-                                const newTabs = JSON.stringify(newState.state.openTabs);
+                                const newTabs = JSON.stringify(nextOpenTabs);
                                 if (currentTabs !== newTabs) {
-                                    updates.openTabs = newState.state.openTabs;
+                                    updates.openTabs = nextOpenTabs;
                                 }
                             }
                             if (newState.state.currentView !== undefined && newState.state.currentView !== currentState.currentView) {
@@ -613,10 +619,18 @@ export const useStore = create<AppState>()(
 
                 restoreSession: async () => {
                     const { openTabs, files } = get();
-                    const newFiles = [...files];
+                    const safeOpenTabs = Array.isArray(openTabs) ? openTabs : [];
+                    const safeFiles = Array.isArray(files) ? files : [];
+                    if (!Array.isArray(openTabs)) {
+                        console.error('[Store] restoreSession openTabs not array', openTabs);
+                    }
+                    if (!Array.isArray(files)) {
+                        console.error('[Store] restoreSession files not array', files);
+                    }
+                    const newFiles = [...safeFiles];
                     let hasUpdates = false;
 
-                    for (const tab of openTabs) {
+                    for (const tab of safeOpenTabs) {
                         if (tab.type === 'file') {
                             const isLoaded = newFiles.some(f => f.id === tab.id);
                             // Optimization: Only load content for the active file immediately
