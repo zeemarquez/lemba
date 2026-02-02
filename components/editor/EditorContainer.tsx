@@ -16,7 +16,8 @@ export function EditorContainer() {
         pendingDiffs
     } = useStore();
 
-    const activeFile = files.find((f) => f.id === activeFileId);
+    const safeFiles = Array.isArray(files) ? files : [];
+    const activeFile = safeFiles.find((f) => f.id === activeFileId);
 
     // Check if there are pending diffs for the current file
     const hasPendingDiffs = useMemo(() => {

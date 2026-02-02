@@ -255,7 +255,8 @@ export const useStore = create<AppState>()(
                                             content,
                                             language: 'markdown'
                                         };
-                                        updates.files = [...currentState.files, newFile];
+                                        const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                                        updates.files = [...currentFiles, newFile];
                                     } catch (error) {
                                         console.error('Failed to load file on sync:', error);
                                     }
@@ -266,7 +267,8 @@ export const useStore = create<AppState>()(
                                 updates.activeTemplateId = newState.state.activeTemplateId;
                                 // Update activeTemplateCss if template changed
                                 if (newState.state.activeTemplateId) {
-                                    const template = currentState.templates.find(t => t.id === newState.state.activeTemplateId);
+                                    const currentTemplates = Array.isArray(currentState.templates) ? currentState.templates : [];
+                                    const template = currentTemplates.find(t => t.id === newState.state.activeTemplateId);
                                     if (template) {
                                         updates.activeTemplateCss = template.css;
                                     }
@@ -306,13 +308,17 @@ export const useStore = create<AppState>()(
                             const currentState = get();
 
                             if (syncData.fileId && syncData.content !== undefined) {
-                                const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                                const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                                const existingFile = currentFiles.find(f => f.id === syncData.fileId);
                                 if (existingFile && existingFile.content !== syncData.content) {
-                                    set((state) => ({
-                                        files: state.files.map((f) =>
-                                            f.id === syncData.fileId ? { ...f, content: syncData.content } : f
-                                        )
-                                    }));
+                                    set((state) => {
+                                        const files = Array.isArray(state.files) ? state.files : [];
+                                        return {
+                                            files: files.map((f) =>
+                                                f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                            )
+                                        };
+                                    });
                                 } else if (!existingFile) {
                                     // File not loaded, add it if it's the active file or if we should load it
                                     const shouldLoad = syncData.fileId === currentState.activeFileId;
@@ -323,7 +329,7 @@ export const useStore = create<AppState>()(
                                             content: syncData.content,
                                             language: 'markdown'
                                         };
-                                        set((state) => ({ files: [...state.files, newFile] }));
+                                        set((state) => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                                     }
                                 }
                             }
@@ -352,13 +358,17 @@ export const useStore = create<AppState>()(
 
                         // Check if we need to update file content
                         if (syncData.fileId && syncData.content !== undefined) {
-                            const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                            const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                            const existingFile = currentFiles.find(f => f.id === syncData.fileId);
                             if (existingFile && existingFile.content !== syncData.content) {
-                                set((state) => ({
-                                    files: state.files.map((f) =>
-                                        f.id === syncData.fileId ? { ...f, content: syncData.content } : f
-                                    )
-                                }));
+                                set((state) => {
+                                    const files = Array.isArray(state.files) ? state.files : [];
+                                    return {
+                                        files: files.map((f) =>
+                                            f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                        )
+                                    };
+                                });
                             } else if (!existingFile && syncData.fileId === currentState.activeFileId) {
                                 // File not loaded but is active, load it
                                 const newFile: AppStateFile = {
@@ -367,7 +377,7 @@ export const useStore = create<AppState>()(
                                     content: syncData.content,
                                     language: 'markdown'
                                 };
-                                set((state) => ({ files: [...state.files, newFile] }));
+                                set((state) => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                             }
                         }
                     } catch (error) {
@@ -713,9 +723,10 @@ export const useStore = create<AppState>()(
                 saveTemplate: async (path: string, template: Template) => {
                     try {
                         await browserStorage.saveTemplate(path, template);
-                        set((state) => ({
-                            templates: state.templates.map((t) => (t.id === path ? template : t))
-                        }));
+                        set((state) => {
+                            const templates = Array.isArray(state.templates) ? state.templates : [];
+                            return { templates: templates.map((t) => (t.id === path ? template : t)) };
+                        });
 
                         // Trigger cloud sync (templates are stored as files)
                         if (syncService.isActive) {
@@ -822,7 +833,9 @@ export const useStore = create<AppState>()(
                 },
 
                 openFile: async (path: string) => {
-                    const { files, openTabs } = get();
+                    const state = get();
+                    const files = Array.isArray(state.files) ? state.files : [];
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
                     const existingFile = files.find(f => f.id === path);
 
                     if (!existingFile) {
@@ -834,7 +847,7 @@ export const useStore = create<AppState>()(
                                 content: content,
                                 language: 'markdown'
                             };
-                            set(state => ({ files: [...state.files, newFile] }));
+                            set(state => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                             // Sync file content to other windows
                             if (typeof window !== 'undefined') {
                                 try {
@@ -868,7 +881,8 @@ export const useStore = create<AppState>()(
 
                     const currentState = get();
                     const isAlreadyActive = currentState.activeFileId === path && currentState.currentView === 'file';
-                    const isInTabs = openTabs.some(tab => tab.id === path && tab.type === 'file');
+                    const currentOpenTabs = Array.isArray(currentState.openTabs) ? currentState.openTabs : [];
+                    const isInTabs = currentOpenTabs.some(tab => tab.id === path && tab.type === 'file');
 
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
@@ -879,7 +893,7 @@ export const useStore = create<AppState>()(
                         set(state => ({
                             activeFileId: path,
                             currentView: 'file',
-                            openTabs: [...state.openTabs, { id: path, type: 'file' }]
+                            openTabs: [...(Array.isArray(state.openTabs) ? state.openTabs : []), { id: path, type: 'file' }]
                         }));
                     } else {
                         set({ activeFileId: path, currentView: 'file' });
@@ -891,9 +905,10 @@ export const useStore = create<AppState>()(
                     try {
                         const fileEntry = await browserStorage.writeFile(path, content);
                         // Update local file content and sync to other windows
-                        set((state) => ({
-                            files: state.files.map((f) => (f.id === path ? { ...f, content } : f))
-                        }));
+                        set((state) => {
+                            const files = Array.isArray(state.files) ? state.files : [];
+                            return { files: files.map((f) => (f.id === path ? { ...f, content } : f)) };
+                        });
                         // Sync file content to other windows
                         if (typeof window !== 'undefined') {
                             try {
@@ -917,9 +932,10 @@ export const useStore = create<AppState>()(
                 },
 
                 updateFileContent: (id, content) => {
-                    set((state) => ({
-                        files: state.files.map((f) => (f.id === id ? { ...f, content } : f))
-                    }));
+                    set((state) => {
+                        const files = Array.isArray(state.files) ? state.files : [];
+                        return { files: files.map((f) => (f.id === id ? { ...f, content } : f)) };
+                    });
                     // Sync file content to other windows
                     if (typeof window !== 'undefined') {
                         try {
@@ -935,11 +951,12 @@ export const useStore = create<AppState>()(
                 },
 
                 closeTab: (id) => set((state) => {
-                    const tabIndex = state.openTabs.findIndex(t => t.id === id);
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
+                    const tabIndex = openTabs.findIndex(t => t.id === id);
                     if (tabIndex === -1) return {};
 
-                    const tabToRemove = state.openTabs[tabIndex];
-                    const newTabs = state.openTabs.filter(t => t.id !== id);
+                    const tabToRemove = openTabs[tabIndex];
+                    const newTabs = openTabs.filter(t => t.id !== id);
 
                     const isClosingActive =
                         (state.currentView === 'file' && state.activeFileId === id && tabToRemove.type === 'file') ||
@@ -962,11 +979,12 @@ export const useStore = create<AppState>()(
                                 currentView: 'file'
                             };
                         } else {
+                            const templates = Array.isArray(state.templates) ? state.templates : [];
                             return {
                                 openTabs: newTabs,
                                 activeTemplateId: nextTab.id,
                                 currentView: 'template',
-                                activeTemplateCss: state.templates.find(t => t.id === nextTab.id)?.css || state.activeTemplateCss
+                                activeTemplateCss: templates.find(t => t.id === nextTab.id)?.css || state.activeTemplateCss
                             };
                         }
                     } else {
@@ -991,16 +1009,21 @@ export const useStore = create<AppState>()(
                 setActiveHeadingId: (headingId) => set({ activeHeadingId: headingId }),
                 setSourceEditorFontFamily: (fontFamily) => set({ sourceEditorFontFamily: fontFamily }),
                 setSourceEditorFontSize: (fontSize) => set({ sourceEditorFontSize: fontSize }),
-                addTemplate: (template) => set((state) => ({ templates: [...state.templates, template] })),
-                updateTemplate: (id, updates) => set((state) => ({
-                    templates: state.templates.map((t) => (t.id === id ? { ...t, ...updates } : t))
-                })),
-                updateTemplateCss: (id, css) => set((state) => ({
-                    templates: state.templates.map((t) => (t.id === id ? { ...t, css } : t)),
-                    activeTemplateCss: state.activeTemplateId === id ? css : state.activeTemplateCss
-                })),
+                addTemplate: (template) => set((state) => ({ templates: [...(Array.isArray(state.templates) ? state.templates : []), template] })),
+                updateTemplate: (id, updates) => set((state) => {
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    return { templates: templates.map((t) => (t.id === id ? { ...t, ...updates } : t)) };
+                }),
+                updateTemplateCss: (id, css) => set((state) => {
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    return {
+                        templates: templates.map((t) => (t.id === id ? { ...t, css } : t)),
+                        activeTemplateCss: state.activeTemplateId === id ? css : state.activeTemplateCss
+                    };
+                }),
                 setActiveTemplate: (id) => set((state) => {
-                    const template = state.templates.find(t => t.id === id);
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    const template = templates.find(t => t.id === id);
                     return {
                         activeTemplateId: id,
                         activeTemplateCss: template ? template.css : state.activeTemplateCss
@@ -1010,9 +1033,11 @@ export const useStore = create<AppState>()(
                 setEditorViewMode: (editorViewMode) => set({ editorViewMode }),
                 openTemplate: (id) => {
                     const state = get();
-                    const template = state.templates.find(t => t.id === id);
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
+                    const template = templates.find(t => t.id === id);
                     const isAlreadyActive = state.activeTemplateId === id && state.currentView === 'template';
-                    const isInTabs = state.openTabs.some(tab => tab.id === id && tab.type === 'template');
+                    const isInTabs = openTabs.some(tab => tab.id === id && tab.type === 'template');
 
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
@@ -1024,7 +1049,7 @@ export const useStore = create<AppState>()(
                             activeTemplateId: id,
                             activeTemplateCss: template ? template.css : state.activeTemplateCss,
                             currentView: 'template',
-                            openTabs: [...state.openTabs, { id, type: 'template' }],
+                            openTabs: [...openTabs, { id, type: 'template' }],
                         });
                     } else {
                         set({
@@ -1037,7 +1062,8 @@ export const useStore = create<AppState>()(
 
                 // Agent Actions (sync to active chat in chats)
                 addAgentMessage: (message) => set((state) => {
-                    const nextMessages = [...state.agentMessages, message];
+                    const agentMessages = Array.isArray(state.agentMessages) ? state.agentMessages : [];
+                    const nextMessages = [...agentMessages, message];
                     const updates: Partial<AppState> = { agentMessages: nextMessages };
                     if (state.activeChatId && state.chats[state.activeChatId]) {
                         const chat = state.chats[state.activeChatId];
@@ -1096,8 +1122,9 @@ export const useStore = create<AppState>()(
 
                     // Create concise tags for visible display
                     let displayTags = '';
-                    if (state.ragDocuments.length > 0) {
-                        const tags = state.ragDocuments.map(doc => {
+                    const ragDocuments = Array.isArray(state.ragDocuments) ? state.ragDocuments : [];
+                    if (ragDocuments.length > 0) {
+                        const tags = ragDocuments.map(doc => {
                             if (doc.type === 'text') return `[📄 ${doc.name}]`;
                             if (doc.type === 'image') return `[🖼 ${doc.name}]`;
                             const shortName = doc.name.length > 30 ? doc.name.substring(0, 27) + '...' : doc.name;
@@ -1108,7 +1135,7 @@ export const useStore = create<AppState>()(
                     const visibleContent = content + displayTags;
 
                     // Build image attachments for vision (data URL -> base64 + mimeType)
-                    const imageAttachments = state.ragDocuments
+                    const imageAttachments = ragDocuments
                         .filter((d): d is typeof d & { type: 'image'; content: string } => d.type === 'image' && !!d.content)
                         .map(doc => {
                             const dataUrl = doc.content!;
@@ -1123,15 +1150,16 @@ export const useStore = create<AppState>()(
                         readOnly: state.agentReadOnly,
                         fileContext: filesForContext,
                         contentLength: content.length,
-                        ragDocuments: state.ragDocuments.length,
+                        ragDocuments: ragDocuments.length,
                         ragContextLength: ragContext.length,
                         imageAttachments: imageAttachments.length,
                     });
                     const userMessage = createMessage('user', visibleContent, [], undefined, fullContent, imageAttachments.length > 0 ? imageAttachments : undefined);
                     const currentChatId = get().activeChatId;
-                    const ragDocsToClear = state.ragDocuments;
+                    const ragDocsToClear = ragDocuments;
                     set((s) => {
-                        const nextMessages = [...s.agentMessages, userMessage];
+                        const agentMessages = Array.isArray(s.agentMessages) ? s.agentMessages : [];
+                        const nextMessages = [...agentMessages, userMessage];
                         const updates: Partial<AppState> = {
                             agentMessages: nextMessages,
                             agentMentionedFiles: filesForContext,
@@ -1163,7 +1191,8 @@ export const useStore = create<AppState>()(
 
                     try {
                         const state = get();
-                        const allMessages = [...state.agentMessages];
+                        const agentMessages = Array.isArray(state.agentMessages) ? state.agentMessages : [];
+                        const allMessages = [...agentMessages];
 
                         // Callback for handling diff creation
                         const onDiffCreated = (diff: DocumentDiff) => {
@@ -1253,7 +1282,8 @@ export const useStore = create<AppState>()(
                             response.diffs?.map(d => d.id)
                         );
                         set((s) => {
-                            const nextMessages = [...s.agentMessages, assistantMessage];
+                            const agentMessages = Array.isArray(s.agentMessages) ? s.agentMessages : [];
+                            const nextMessages = [...agentMessages, assistantMessage];
                             const updates: Partial<AppState> = {
                                 agentMessages: nextMessages,
                                 agentLoading: false,
@@ -1586,7 +1616,7 @@ export const useStore = create<AppState>()(
                     try {
                         await browserStorage.storeRagDocument(doc);
                         set(state => ({
-                            ragDocuments: [...state.ragDocuments, doc]
+                            ragDocuments: [...(Array.isArray(state.ragDocuments) ? state.ragDocuments : []), doc]
                         }));
                     } catch (error) {
                         console.error('Failed to add RAG document:', error);
@@ -1596,9 +1626,10 @@ export const useStore = create<AppState>()(
                 removeRagDocument: async (id: string) => {
                     try {
                         await browserStorage.deleteRagDocument(id);
-                        set(state => ({
-                            ragDocuments: state.ragDocuments.filter(d => d.id !== id)
-                        }));
+                        set(state => {
+                            const ragDocuments = Array.isArray(state.ragDocuments) ? state.ragDocuments : [];
+                            return { ragDocuments: ragDocuments.filter(d => d.id !== id) };
+                        });
                     } catch (error) {
                         console.error('Failed to remove RAG document:', error);
                     }
@@ -1645,9 +1676,21 @@ export const useStore = create<AppState>()(
                     customFonts: currentState.customFonts,
                     fontsLoaded: currentState.fontsLoaded,
                 };
-                // Ensure persisted array/object shapes are valid
+                // Ensure persisted array/object shapes are valid (avoids "undefined is not iterable" on load)
                 if (!Array.isArray(merged.openTabs)) {
                     merged.openTabs = [];
+                }
+                if (!Array.isArray(merged.files)) {
+                    merged.files = [];
+                }
+                if (!Array.isArray(merged.templates)) {
+                    merged.templates = [];
+                }
+                if (!Array.isArray(merged.fileTree)) {
+                    merged.fileTree = [];
+                }
+                if (!Array.isArray(merged.ragDocuments)) {
+                    merged.ragDocuments = [];
                 }
                 if (!merged.chats || typeof merged.chats !== 'object') {
                     merged.chats = {};
