@@ -4,7 +4,9 @@ import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { EditorView } from '@codemirror/view';
+import { syntaxHighlighting } from '@codemirror/language';
+import { tags, tagHighlighter } from '@lezer/highlight';
+import { EditorView, Decoration, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { useTheme } from 'next-themes';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { useStore } from '@/lib/store';
@@ -65,6 +67,26 @@ export function SourceEditor({ content, onChange }: SourceEditorProps) {
             window.removeEventListener('navigate-to-line', handleNavigateToLine as EventListener);
         };
     }, [handleNavigateToLine]);
+
+    useEffect(() => {
+        const handleInsertText = (event: CustomEvent<{ text: string }>) => {
+            const view = editorRef.current?.view;
+            if (!view) return;
+            const { text } = event.detail || {};
+            if (!text) return;
+            const selection = view.state.selection.main;
+            view.dispatch({
+                changes: { from: selection.from, to: selection.to, insert: text },
+                selection: { anchor: selection.from + text.length },
+            });
+            view.focus();
+        };
+
+        window.addEventListener('insert-source-text', handleInsertText as EventListener);
+        return () => {
+            window.removeEventListener('insert-source-text', handleInsertText as EventListener);
+        };
+    }, []);
 
     // Function to find the active heading based on cursor line
     const findActiveHeading = useCallback((lineNumber: number) => {
@@ -197,14 +219,66 @@ export function SourceEditor({ content, onChange }: SourceEditorProps) {
                 fontFamily: sourceEditorFontFamily,
                 fontSize: `${sourceEditorFontSize}px`,
             },
+            '.cm-placeholder-token': {
+                fontWeight: '700',
+                color: 'rgb(168, 85, 247)',
+            },
         });
     }, [sourceEditorFontFamily, sourceEditorFontSize]);
+
+    const placeholderDecoration = useMemo(() => {
+        const placeholderRegex = /\{\{[^}]+\}\}/g;
+        const deco = Decoration.mark({ class: 'cm-placeholder-token' });
+
+        return ViewPlugin.fromClass(class {
+            decorations: ReturnType<typeof Decoration.set>;
+
+            constructor(view: EditorView) {
+                this.decorations = this.buildDecorations(view);
+            }
+
+            update(update: ViewUpdate) {
+                if (update.docChanged || update.viewportChanged) {
+                    this.decorations = this.buildDecorations(update.view);
+                }
+            }
+
+            buildDecorations(view: EditorView) {
+                const widgets = [];
+                for (const { from, to } of view.visibleRanges) {
+                    const text = view.state.doc.sliceString(from, to);
+                    placeholderRegex.lastIndex = 0;
+                    let match: RegExpExecArray | null;
+                    while ((match = placeholderRegex.exec(text)) !== null) {
+                        const start = from + match.index;
+                        const end = start + match[0].length;
+                        widgets.push(deco.range(start, end));
+                    }
+                }
+                return Decoration.set(widgets, true);
+            }
+        }, {
+            decorations: (v) => v.decorations
+        });
+    }, []);
+
+    const headingColorExtension = useMemo(() => {
+        if (theme !== 'dark') {
+            return [];
+        }
+        const headingClass = syntaxHighlighting(
+            tagHighlighter([{ tag: tags.heading, class: 'cm-heading-white' }])
+        );
+        return [headingClass];
+    }, [theme]);
 
     const extensions = useMemo(() => [
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         fontExtension,
         cursorTrackingExtension,
-    ], [fontExtension, cursorTrackingExtension]);
+        placeholderDecoration,
+        ...headingColorExtension,
+    ], [fontExtension, cursorTrackingExtension, placeholderDecoration, headingColorExtension]);
 
     return (
         <div className="h-full w-full overflow-hidden text-base">

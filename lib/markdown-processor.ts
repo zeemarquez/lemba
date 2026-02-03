@@ -8,15 +8,17 @@
  * 3. Differential processing to only re-process changed sections
  */
 
+import { KEYS } from 'platejs';
 import { createPlateEditor } from 'platejs/react';
 import { EditorKit } from '@/components/plate-editor/editor-kit';
-import { preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
+import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
+import { parsePlaceholderToken, preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 
 // Type for cached chunk data
 interface CachedChunk {
     markdown: string;
     hash: string;
-    nodes: any[];
+    nodes: any[] | null;
 }
 
 interface ContentCache {
@@ -35,6 +37,100 @@ function hashString(str: string): string {
         hash = hash & hash; // Convert to 32bit integer
     }
     return hash.toString(36);
+}
+
+const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
+
+function splitTextWithPlaceholders(value: string): Array<{ type: 'text'; text: string } | ({ type: 'placeholder' } & Record<string, unknown>)> {
+    const parts: Array<{ type: 'text'; text: string } | ({ type: 'placeholder' } & Record<string, unknown>)> = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    PLACEHOLDER_REGEX.lastIndex = 0;
+    while ((match = PLACEHOLDER_REGEX.exec(value)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const rawToken = match[1];
+
+        if (start > lastIndex) {
+            parts.push({ type: 'text', text: value.slice(lastIndex, start) });
+        }
+
+        const parsed = parsePlaceholderToken(rawToken);
+        if (parsed) {
+            parts.push({ type: 'placeholder', ...parsed });
+        } else {
+            parts.push({ type: 'text', text: match[0] });
+        }
+
+        lastIndex = end;
+    }
+
+    if (lastIndex < value.length) {
+        parts.push({ type: 'text', text: value.slice(lastIndex) });
+    }
+
+    return parts;
+}
+
+function normalizePlaceholdersInNodes(nodes: any, inCodeBlock = false): any[] {
+    if (!Array.isArray(nodes)) {
+        return [];
+    }
+
+    const normalized: any[] = [];
+
+    for (const node of nodes) {
+        const transformed = normalizePlaceholdersInNode(node, inCodeBlock);
+        if (Array.isArray(transformed)) {
+            normalized.push(...transformed);
+        } else {
+            normalized.push(transformed);
+        }
+    }
+
+    return normalized;
+}
+
+function normalizePlaceholdersInNode(node: any, inCodeBlock: boolean): any | any[] {
+    if (!node || typeof node !== 'object') return node;
+
+    if (node.type === KEY_PLACEHOLDER) {
+        return node;
+    }
+
+    const isCodeContext = inCodeBlock || node.type === KEYS.codeBlock || node.type === KEYS.codeLine;
+
+    if (typeof node.text === 'string') {
+        if (isCodeContext || node.code) {
+            return node;
+        }
+
+        const parts = splitTextWithPlaceholders(node.text);
+        if (parts.length === 1 && parts[0].type === 'text') {
+            return node;
+        }
+
+        const { text: _text, ...marks } = node;
+        return parts.map((part) => {
+            if (part.type === 'text') {
+                return { ...marks, text: part.text };
+            }
+            const { type: _type, ...parsed } = part;
+            return {
+                type: KEY_PLACEHOLDER,
+                children: [{ text: '' }],
+                ...parsed,
+            };
+        });
+    }
+
+    if (Array.isArray(node.children)) {
+        const children = normalizePlaceholdersInNodes(node.children, isCodeContext);
+        return { ...node, children };
+    }
+
+    return node;
 }
 
 // Split markdown into semantic chunks (by headers or significant blocks)
@@ -80,9 +176,11 @@ function splitIntoChunks(markdown: string): string[] {
 // The main cache instance
 let contentCache: ContentCache | null = null;
 
-// Create a temporary editor for deserialization
+// Create a temporary editor for deserialization.
+// Guard EditorKit so we never pass undefined to createPlateEditor (avoids "undefined is not iterable" in platejs).
 function createTempEditor() {
-    return createPlateEditor({ plugins: EditorKit });
+    const plugins = Array.isArray(EditorKit) ? EditorKit : [];
+    return createPlateEditor({ plugins });
 }
 
 /**
@@ -92,7 +190,14 @@ function deserializeChunk(chunk: string, tempEditor: any): any[] {
     try {
         const preprocessed = preprocessMathDelimiters(chunk);
         const nodes = tempEditor.api.markdown.deserialize(preprocessed);
-        return nodes;
+        const normalized = normalizePlaceholdersInNodes(nodes);
+        if (normalized.length > 0) {
+            return normalized;
+        }
+        if (Array.isArray(nodes) && nodes.length > 0) {
+            return nodes;
+        }
+        return [{ type: 'p', children: [{ text: chunk }] }];
     } catch (e) {
         console.error('Error deserializing chunk:', e);
         // Return a simple paragraph with the raw text on error
@@ -167,9 +272,10 @@ function processWithDiff(
     if (contentCache.fullHash === newFullHash) {
         console.log('[MarkdownProcessor] processWithDiff completed (unchanged)', {
             totalTime: performance.now() - startTime,
-            cachedNodes: contentCache.lastNodes.length
+            cachedNodes: Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes.length : 0
         });
-        return { nodes: contentCache.lastNodes, unchanged: true };
+        const cachedNodes = Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes : [];
+        return { nodes: cachedNodes, unchanged: true };
     }
 
     // Differential update: only reprocess changed chunks
@@ -186,7 +292,7 @@ function processWithDiff(
         // Check if this chunk matches a cached chunk
         const cachedChunk = contentCache.chunks[i];
 
-        if (cachedChunk && cachedChunk.hash === newHash) {
+        if (cachedChunk && cachedChunk.hash === newHash && Array.isArray(cachedChunk.nodes) && cachedChunk.nodes.length > 0) {
             // Reuse cached nodes
             allNodes.push(...cachedChunk.nodes);
             newCachedChunks.push(cachedChunk);
@@ -239,7 +345,7 @@ export async function processMarkdownChunked(
         // Check if we have this chunk cached
         const cachedChunk = contentCache?.chunks.find(c => c.hash === hash);
 
-        if (cachedChunk) {
+        if (cachedChunk && Array.isArray(cachedChunk.nodes) && cachedChunk.nodes.length > 0) {
             allNodes.push(...cachedChunk.nodes);
             cachedChunks.push(cachedChunk);
         } else {
@@ -284,9 +390,10 @@ export function processMarkdownDiff(markdown: string): { nodes: any[]; unchanged
         if (contentCache.fullHash === newHash) {
             console.log('[MarkdownProcessor] processMarkdownDiff cache hit (fast path)', {
                 totalTime: performance.now() - startTime,
-                cachedNodes: contentCache.lastNodes.length
+                cachedNodes: Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes.length : 0
             });
-            return { nodes: contentCache.lastNodes, unchanged: true };
+            const cachedNodes = Array.isArray(contentCache.lastNodes) ? contentCache.lastNodes : [];
+            return { nodes: cachedNodes, unchanged: true };
         }
     }
 
@@ -408,7 +515,7 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
         cachedChunks.push({
             markdown: chunk,
             hash: hashString(chunk),
-            nodes: [], // Empty - will be populated on next deserialization
+            nodes: null, // Unknown per-chunk nodes; force reprocess later
         });
     }
 
@@ -416,7 +523,7 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
         fullMarkdown: markdown,
         fullHash: hashString(markdown),
         chunks: cachedChunks,
-        lastNodes: nodes,
+        lastNodes: Array.isArray(nodes) ? nodes : [],
     };
 }
 
@@ -425,5 +532,5 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
  */
 export function isCacheValid(markdown: string): boolean {
     if (!contentCache) return false;
-    return contentCache.fullHash === hashString(markdown);
+    return contentCache.fullHash === hashString(markdown) && Array.isArray(contentCache.lastNodes);
 }

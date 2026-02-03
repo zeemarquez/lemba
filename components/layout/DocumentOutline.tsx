@@ -106,7 +106,7 @@ function OutlineItem({ heading, isActive, isExpanded, hasChildren, onToggleExpan
         <button
             onClick={onClick}
             className={cn(
-                "w-full text-left px-2 py-1.5 rounded-md transition-colors",
+                "w-max text-left px-2 py-1.5 rounded-md transition-colors",
                 "hover:bg-accent/50 focus:bg-accent/50 focus:outline-none",
                 "flex items-center gap-1.5 min-h-[28px]",
                 isActive && "bg-accent text-accent-foreground"
@@ -114,24 +114,24 @@ function OutlineItem({ heading, isActive, isExpanded, hasChildren, onToggleExpan
             style={{ paddingLeft: `${paddingLeft + 8}px` }}
             title={`Line ${heading.line}: ${heading.text}`}
         >
-            <span 
-                onClick={handleChevronClick}
-                className={cn(
-                    "shrink-0 flex items-center justify-center w-[14px] h-[14px]",
-                    hasChildren && "cursor-pointer hover:bg-accent/50 rounded"
-                )}
+            <span
+                className="shrink-0 w-[14px] h-[14px] flex items-center justify-center"
+                onClick={hasChildren ? handleChevronClick : undefined}
             >
                 {hasChildren ? (
-                    isExpanded ? (
-                        <ChevronDown size={14} className="text-muted-foreground" />
-                    ) : (
-                        <ChevronRight size={14} className="text-muted-foreground" />
-                    )
-                ) : (
-                    <ChevronRight size={14} className="text-muted-foreground/40" />
-                )}
+                    <span className={cn(
+                        "cursor-pointer hover:bg-accent/50 rounded flex items-center justify-center",
+                        "w-full h-full"
+                    )}>
+                        {isExpanded ? (
+                            <ChevronDown size={14} className="text-muted-foreground" />
+                        ) : (
+                            <ChevronRight size={14} className="text-muted-foreground" />
+                        )}
+                    </span>
+                ) : null}
             </span>
-            <span className={cn("truncate", getHeadingStyle(heading.level))}>{heading.text}</span>
+            <span className={cn("whitespace-nowrap overflow-visible", getHeadingStyle(heading.level))}>{heading.text}</span>
         </button>
     );
 }
@@ -309,7 +309,7 @@ export function DocumentOutline({ className, isCollapsed, onToggleCollapse }: Do
                         </div>
                     ) : (
                         <ScrollArea className="flex-1 min-h-0">
-                            <div className="px-1 pb-2 space-y-0.5">
+                            <div className="px-1 pb-2 space-y-0.5 min-w-max">
                                 {visibleHeadings.map(({ heading, index }) => (
                                     <OutlineItem
                                         key={heading.id}

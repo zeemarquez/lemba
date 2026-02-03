@@ -1,6 +1,6 @@
 {
     "name": "modern-markdown-editor",
-    "version": "0.1.17",
+    "version": "0.1.18",
     "private": true,
     "description": "A modern markdown editor with PDF export capabilities",
     "author": "zeemarquez",
@@ -97,6 +97,7 @@
         "firebase": "^12.8.0",
         "framer-motion": "^12.26.2",
         "fuse.js": "^7.1.0",
+        "gray-matter": "^4.0.3",
         "highlight.js": "^11.11.1",
         "html2canvas-pro": "^1.6.4",
         "katex": "^0.16.27",

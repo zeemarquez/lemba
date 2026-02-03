@@ -39,6 +39,7 @@ import { TocKit } from '@/components/plate-editor/plugins/toc-kit';
 import { ToggleKit } from '@/components/plate-editor/plugins/toggle-kit';
 import { PageBreakPlugin } from '@/components/plate-editor/plugins/page-break-plugin';
 import { PageBreakElement } from '@/components/plate-ui/page-break-element';
+import { PlaceholderPlugin } from '@/components/plate-editor/plugins/placeholder-kit';
 
 export const EditorKit = [
 
@@ -56,6 +57,7 @@ export const EditorKit = [
   ...ColumnKit,
   ...MathKit,
   ...DateKit,
+  PlaceholderPlugin,
   ...LinkKit,
   ...MentionKit,
 

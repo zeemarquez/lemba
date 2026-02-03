@@ -47,6 +47,8 @@ export interface OrchestrationOptions {
     readOnly?: boolean;
     onEvent?: OrchestrationEventHandler;
     onDiffCreated?: (diff: DocumentDiff) => void;
+    /** In-memory content for mentioned files; overrides IndexedDB to use latest unsaved edits */
+    initialContentOverrides?: Record<string, string>;
 }
 
 export interface OrchestrationResult {
@@ -126,7 +128,7 @@ export class OrchestratorAgent {
         this.eventHandler = options.onEvent;
         const collectedDiffs: DocumentDiff[] = [];
         const collectedDiffIds = new Set<string>();
-        const contentOverrides: Record<string, string> = {};
+        const contentOverrides: Record<string, string> = { ...(options.initialContentOverrides ?? {}) };
 
         const updateContentOverride = (fileId: string) => {
             const fileDiffs = collectedDiffs.filter(d => d.fileId === fileId);
@@ -788,17 +790,23 @@ export async function runOrchestration(
     };
 
     // If files are mentioned, load the first one as active document (even if empty, so writer/linter get defaultFileId)
+    // Prefer in-memory content (initialContentOverrides) over IndexedDB to use latest unsaved edits
     if (mentionedFiles.length > 0) {
-        const { browserStorage } = await import('../../browser-storage');
+        const fileId = mentionedFiles[0];
         let content: string;
-        try {
-            content = await browserStorage.readFile(mentionedFiles[0]) ?? '';
-        } catch {
-            content = '';
+        if (options.initialContentOverrides?.[fileId] !== undefined) {
+            content = options.initialContentOverrides[fileId];
+        } else {
+            const { browserStorage } = await import('../../browser-storage');
+            try {
+                content = await browserStorage.readFile(fileId) ?? '';
+            } catch {
+                content = '';
+            }
         }
-        const fileName = mentionedFiles[0].split('/').pop() || mentionedFiles[0];
+        const fileName = fileId.split('/').pop() || fileId;
         context.activeDocument = {
-            id: mentionedFiles[0],
+            id: fileId,
             name: fileName,
             content,
         };

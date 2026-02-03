@@ -35,6 +35,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         toggleRightSidebar
     } = useStore();
 
+    const safeOpenTabs = Array.isArray(openTabs) ? openTabs : [];
+    const safeFiles = Array.isArray(files) ? files : [];
+    const safeTemplates = Array.isArray(templates) ? templates : [];
+
+    if (process.env.NODE_ENV === 'production') {
+        if (!Array.isArray(openTabs)) {
+            console.error('[AppShell] openTabs is not an array', openTabs);
+        }
+        if (!Array.isArray(files)) {
+            console.error('[AppShell] files is not an array', files);
+        }
+        if (!Array.isArray(templates)) {
+            console.error('[AppShell] templates is not an array', templates);
+        }
+    }
+
     const leftPanelRef = useRef<ImperativePanelHandle>(null);
     const rightPanelRef = useRef<ImperativePanelHandle>(null);
 
@@ -86,11 +102,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <div className="flex items-end bg-muted/20 h-11 overflow-x-auto overflow-y-hidden no-scrollbar scroll-smooth shrink-0 relative app-chrome">
                             {/* Prefix line (before first tab) */}
                             <div className="w-2 h-full border-b border-border shrink-0" />
-                            {openTabs.map(tab => {
+                            {safeOpenTabs.map(tab => {
                                 const isFile = tab.type === 'file';
                                 const data = isFile
-                                    ? files.find(f => f.id === tab.id)
-                                    : templates.find(t => t.id === tab.id);
+                                    ? safeFiles.find(f => f.id === tab.id)
+                                    : safeTemplates.find(t => t.id === tab.id);
 
                                 if (!data) return null;
                                 const isActive = isFile
@@ -168,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </div>
 
                         <div className="flex-1 min-h-0 relative flex flex-col">
-                            {openTabs.length > 0 ? (
+                            {safeOpenTabs.length > 0 ? (
                                 <div className="flex-1 h-full flex flex-col overflow-hidden">
                                     {children}
                                 </div>

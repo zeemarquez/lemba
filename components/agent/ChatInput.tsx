@@ -386,6 +386,8 @@ export function ChatInput() {
         const hasAttachments = docIds.length > 0;
         if (!text && !hasAttachments) return;
 
+        // Ensure WYSIWYG edits are serialized before the agent reads content
+        window.dispatchEvent(new CustomEvent('flush-editor-content'));
         sendAgentMessage(text ?? "");
         editable.innerHTML = "";
         setContentVersion((v) => v + 1);

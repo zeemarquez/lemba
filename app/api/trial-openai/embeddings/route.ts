@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// No dynamic/revalidate: incompatible with output: 'export' (used for Electron/local builds).
 
 export async function POST(request: Request) {
   const apiKey = process.env.TRIAL_OPENAI_API_KEY;

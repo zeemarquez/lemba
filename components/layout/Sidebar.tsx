@@ -18,15 +18,17 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileTree } from "@/components/layout/FileTree";
 import { InputDialog } from "@/components/layout/InputDialog";
 import { DocumentOutline } from "@/components/layout/DocumentOutline";
+import { DocumentVersionHistory } from "@/components/layout/DocumentVersionHistory";
 import {
     ResizablePanelGroup,
     ResizablePanel,
     ResizableHandle,
 } from "@/components/ui/resizable";
+import type { ImperativePanelHandle, ImperativePanelGroupHandle } from "react-resizable-panels";
 import { LoginButton } from "@/components/auth";
 import { SyncStatus } from "@/components/sync";
 import { AgentPanel } from "@/components/agent";
@@ -62,7 +64,28 @@ export function Sidebar() {
     const [mounted, setMounted] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [isOutlineCollapsed, setIsOutlineCollapsed] = useState(false);
+    const [isVersionHistoryCollapsed, setIsVersionHistoryCollapsed] = useState(false);
     const [isFilesCollapsed, setIsFilesCollapsed] = useState(false);
+    const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
+    const filesPanelRef = useRef<ImperativePanelHandle>(null);
+    const outlinePanelRef = useRef<ImperativePanelHandle>(null);
+    const versionHistoryPanelRef = useRef<ImperativePanelHandle>(null);
+    // Refs for collapsed state so onCollapse callbacks see latest without stale closure
+    const outlineCollapsedRef = useRef(false);
+    const versionHistoryCollapsedRef = useRef(false);
+    outlineCollapsedRef.current = isOutlineCollapsed;
+    versionHistoryCollapsedRef.current = isVersionHistoryCollapsed;
+
+    // Explicit layouts so expand/collapse work reliably (avoid relying on library's stored "size before collapse").
+    const LAYOUT_ALL_EXPANDED: [number, number, number] = [40, 35, 25];   // Files, Outline, Version History
+    const LAYOUT_OUTLINE_COLLAPSED: [number, number, number] = [70, 5, 25];
+    const LAYOUT_VERSION_COLLAPSED: [number, number, number] = [60, 35, 5];
+    const LAYOUT_BOTH_COLLAPSED: [number, number, number] = [90, 5, 5];
+
+    const setSidebarLayout = (layout: [number, number, number]) => {
+        panelGroupRef.current?.setLayout(layout);
+    };
+
     const [dialogConfig, setDialogConfig] = useState<{
         title: string;
         description: string;
@@ -367,20 +390,52 @@ export function Sidebar() {
                 </div>
 
                 {sidebarView === 'explorer' && showOutline && currentView === 'file' && activeFileId && (
-                    <ResizablePanelGroup direction="vertical" className="flex-1 min-h-0">
+                    <ResizablePanelGroup ref={panelGroupRef} direction="vertical" className="flex-1 min-h-0">
                         {/* Files Panel */}
                         <ResizablePanel
-                            defaultSize={60}
+                            ref={filesPanelRef}
+                            defaultSize={40}
                             minSize={20}
                             collapsible={true}
-                            collapsedSize={8}
+                            collapsedSize={5}
                             onCollapse={() => setIsFilesCollapsed(true)}
                             onExpand={() => setIsFilesCollapsed(false)}
                         >
-                            <div className="h-full flex flex-col">
+                            <div className="h-full flex flex-col min-h-0">
                                 <div
                                     className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-accent/30 shrink-0"
-                                    onClick={() => setIsFilesCollapsed(!isFilesCollapsed)}
+                                    onClick={() => {
+                                        if (isFilesCollapsed) {
+                                            setIsFilesCollapsed(false);
+                                            const outlineCollapsed = outlineCollapsedRef.current;
+                                            const versionCollapsed = versionHistoryCollapsedRef.current;
+                                            if (outlineCollapsed && versionCollapsed) {
+                                                setSidebarLayout(LAYOUT_BOTH_COLLAPSED);
+                                            } else if (outlineCollapsed) {
+                                                setSidebarLayout(LAYOUT_VERSION_COLLAPSED);
+                                            } else if (versionCollapsed) {
+                                                setSidebarLayout(LAYOUT_OUTLINE_COLLAPSED);
+                                            } else {
+                                                setSidebarLayout(LAYOUT_ALL_EXPANDED);
+                                            }
+                                        } else {
+                                            filesPanelRef.current?.collapse();
+                                            setIsFilesCollapsed(true);
+                                            const outlineCollapsed = outlineCollapsedRef.current;
+                                            const versionCollapsed = versionHistoryCollapsedRef.current;
+                                            setTimeout(() => {
+                                                if (outlineCollapsed && versionCollapsed) {
+                                                    setSidebarLayout([5, 5, 90]);
+                                                } else if (outlineCollapsed) {
+                                                    setSidebarLayout([5, 5, 90]);
+                                                } else if (versionCollapsed) {
+                                                    setSidebarLayout([5, 90, 5]);
+                                                } else {
+                                                    setSidebarLayout([5, 48, 47]);
+                                                }
+                                            }, 0);
+                                        }
+                                    }}
                                 >
                                     <div className="flex items-center gap-2">
                                         {isFilesCollapsed ? (
@@ -439,18 +494,84 @@ export function Sidebar() {
 
                         {/* Outline Panel */}
                         <ResizablePanel
-                            defaultSize={40}
+                            ref={outlinePanelRef}
+                            defaultSize={35}
                             minSize={15}
                             collapsible={true}
-                            collapsedSize={8}
-                            onCollapse={() => setIsOutlineCollapsed(true)}
+                            collapsedSize={5}
+                            onCollapse={() => {
+                                setIsOutlineCollapsed(true);
+                                outlineCollapsedRef.current = true;
+                                const versionCollapsed = versionHistoryCollapsedRef.current;
+                                setTimeout(() => {
+                                    setSidebarLayout(versionCollapsed ? LAYOUT_BOTH_COLLAPSED : LAYOUT_OUTLINE_COLLAPSED);
+                                }, 0);
+                            }}
                             onExpand={() => setIsOutlineCollapsed(false)}
                         >
-                            <DocumentOutline
-                                className="h-full"
-                                isCollapsed={isOutlineCollapsed}
-                                onToggleCollapse={() => setIsOutlineCollapsed(!isOutlineCollapsed)}
-                            />
+                            <div className="h-full flex flex-col min-h-0">
+                                <DocumentOutline
+                                    className="h-full"
+                                    isCollapsed={isOutlineCollapsed}
+                                    onToggleCollapse={() => {
+                                        if (isOutlineCollapsed) {
+                                            setIsOutlineCollapsed(false);
+                                            const versionCollapsed = versionHistoryCollapsedRef.current;
+                                            setSidebarLayout(versionCollapsed ? LAYOUT_VERSION_COLLAPSED : LAYOUT_ALL_EXPANDED);
+                                        } else {
+                                            const versionCollapsed = versionHistoryCollapsedRef.current;
+                                            outlinePanelRef.current?.collapse();
+                                            setIsOutlineCollapsed(true);
+                                            outlineCollapsedRef.current = true;
+                                            setTimeout(() => {
+                                                setSidebarLayout(versionCollapsed ? LAYOUT_BOTH_COLLAPSED : LAYOUT_OUTLINE_COLLAPSED);
+                                            }, 0);
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </ResizablePanel>
+
+                        <ResizableHandle />
+
+                        {/* Version History Panel */}
+                        <ResizablePanel
+                            ref={versionHistoryPanelRef}
+                            defaultSize={25}
+                            minSize={10}
+                            collapsible={true}
+                            collapsedSize={5}
+                            onCollapse={() => {
+                                setIsVersionHistoryCollapsed(true);
+                                versionHistoryCollapsedRef.current = true;
+                                const outlineCollapsed = outlineCollapsedRef.current;
+                                setTimeout(() => {
+                                    setSidebarLayout(outlineCollapsed ? LAYOUT_BOTH_COLLAPSED : LAYOUT_VERSION_COLLAPSED);
+                                }, 0);
+                            }}
+                            onExpand={() => setIsVersionHistoryCollapsed(false)}
+                        >
+                            <div className="h-full flex flex-col min-h-0">
+                                <DocumentVersionHistory
+                                    className="h-full"
+                                    isCollapsed={isVersionHistoryCollapsed}
+                                    onToggleCollapse={() => {
+                                        if (isVersionHistoryCollapsed) {
+                                            setIsVersionHistoryCollapsed(false);
+                                            const outlineCollapsed = outlineCollapsedRef.current;
+                                            setSidebarLayout(outlineCollapsed ? LAYOUT_OUTLINE_COLLAPSED : LAYOUT_ALL_EXPANDED);
+                                        } else {
+                                            const outlineCollapsed = outlineCollapsedRef.current;
+                                            versionHistoryPanelRef.current?.collapse();
+                                            setIsVersionHistoryCollapsed(true);
+                                            versionHistoryCollapsedRef.current = true;
+                                            setTimeout(() => {
+                                                setSidebarLayout(outlineCollapsed ? LAYOUT_BOTH_COLLAPSED : LAYOUT_VERSION_COLLAPSED);
+                                            }, 0);
+                                        }
+                                    }}
+                                />
+                            </div>
                         </ResizablePanel>
                     </ResizablePanelGroup>
                 )}
