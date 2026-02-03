@@ -84,6 +84,10 @@ export async function createVersion(
     await browserStorage.storeVersion(entry);
     lastVersionByFile.set(fileId, { content, wordCount: wc, createdAt: now });
 
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('version-created', { detail: { fileId } }));
+    }
+
     await pruneVersions(fileId, now);
 
     return entry;

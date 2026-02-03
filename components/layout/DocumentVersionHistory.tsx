@@ -2,9 +2,8 @@
 
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ChevronRight, ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useState } from "react";
 import { getVersions } from "@/lib/version-history";
 import type { VersionEntry } from "@/lib/browser-storage";
@@ -90,13 +89,18 @@ export function DocumentVersionHistory({
             setSelectedVersionId(null);
             loadVersions();
         };
+        const handleVersionCreated = (event: CustomEvent<{ fileId: string }>) => {
+            if (event.detail?.fileId === activeFileId) loadVersions();
+        };
         window.addEventListener('version-preview-cancel', handleCancel as EventListener);
         window.addEventListener('version-restored', handleRestored as EventListener);
+        window.addEventListener('version-created', handleVersionCreated as EventListener);
         return () => {
             window.removeEventListener('version-preview-cancel', handleCancel as EventListener);
             window.removeEventListener('version-restored', handleRestored as EventListener);
+            window.removeEventListener('version-created', handleVersionCreated as EventListener);
         };
-    }, [loadVersions]);
+    }, [loadVersions, activeFileId]);
 
     const handlePreview = (version: VersionEntry) => {
         if (!activeFileId || version.fileId !== activeFileId) return;
@@ -142,9 +146,9 @@ export function DocumentVersionHistory({
 
     return (
         <div className={cn("flex flex-col h-full", className)}>
-            <div className="flex items-center justify-between px-3 py-2 shrink-0">
+            <div className="flex items-center px-3 py-2 shrink-0">
                 <div
-                    className="flex items-center gap-2 cursor-pointer hover:bg-accent/30 rounded px-1 py-0.5 -ml-1 flex-1"
+                    className="flex items-center gap-2 cursor-pointer hover:bg-accent/30 rounded px-1 py-0.5 -ml-1"
                     onClick={onToggleCollapse}
                 >
                     {isCollapsed ? (
@@ -156,20 +160,6 @@ export function DocumentVersionHistory({
                         Version History
                     </span>
                 </div>
-                {!isCollapsed && activeFileId && (
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            loadVersions();
-                        }}
-                        title="Refresh versions"
-                    >
-                        <RefreshCw size={12} />
-                    </Button>
-                )}
             </div>
 
             {!isCollapsed && (
