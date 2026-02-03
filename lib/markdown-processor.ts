@@ -18,7 +18,7 @@ import { parsePlaceholderToken, preprocessMathDelimiters } from '@/components/pl
 interface CachedChunk {
     markdown: string;
     hash: string;
-    nodes: any[];
+    nodes: any[] | null;
 }
 
 interface ContentCache {
@@ -292,7 +292,7 @@ function processWithDiff(
         // Check if this chunk matches a cached chunk
         const cachedChunk = contentCache.chunks[i];
 
-        if (cachedChunk && cachedChunk.hash === newHash && Array.isArray(cachedChunk.nodes)) {
+        if (cachedChunk && cachedChunk.hash === newHash && Array.isArray(cachedChunk.nodes) && cachedChunk.nodes.length > 0) {
             // Reuse cached nodes
             allNodes.push(...cachedChunk.nodes);
             newCachedChunks.push(cachedChunk);
@@ -345,7 +345,7 @@ export async function processMarkdownChunked(
         // Check if we have this chunk cached
         const cachedChunk = contentCache?.chunks.find(c => c.hash === hash);
 
-        if (cachedChunk && Array.isArray(cachedChunk.nodes)) {
+        if (cachedChunk && Array.isArray(cachedChunk.nodes) && cachedChunk.nodes.length > 0) {
             allNodes.push(...cachedChunk.nodes);
             cachedChunks.push(cachedChunk);
         } else {
@@ -515,7 +515,7 @@ export function updateCacheFromMarkdown(markdown: string, nodes: any[]): void {
         cachedChunks.push({
             markdown: chunk,
             hash: hashString(chunk),
-            nodes: [], // Empty - will be populated on next deserialization
+            nodes: null, // Unknown per-chunk nodes; force reprocess later
         });
     }
 

@@ -7,6 +7,7 @@ import { PRELOADED_FONTS } from './preloaded-fonts';
 import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL } from './agent';
 import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
+import { saveBackupBeforeApply } from './content-backup';
 export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument };
 export type { AgentMessage, DocumentDiff, AgentChat };
 
@@ -1227,6 +1228,11 @@ export const useStore = create<AppState>()(
                                 linter: '✨ Linting',
                                 summarizer: '💬 Summarizing',
                             };
+                            const initialContentOverrides =
+                                state.currentView === 'file' && state.activeFileId
+                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
+                                    : undefined;
+
                             const orchestrationResult = await runOrchestration(
                                 allMessages,
                                 filesForContext,
@@ -1238,6 +1244,7 @@ export const useStore = create<AppState>()(
                                     temperature: state.agentTemperature,
                                     maxTokens: state.agentMaxTokens,
                                     onDiffCreated,
+                                    initialContentOverrides,
                                     onEvent: (event) => {
                                         if (event.type === 'step_started') {
                                             set({ agentCurrentStep: stepLabels[event.step.agentType] ?? event.step.agentType });
@@ -1254,6 +1261,11 @@ export const useStore = create<AppState>()(
                         } else {
                             const provider = modelToProvider(state.agentModel);
                             const apiKeyOverride = state.agentApiKeys[provider]?.trim() || undefined;
+                            const initialContentOverrides =
+                                state.currentView === 'file' && state.activeFileId
+                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
+                                    : undefined;
+
                             response = await sendMessageToAI(
                                 allMessages,
                                 filesForContext,
@@ -1266,6 +1278,7 @@ export const useStore = create<AppState>()(
                                     temperature: state.agentTemperature,
                                     maxTokens: state.agentMaxTokens,
                                     onDiffCreated,
+                                    initialContentOverrides,
                                 }
                             );
                         }
@@ -1368,6 +1381,21 @@ export const useStore = create<AppState>()(
                     const diffs = Object.values(merged);
                     if (diffs.length === 0) return;
                     try {
+                        const state = get();
+                        for (const diff of diffs) {
+                            const currentFile = state.files.find((f) => f.id === diff.fileId);
+                            const currentContent = currentFile?.content ?? '';
+                            const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                            if (norm(diff.originalContent) !== norm(currentContent)) {
+                                console.warn(
+                                    '[Store] Content drift when accepting diff: diff.originalContent differs from current file content. Backup saved. fileId=',
+                                    diff.fileId
+                                );
+                            }
+                            if (currentFile?.content !== undefined) {
+                                saveBackupBeforeApply(diff.fileId, currentFile.content);
+                            }
+                        }
                         for (const diff of diffs) {
                             const newContent = applyDiffToContent(diff.originalContent, diff);
                             await get().saveFile(diff.fileId, newContent);
@@ -1423,6 +1451,18 @@ export const useStore = create<AppState>()(
                         return;
                     }
                     try {
+                        const currentFile = state.files.find((f) => f.id === diff.fileId);
+                        const currentContent = currentFile?.content ?? '';
+                        const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                        if (norm(diff.originalContent) !== norm(currentContent)) {
+                            console.warn(
+                                '[Store] Content drift when approving diff: diff.originalContent differs from current file content. Backup saved. fileId=',
+                                diff.fileId
+                            );
+                        }
+                        if (currentFile?.content !== undefined) {
+                            saveBackupBeforeApply(diff.fileId, currentFile.content);
+                        }
                         const newContent = applyDiffToContent(diff.originalContent, diff);
                         await get().saveFile(diff.fileId, newContent);
                         set((s) => {

@@ -53,6 +53,8 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const lastDeserializedContent = useRef<string | null>(null);
   // Track the last nodes array reference we set - to avoid redundant setValue calls
   const lastSetNodesRef = useRef<any[] | null>(null);
+  // Track external content updates that arrive while we are typing
+  const pendingExternalContentRef = useRef<string | null>(null);
   // Track if initial async load has completed
   const initialLoadComplete = useRef(false);
   // Refs to store latest values for debounced function
@@ -175,6 +177,40 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     };
   }, [debouncedSerialize]);
 
+  // Flush current editor content on demand (e.g., before AI runs)
+  useEffect(() => {
+    const handleFlush = () => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+      try {
+        debouncedSerialize.flush();
+        const value = currentEditor.children ?? DEFAULT_EDITOR_VALUE;
+        const rawMd = currentEditor.api.markdown.serialize({ value });
+        const md = postprocessMathDelimiters(rawMd);
+        const fullMd = mergeFrontmatter(md, frontmatterRef.current);
+        if (fullMd !== contentRef.current) {
+          updateCacheFromMarkdown(md, value);
+          onChangeRef.current(fullMd);
+        }
+      } catch (error) {
+        console.error('[PlateEditor] Flush serialization failed:', error);
+      }
+    };
+    window.addEventListener('flush-editor-content', handleFlush as EventListener);
+    return () => {
+      window.removeEventListener('flush-editor-content', handleFlush as EventListener);
+    };
+  }, [debouncedSerialize]);
+
+  // When switching from editing to source mode, flush any pending Plate serialization
+  // so the latest WYSIWYG content is committed before SourceEditor is shown
+  useEffect(() => {
+    if (prevEditorViewMode.current !== 'source' && editorViewMode === 'source') {
+      debouncedSerialize.flush();
+    }
+    // Don't update prevEditorViewMode here - the sync effect below handles it
+  }, [editorViewMode, debouncedSerialize]);
+
   // Sync content from Source view back to Plate if content changed externally or in source mode
   useEffect(() => {
     // Skip while initial async loading is in progress
@@ -202,36 +238,25 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       return;
     }
 
-    if (!isUpdatingFromPlate.current) {
-      // Capture values at scheduling time to avoid stale closures
-      const contentToDeserialize = bodyContent;
-
-      // Defer deserialization to prevent blocking the main thread
-      // Use requestIdleCallback if available for better performance, otherwise setTimeout
-      const performDeserialization = () => {
-        
-        // Use optimized processor with caching and differential updates
-        // This only re-processes chunks that have changed
-        const { nodes, unchanged } = processMarkdownDiff(contentToDeserialize);
-        
-        // Skip setValue if:
-        // 1. Content is unchanged (cache hit) AND not switching from source, OR
-        // 2. The nodes reference is the same as what we already set (avoids expensive setValue)
-        if (unchanged && !isSwitchingFromSource) {
-          return;
-        }
-        
-        // Skip setValue if we'd be setting the exact same nodes array (by reference)
-        // This is the key optimization for mode switches when content hasn't changed
-        if (nodes === lastSetNodesRef.current) {
-          console.log('[PlateEditor] Skipping setValue - same nodes reference');
-          lastDeserializedContent.current = contentToDeserialize;
-          return;
-        }
-        
-        editor.tf.setValue(nodes);
-        lastSetNodesRef.current = nodes;
+    const applyDeserializedContent = (contentToDeserialize: string) => {
+      const { nodes, unchanged } = processMarkdownDiff(contentToDeserialize);
+      if (unchanged && !isSwitchingFromSource) {
+        return;
+      }
+      if (nodes === lastSetNodesRef.current) {
+        console.log('[PlateEditor] Skipping setValue - same nodes reference');
         lastDeserializedContent.current = contentToDeserialize;
+        return;
+      }
+      editor.tf.setValue(nodes);
+      lastSetNodesRef.current = nodes;
+      lastDeserializedContent.current = contentToDeserialize;
+    };
+
+    if (!isUpdatingFromPlate.current) {
+      const contentToDeserialize = bodyContent;
+      const performDeserialization = () => {
+        applyDeserializedContent(contentToDeserialize);
       };
 
       let cleanup: (() => void) | undefined;
@@ -255,6 +280,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
       return cleanup;
     } else {
+      pendingExternalContentRef.current = bodyContent;
       prevEditorViewMode.current = editorViewMode;
     }
   }, [bodyContent, editor, editorViewMode, isLoading]);
@@ -550,6 +576,21 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // This prevents the effect from resetting the editor and losing focus
         setTimeout(() => {
           isUpdatingFromPlate.current = false;
+          const pendingExternal = pendingExternalContentRef.current;
+          if (pendingExternal && pendingExternal !== lastDeserializedContent.current) {
+            try {
+              const { nodes } = processMarkdownDiff(pendingExternal);
+              if (nodes && nodes !== lastSetNodesRef.current) {
+                editor.tf.setValue(nodes);
+                lastSetNodesRef.current = nodes;
+                lastDeserializedContent.current = pendingExternal;
+              }
+            } catch (error) {
+              console.error('[PlateEditor] Deferred sync failed:', error);
+            } finally {
+              pendingExternalContentRef.current = null;
+            }
+          }
         }, 0);
       }}
     >

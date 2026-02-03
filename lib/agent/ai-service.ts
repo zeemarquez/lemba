@@ -14,6 +14,7 @@ import {
     generateId,
     type ImageAttachment,
 } from './types';
+import { mergeDiffsForFile } from './diff-utils';
 import {
     readDocument,
     readDocumentSection,
@@ -478,11 +479,17 @@ You have access to tools that allow you to:
 
 // ==================== Tool Execution ====================
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function executeTool(
+    name: string,
+    args: Record<string, unknown>,
+    contentOverrides?: Record<string, string>
+): Promise<string> {
+    const getOverride = (fileId: string) => contentOverrides?.[fileId];
+
     try {
         switch (name) {
             case 'read_document': {
-                const content = await readDocument(args.fileId as string);
+                const content = await readDocument(args.fileId as string, getOverride(args.fileId as string));
                 return content || '(empty document)';
             }
 
@@ -490,20 +497,23 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                 const content = await readDocumentSection(
                     args.fileId as string,
                     args.startLine as number,
-                    args.endLine as number
+                    args.endLine as number,
+                    getOverride(args.fileId as string)
                 );
                 return content || '(empty section)';
             }
 
             case 'get_document_metadata': {
-                const metadata = await getDocumentMetadata(args.fileId as string);
+                const metadata = await getDocumentMetadata(args.fileId as string, getOverride(args.fileId as string));
                 return JSON.stringify(metadata, null, 2);
             }
 
             case 'search_in_document': {
                 const results = await searchInDocument(
                     args.fileId as string,
-                    args.query as string
+                    args.query as string,
+                    2,
+                    getOverride(args.fileId as string)
                 );
                 return JSON.stringify(results, null, 2);
             }
@@ -516,7 +526,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
             case 'find_headings': {
                 const headings = await findHeadings(
                     args.fileId as string,
-                    args.level as number | undefined
+                    args.level as number | undefined,
+                    getOverride(args.fileId as string)
                 );
                 return JSON.stringify(headings, null, 2);
             }
@@ -526,7 +537,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     args.oldText as string,
                     args.newText as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) {
                     return JSON.stringify({ error: 'Text not found in document' });
@@ -559,7 +571,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     insertPos,
                     args.content as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) {
                     return JSON.stringify({ error: 'Could not insert at specified position' });
@@ -572,7 +585,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     args.startLine as number,
                     args.endLine as number,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) {
                     return JSON.stringify({ error: 'Invalid line range' });
@@ -585,7 +599,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     args.sectionHeading as string,
                     args.newContent as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) {
                     return JSON.stringify({ error: 'Section heading not found' });
@@ -610,7 +625,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
             }
 
             case 'get_document_structure': {
-                const structure = await getDocumentStructure(args.fileId as string);
+                const structure = await getDocumentStructure(args.fileId as string, getOverride(args.fileId as string));
                 return JSON.stringify(structure, null, 2);
             }
 
@@ -619,7 +634,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     args.sectionHeading as string,
                     args.newContent as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    1,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) return JSON.stringify({ error: 'Section not found' });
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
@@ -631,7 +648,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.targetHeading as string,
                     args.relation as 'before' | 'after',
                     args.newContent as string,
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) return JSON.stringify({ error: 'Target section not found' });
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
@@ -643,7 +661,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.fileId as string,
                     args.sectionHeading as string,
                     args.description as string | undefined,
-                    occurrenceIndex
+                    occurrenceIndex,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) return JSON.stringify({ error: 'Section not found' });
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
@@ -655,7 +674,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
                     args.sectionHeading as string,
                     args.targetHeading as string,
                     args.relation as 'before' | 'after',
-                    args.description as string | undefined
+                    args.description as string | undefined,
+                    getOverride(args.fileId as string)
                 );
                 if (!diff) return JSON.stringify({ error: 'Section or target not found, or invalid move' });
                 return JSON.stringify({ success: true, diffId: diff.id, diff });
@@ -717,7 +737,19 @@ function formatProviderError(provider: LLMProvider, status: number, body: string
     const label = PROVIDER_LABELS[provider];
     if (status === 401) return `${label}: Invalid API key`;
     if (status === 429) return `${label}: Rate limit exceeded`;
-    if (status >= 500) return `${label}: Service error`;
+    if (status >= 500) {
+        try {
+            const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+            const msg = typeof j?.error === 'string' ? j.error : j?.error?.message ?? j?.message;
+            if (typeof msg === 'string' && msg.length > 0) {
+                const short = msg.length > 120 ? msg.slice(0, 117) + '…' : msg;
+                return `${label}: ${short}`;
+            }
+        } catch {
+            /* ignore */
+        }
+        return `${label}: Service error (try again later or check API key in Settings)`;
+    }
     try {
         const j = JSON.parse(body) as { error?: { message?: string }; message?: string };
         const msg = j?.error?.message ?? j?.message;
@@ -1222,6 +1254,8 @@ export interface SendMessageToAIOptions {
     temperature?: number;
     maxTokens?: number;
     onDiffCreated?: (diff: DocumentDiff) => void;
+    /** In-memory content for mentioned files; overrides IndexedDB to use latest unsaved edits */
+    initialContentOverrides?: Record<string, string>;
 }
 
 export async function sendMessageToAI(
@@ -1252,17 +1286,23 @@ export async function sendMessageToAI(
         ? SYSTEM_PROMPT + '\n\n**Read-only mode is enabled.** You must NOT use any tools that propose or apply edits to documents. Only read, search, and list. If the user asks to edit, explain that edit mode is disabled.'
         : SYSTEM_PROMPT;
 
-    // Build context from mentioned files
+    // Build context from mentioned files; prefer in-memory content (initialContentOverrides) over IndexedDB
     let fileContext = '';
     if (mentionedFiles.length > 0) {
         for (const fileId of mentionedFiles) {
-            try {
-                const content = await readDocument(fileId);
-                const fileName = fileId.split('/').pop() || fileId;
-                fileContext += `\n\n--- Content of @${fileName} (${fileId}) ---\n${content}\n--- End of ${fileName} ---`;
-            } catch (error) {
-                console.error(`Failed to read mentioned file ${fileId}:`, error);
+            let content: string;
+            if (options?.initialContentOverrides?.[fileId] !== undefined) {
+                content = options.initialContentOverrides[fileId];
+            } else {
+                try {
+                    content = await readDocument(fileId);
+                } catch (error) {
+                    console.error(`Failed to read mentioned file ${fileId}:`, error);
+                    content = '(empty document)';
+                }
             }
+            const fileName = fileId.split('/').pop() || fileId;
+            fileContext += `\n\n--- Content of @${fileName} (${fileId}) ---\n${content || '(empty document)'}\n--- End of ${fileName} ---`;
         }
     }
 
@@ -1299,6 +1339,7 @@ export async function sendMessageToAI(
 
     // Make API call with tools (provider-specific)
     const collectedDiffs: DocumentDiff[] = [];
+    const contentOverrides: Record<string, string> = { ...(options?.initialContentOverrides ?? {}) };
     let maxIterations = 10; // Prevent infinite loops
 
     const openaiCompatibleUrl = provider === 'google'
@@ -1459,13 +1500,18 @@ export async function sendMessageToAI(
             for (const toolCall of message.tool_calls) {
                 const args = JSON.parse(toolCall.function.arguments);
                 agentLog.tool(toolCall.function.name, args);
-                const result = await executeTool(toolCall.function.name, args);
+                const result = await executeTool(toolCall.function.name, args, contentOverrides);
 
                 // Collect diffs from any edit tool (propose_*, update_section, add_section, remove_section, move_section)
                 try {
                     const resultObj = JSON.parse(result);
                     if (resultObj.success && resultObj.diff) {
                         collectedDiffs.push(resultObj.diff);
+                        const fileDiffs = collectedDiffs.filter((d) => d.fileId === resultObj.diff.fileId);
+                        const merged = mergeDiffsForFile(fileDiffs);
+                        if (merged) {
+                            contentOverrides[resultObj.diff.fileId] = merged.proposedContent;
+                        }
                         if (onDiff) {
                             onDiff(resultObj.diff);
                         }

@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { FileTree } from "@/components/layout/FileTree";
 import { InputDialog } from "@/components/layout/InputDialog";
 import { DocumentOutline } from "@/components/layout/DocumentOutline";
+import { DocumentVersionHistory } from "@/components/layout/DocumentVersionHistory";
 import {
     ResizablePanelGroup,
     ResizablePanel,
@@ -62,6 +63,7 @@ export function Sidebar() {
     const [mounted, setMounted] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [isOutlineCollapsed, setIsOutlineCollapsed] = useState(false);
+    const [isVersionHistoryCollapsed, setIsVersionHistoryCollapsed] = useState(false);
     const [isFilesCollapsed, setIsFilesCollapsed] = useState(false);
     const [dialogConfig, setDialogConfig] = useState<{
         title: string;
@@ -370,7 +372,7 @@ export function Sidebar() {
                     <ResizablePanelGroup direction="vertical" className="flex-1 min-h-0">
                         {/* Files Panel */}
                         <ResizablePanel
-                            defaultSize={60}
+                            defaultSize={40}
                             minSize={20}
                             collapsible={true}
                             collapsedSize={8}
@@ -439,7 +441,7 @@ export function Sidebar() {
 
                         {/* Outline Panel */}
                         <ResizablePanel
-                            defaultSize={40}
+                            defaultSize={35}
                             minSize={15}
                             collapsible={true}
                             collapsedSize={8}
@@ -450,6 +452,24 @@ export function Sidebar() {
                                 className="h-full"
                                 isCollapsed={isOutlineCollapsed}
                                 onToggleCollapse={() => setIsOutlineCollapsed(!isOutlineCollapsed)}
+                            />
+                        </ResizablePanel>
+
+                        <ResizableHandle />
+
+                        {/* Version History Panel */}
+                        <ResizablePanel
+                            defaultSize={25}
+                            minSize={10}
+                            collapsible={true}
+                            collapsedSize={8}
+                            onCollapse={() => setIsVersionHistoryCollapsed(true)}
+                            onExpand={() => setIsVersionHistoryCollapsed(false)}
+                        >
+                            <DocumentVersionHistory
+                                className="h-full"
+                                isCollapsed={isVersionHistoryCollapsed}
+                                onToggleCollapse={() => setIsVersionHistoryCollapsed(!isVersionHistoryCollapsed)}
                             />
                         </ResizablePanel>
                     </ResizablePanelGroup>
