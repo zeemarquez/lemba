@@ -97,39 +97,8 @@ function getStaticPath() {
   return path.join(__dirname, '..', 'out');
 }
 
-function createWindow() {
-  const isDarkMode = nativeTheme.shouldUseDarkColors;
-  const backgroundColor = isDarkMode ? THEME_COLORS.dark : THEME_COLORS.light;
-
-  const iconPath = process.env.NODE_ENV === 'development'
-    ? path.join(__dirname, '..', 'public', 'favicon.png')
-    : path.join(getStaticPath(), 'favicon.png');
-
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
-    icon: iconPath,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-    // macOS: Hide title bar but keep traffic lights
-    // Windows/Linux: Completely frameless
-    ...(process.platform === 'darwin'
-      ? {
-        titleBarStyle: 'hidden',
-        trafficLightPosition: { x: 12, y: 10 }, // Adjust traffic light position
-      }
-      : { frame: false }
-    ),
-    backgroundColor: backgroundColor,
-    show: false,
-  });
-
-  // Handle IPC calls
+// Register IPC handlers once (survives window close on macOS so we don't double-register on activate)
+function registerIpcHandlers() {
   ipcMain.on('window-minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) win.minimize();
@@ -147,20 +116,6 @@ function createWindow() {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) win.close();
   });
-
-  mainWindow.on('maximize', () => mainWindow.webContents.send('window-maximized', true));
-  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-maximized', false));
-
-  const isDev = process.env.NODE_ENV === 'development';
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadURL('app://./index.html');
-  }
-
-  mainWindow.once('ready-to-show', () => mainWindow.show());
-
 
   ipcMain.on('open-external', async (event, url) => {
     console.log('[Main] Opening external URL:', url);
@@ -203,6 +158,52 @@ function createWindow() {
       return { error: error.message };
     }
   });
+}
+
+function createWindow() {
+  const isDarkMode = nativeTheme.shouldUseDarkColors;
+  const backgroundColor = isDarkMode ? THEME_COLORS.dark : THEME_COLORS.light;
+
+  const iconPath = process.env.NODE_ENV === 'development'
+    ? path.join(__dirname, '..', 'public', 'favicon.png')
+    : path.join(getStaticPath(), 'favicon.png');
+
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    icon: iconPath,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    // macOS: Hide title bar but keep traffic lights
+    // Windows/Linux: Completely frameless
+    ...(process.platform === 'darwin'
+      ? {
+        titleBarStyle: 'hidden',
+        trafficLightPosition: { x: 12, y: 10 }, // Adjust traffic light position
+      }
+      : { frame: false }
+    ),
+    backgroundColor: backgroundColor,
+    show: false,
+  });
+
+  mainWindow.on('maximize', () => mainWindow.webContents.send('window-maximized', true));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-maximized', false));
+
+  const isDev = process.env.NODE_ENV === 'development';
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadURL('app://./index.html');
+  }
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
 
   // Handle Auth Popups and External Links
   mainWindow.webContents.setWindowOpenHandler(({ url, features }) => {
@@ -330,6 +331,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     registerProtocol();
+    registerIpcHandlers();
     createWindow();
 
     // Check for deep link on startup (Windows/Linux)

@@ -1,6 +1,6 @@
 Loading environment variables from .env.local...
-Current Hash: f83f9051e9be2bd8c619736f7c927eede361c513
-Using current version: 0.1.18
+Current Hash: a602d52b6d188bef29815e164ef2f901a8ef1803
+Using current version: 0.1.19
 Preparing dist/win directory...
 Starting Windows build...
   • electron-builder  version=26.4.0 os=23.6.0
@@ -11,11 +11,11 @@ Starting Windows build...
   • packaging       platform=win32 arch=x64 electron=40.0.0 appOutDir=dist/win/win-unpacked
   • cannot find path for dependency  name=undefined reference=undefined
   • updating asar integrity executable resource  executablePath=dist/win/win-unpacked/Modern Markdown Editor.exe
-  • building        target=nsis file=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.exe archs=x64 oneClick=false perMachine=false
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.__uninstaller.exe
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.exe
-  • building block map  blockMapFile=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.exe.blockmap
-  • building        target=portable file=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.exe archs=x64
-  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.18-Windows-x64.exe
+  • building        target=nsis file=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.exe archs=x64 oneClick=false perMachine=false
+  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.__uninstaller.exe
+  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.exe
+  • building block map  blockMapFile=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.exe.blockmap
+  • building        target=portable file=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.exe archs=x64
+  • signing with signtool.exe  path=dist/win/Modern Markdown Editor-0.1.19-Windows-x64.exe
 Updating build history...
 Build complete! Artifacts are in dist/
