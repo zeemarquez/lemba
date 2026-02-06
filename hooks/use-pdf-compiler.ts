@@ -17,7 +17,7 @@ import { processTypstImages } from '@/lib/typst/client-image-manager';
 import { resolveLucideIconsFromAlerts } from '@/lib/typst/lucide-svg';
 import { convertIndexedDbImagesToBase64 } from '@/hooks/use-indexed-db-image';
 import { useStore } from '@/lib/store';
-import { parseVariablesFromFrontmatter } from '@/components/export/ExportSidebar';
+import { parseVariablesFromFrontmatter } from '@/lib/frontmatter';
 import type {
     WorkerRequest,
     WorkerResponse,
@@ -219,7 +219,15 @@ async function contentToTypst(content: string, context: {
         // Not JSON, assume markdown string
     }
 
-    return markdownToTypst(content, { figures: context.figures, alerts: context.alerts, resolvedLucideSvgs: context.resolvedLucideSvgs }).trim();
+    return markdownToTypst(content, { 
+        figures: context.figures, 
+        alerts: context.alerts, 
+        resolvedLucideSvgs: context.resolvedLucideSvgs,
+        title: context.title,
+        variables: context.variables,
+        pageNumberOffset: context.pageNumberOffset,
+        insideContext: context.insideContext
+    }).trim();
 }
 
 /**
@@ -250,13 +258,6 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
     // Resolve custom Lucide alert icons to SVG for PDF
     const resolvedLucideSvgs = await resolveLucideIconsFromAlerts(settings?.alerts);
 
-    const typstBody = markdownToTypst(markdownWithImages, {
-        tables: settings?.tables,
-        figures: settings?.figures,
-        alerts: settings?.alerts,
-        resolvedLucideSvgs
-    });
-
     // Prepare Header/Footer/Front Page
     let headerContent = '';
     let footerContent = '';
@@ -264,6 +265,16 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
 
     const startPageNumber = settings?.startPageNumber || 1;
     const pageNumberOffset = 1 - startPageNumber;
+
+    const typstBody = markdownToTypst(markdownWithImages, {
+        tables: settings?.tables,
+        figures: settings?.figures,
+        alerts: settings?.alerts,
+        resolvedLucideSvgs,
+        title,
+        variables,
+        pageNumberOffset
+    });
 
     if (settings?.header?.enabled && settings?.header?.content) {
         const headerWithImages = await convertIndexedDbImagesToBase64(settings.header.content);

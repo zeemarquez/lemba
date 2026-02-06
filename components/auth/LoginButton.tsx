@@ -28,13 +28,19 @@ interface LoginButtonProps {
 /**
  * Login Button Component
  */
-export function LoginButton({ 
-    className, 
+export function LoginButton({
+    className,
     showLabel = true,
-    size = 'default' 
+    size = 'default'
 }: LoginButtonProps) {
     const { user, isLoading, isConfigured, signIn, signOut, error, accessLevel, hasSyncAccess } = useAuth();
     const [isSigningIn, setIsSigningIn] = useState(false);
+    const [mounted, setMounted] = useState(false);
+
+    // Prevent hydration mismatch
+    React.useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // Handle sign in
     const handleSignIn = async () => {
@@ -56,6 +62,21 @@ export function LoginButton({
             // Error is handled in AuthProvider
         }
     };
+
+    // Show loading state until mounted to match server/client
+    if (!mounted) {
+        return (
+            <Button
+                variant="ghost"
+                size={size}
+                className={className}
+                disabled
+            >
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {showLabel && <span className="ml-2">Loading...</span>}
+            </Button>
+        );
+    }
 
     // Firebase not configured
     if (!isConfigured) {
@@ -166,7 +187,7 @@ export function LoginButton({
                     )}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem 
+                <DropdownMenuItem
                     className="gap-2 text-destructive focus:text-destructive"
                     onClick={handleSignOut}
                 >

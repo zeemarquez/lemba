@@ -14,18 +14,48 @@ import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
-// Firebase configuration from environment variables
+// Helper to get environment variable from electronAPI (runtime)
+const getElectronEnv = (key: string): string | undefined => {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.env?.[key]) {
+        return (window as any).electronAPI.env[key];
+    }
+    return undefined;
+};
+
+// Explicitly access process.env to allow Next.js to inline values at build time.
+// Dynamic access (process.env[key]) DOES NOT work for Client Components.
+const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || getElectronEnv('NEXT_PUBLIC_FIREBASE_API_KEY');
+const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || getElectronEnv('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN');
+const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || getElectronEnv('NEXT_PUBLIC_FIREBASE_PROJECT_ID');
+const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || getElectronEnv('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET');
+const messagingSenderId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || getElectronEnv('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID');
+const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID || getElectronEnv('NEXT_PUBLIC_FIREBASE_APP_ID');
+
+const customAppId = process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID || getElectronEnv('NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID');
+const authHandlerUrl = process.env.NEXT_PUBLIC_AUTH_HANDLER_URL || getElectronEnv('NEXT_PUBLIC_AUTH_HANDLER_URL');
+
+console.log('[Firebase Config] Initializing with:', {
+    hasApiKey: !!apiKey,
+    hasAuthDomain: !!authDomain,
+    hasProjectId: !!projectId,
+    authHandlerUrl,
+    isElectron: typeof window !== 'undefined' && !!(window as any).electronAPI
+});
+
+// Firebase configuration
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    apiKey,
+    authDomain,
+    projectId,
+    storageBucket,
+    messagingSenderId,
+    appId,
+    // Not part of firebase config but useful to expose here
+    authHandlerUrl,
 };
 
 // App ID for Firestore document structure (can be customized per deployment)
-export const FIREBASE_APP_ID = process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID || 'modern-markdown-editor';
+export const FIREBASE_APP_ID = customAppId || 'modern-markdown-editor';
 
 // Initialize Firebase (singleton pattern)
 let app: FirebaseApp;
@@ -33,25 +63,38 @@ let auth: Auth;
 let db: Firestore;
 
 function initializeFirebase() {
-    if (getApps().length === 0) {
-        app = initializeApp(firebaseConfig);
-    } else {
-        app = getApp();
+    try {
+        if (getApps().length === 0) {
+            console.log('[Firebase Config] Initializing new app instance');
+            app = initializeApp(firebaseConfig);
+        } else {
+            console.log('[Firebase Config] Using existing app instance');
+            app = getApp();
+        }
+
+        auth = getAuth(app);
+        db = getFirestore(app);
+
+        return { app, auth, db };
+    } catch (error) {
+        console.error('[Firebase Config] Initialization failed:', error);
+        throw error;
     }
-    
-    auth = getAuth(app);
-    db = getFirestore(app);
-    
-    return { app, auth, db };
 }
 
 // Check if Firebase is configured
 export function isFirebaseConfigured(): boolean {
-    return !!(
+    const isConfigured = !!(
         firebaseConfig.apiKey &&
         firebaseConfig.authDomain &&
         firebaseConfig.projectId
     );
+
+    if (!isConfigured) {
+        console.warn('[Firebase Config] Missing required configuration. Check your .env.local file.');
+    }
+
+    return isConfigured;
 }
 
 // Lazy initialization
@@ -68,6 +111,11 @@ export function getFirebaseAuth(): Auth {
 export function getFirebaseFirestore(): Firestore {
     if (!db) initializeFirebase();
     return db;
+}
+
+
+export function getAuthHandlerUrl(): string | undefined {
+    return firebaseConfig.authHandlerUrl;
 }
 
 // Export initialized instances (for convenience)

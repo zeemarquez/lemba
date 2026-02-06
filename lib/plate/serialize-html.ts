@@ -2,9 +2,11 @@ import type { Descendant, TElement, TText } from 'platejs';
 
 interface SerializeContext {
   pageNumber?: string | number;
+  totalPages?: string | number;
   date?: string;
   title?: string;
   pageNumberOffset?: number;
+  variables?: Record<string, string>;
 }
 
 // Helper to post-process HTML string and convert img with figcaption attribute to figure element
@@ -197,6 +199,14 @@ function serializeElementNode(element: TElement, children: string, context: Seri
         const counterStyle = pFormat || 'decimal';
         return `<span class="page-number-placeholder"${styleAttr} data-format="${counterStyle}" data-offset="${pOffset}"></span>`;
       }
+      if (pType === 'totalPages') {
+        const counterStyle = pFormat || 'decimal';
+        const total = context.totalPages;
+        if (typeof total === 'number') {
+          return `<span class="total-pages"${styleAttr}>${formatCounter(total, counterStyle)}</span>`;
+        }
+        return `<span class="total-pages-placeholder"${styleAttr} data-format="${counterStyle}"></span>`;
+      }
       if (pType === 'date') {
         const date = new Date();
         let formattedDate = date.toLocaleDateString();
@@ -208,6 +218,11 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       if (pType === 'title') {
         const title = context.title || 'Untitled';
         return `<span class="file-title"${styleAttr}>${title}</span>`;
+      }
+      if (pType === 'variable') {
+        const variableName = element.variableName as string | undefined;
+        const value = variableName ? context.variables?.[variableName] : '';
+        return `<span class="variable-placeholder"${styleAttr}>${escapeHtml(value || '')}</span>`;
       }
       return '';
     // Table elements
@@ -331,6 +346,53 @@ function serializeElementNode(element: TElement, children: string, context: Seri
       }
       return '';
   }
+}
+
+function formatCounter(value: number, format: string): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (format === 'lower-roman') return toRoman(value).toLowerCase();
+  if (format === 'upper-roman') return toRoman(value);
+  if (format === 'lower-alpha') return toAlpha(value).toLowerCase();
+  if (format === 'upper-alpha') return toAlpha(value);
+  return String(value);
+}
+
+function toRoman(value: number): string {
+  const lookup: Array<[number, string]> = [
+    [1000, 'M'],
+    [900, 'CM'],
+    [500, 'D'],
+    [400, 'CD'],
+    [100, 'C'],
+    [90, 'XC'],
+    [50, 'L'],
+    [40, 'XL'],
+    [10, 'X'],
+    [9, 'IX'],
+    [5, 'V'],
+    [4, 'IV'],
+    [1, 'I'],
+  ];
+  let result = '';
+  let remaining = Math.max(0, Math.floor(value));
+  for (const [num, sym] of lookup) {
+    while (remaining >= num) {
+      result += sym;
+      remaining -= num;
+    }
+  }
+  return result || String(value);
+}
+
+function toAlpha(value: number): string {
+  let n = Math.max(1, Math.floor(value));
+  let result = '';
+  while (n > 0) {
+    n -= 1;
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26);
+  }
+  return result;
 }
 
 function escapeHtml(text: string): string {

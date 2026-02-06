@@ -1,12 +1,23 @@
-import { FileNode, Template, ImageEntry, FontEntry, FileEntry, generateSyncId } from './types';
+import { FileNode, Template, ImageEntry, FontEntry, FileEntry, RagDocument, generateSyncId } from './types';
 import { compressImage } from './image-compression';
 
 const DB_NAME = 'markdown-editor-db';
-const DB_VERSION = 12; // Bumped for sync metadata migration
+const DB_VERSION = 14; // Bumped for version history
 const STORE_FILES = 'files';
 const STORE_TEMPLATES = 'templates';
 const STORE_IMAGES = 'images';
 const STORE_FONTS = 'fonts';
+const STORE_RAG = 'rag_documents';
+const STORE_VERSIONS = 'versions';
+
+export interface VersionEntry {
+    id: string;
+    fileId: string;
+    content: string;
+    createdAt: number;
+    wordCount: number;
+    hash?: string;
+}
 
 
 
@@ -148,6 +159,25 @@ class BrowserStorage {
                     };
                 }
 
+                // Add RAG documents store (v13+)
+                if (oldVersion < 13) {
+                    if (!db.objectStoreNames.contains(STORE_RAG)) {
+                        const ragStore = db.createObjectStore(STORE_RAG, { keyPath: 'id' });
+                        ragStore.createIndex('chatId', 'chatId', { unique: false });
+                        ragStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+                        ragStore.createIndex('syncId', 'syncId', { unique: false });
+                    }
+                }
+
+                // Add version history store (v14+)
+                if (oldVersion < 14) {
+                    if (!db.objectStoreNames.contains(STORE_VERSIONS)) {
+                        const versionsStore = db.createObjectStore(STORE_VERSIONS, { keyPath: 'id' });
+                        versionsStore.createIndex('fileId', 'fileId', { unique: false });
+                        versionsStore.createIndex('createdAt', 'createdAt', { unique: false });
+                    }
+                }
+
                 if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
                     // No need to create it if it doesn't exist, we are deprecating it
                     // But if we are in v1->v2 upgrade, it might exist
@@ -284,13 +314,15 @@ class BrowserStorage {
         return entry.content;
     }
 
-    async createFile(path: string, content: string = ''): Promise<FileEntry> {
+    async createFile(path: string, content: string = '', overwrite: boolean = false): Promise<FileEntry> {
         // Check if exists
         try {
             await this.readFile(path);
-            throw new Error('File already exists');
+            if (!overwrite) {
+                throw new Error('File already exists');
+            }
         } catch (e: any) {
-            if (e.message !== 'File not found') throw e;
+            if (e.message !== 'File not found' && e.message !== 'File already exists') throw e;
         }
 
         const fileEntry: FileEntry = {
@@ -446,7 +478,7 @@ class BrowserStorage {
         for (const file of files) {
             // Skip soft-deleted files
             if (file.isDeleted) continue;
-            
+
             if (file.path.startsWith('Templates/') && (file.path.endsWith('.mdt') || file.path.endsWith('.json'))) {
                 try {
                     const template = JSON.parse(file.content);
@@ -464,8 +496,8 @@ class BrowserStorage {
         await this.writeFile(path, JSON.stringify(template, null, 2));
     }
 
-    async createTemplate(path: string, template: Template): Promise<void> {
-        await this.createFile(path, JSON.stringify(template, null, 2));
+    async createTemplate(path: string, template: Template, overwrite: boolean = false): Promise<void> {
+        await this.createFile(path, JSON.stringify(template, null, 2), overwrite);
     }
 
     async deleteTemplate(path: string): Promise<void> {
@@ -488,7 +520,7 @@ class BrowserStorage {
      */
     async storeImage(file: File): Promise<ImageEntry> {
         console.log(`[BrowserStorage] storeImage called for: ${file.name}, size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
-        
+
         // Try to compress image if it's over 500KB
         // If compression fails, use original file
         let fileToStore: File;
@@ -502,7 +534,7 @@ class BrowserStorage {
             console.warn('[BrowserStorage] Image compression failed, storing original file:', compressionError);
             fileToStore = file;
         }
-        
+
         const id = this.generateImageId();
         const now = Date.now();
         const entry: ImageEntry = {
@@ -622,6 +654,15 @@ class BrowserStorage {
         });
 
         return entry;
+    }
+
+    /**
+     * Save a complete font entry (used for preloaded or synced fonts)
+     */
+    async saveFont(font: FontEntry): Promise<void> {
+        await this.transaction(STORE_FONTS, 'readwrite', store => {
+            store.put(font);
+        });
     }
 
     /**
@@ -814,6 +855,61 @@ class BrowserStorage {
         });
     }
 
+    // ==================== Version History ====================
+
+    async storeVersion(entry: VersionEntry): Promise<void> {
+        await this.transaction(STORE_VERSIONS, 'readwrite', store => {
+            store.put(entry);
+        });
+    }
+
+    async getVersionsForFile(fileId: string, limit = 50): Promise<VersionEntry[]> {
+        const db = await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_VERSIONS, 'readonly');
+            const store = tx.objectStore(STORE_VERSIONS);
+            const index = store.index('fileId');
+            const request = index.getAll(fileId);
+
+            request.onsuccess = () => {
+                const entries = (request.result as VersionEntry[]).sort((a, b) => b.createdAt - a.createdAt);
+                resolve(entries.slice(0, limit));
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getVersionById(id: string): Promise<VersionEntry | null> {
+        const entry = await this.transaction<VersionEntry>(STORE_VERSIONS, 'readonly', store => store.get(id));
+        return entry ?? null;
+    }
+
+    async deleteVersionsForFile(fileId: string, keepCount: number): Promise<void> {
+        const versions = await this.getVersionsForFile(fileId, 9999);
+        if (versions.length <= keepCount) return;
+        const toDelete = versions.slice(keepCount);
+        const db = await this.initDB();
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_VERSIONS, 'readwrite');
+            const store = tx.objectStore(STORE_VERSIONS);
+            toDelete.forEach(v => store.delete(v.id));
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    async deleteVersionsByIds(ids: string[]): Promise<void> {
+        if (ids.length === 0) return;
+        const db = await this.initDB();
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_VERSIONS, 'readwrite');
+            const store = tx.objectStore(STORE_VERSIONS);
+            ids.forEach(id => store.delete(id));
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
     /**
      * Soft delete a file (set isDeleted flag)
      */
@@ -880,7 +976,7 @@ class BrowserStorage {
      */
     async upsertFile(entry: FileEntry): Promise<void> {
         const existing = await this.transaction<FileEntry>(STORE_FILES, 'readonly', store => store.get(entry.path));
-        
+
         // If existing entry has newer timestamp, skip
         if (existing && existing.updatedAt >= entry.updatedAt) {
             return;
@@ -897,7 +993,7 @@ class BrowserStorage {
      */
     async upsertImage(entry: ImageEntry): Promise<void> {
         const existing = await this.transaction<ImageEntry>(STORE_IMAGES, 'readonly', store => store.get(entry.id));
-        
+
         // If existing entry has newer timestamp, skip
         if (existing && existing.updatedAt >= entry.updatedAt) {
             return;
@@ -914,7 +1010,7 @@ class BrowserStorage {
      */
     async upsertFont(entry: FontEntry): Promise<void> {
         const existing = await this.transaction<FontEntry>(STORE_FONTS, 'readonly', store => store.get(entry.id));
-        
+
         // If existing entry has newer timestamp, skip
         if (existing && existing.updatedAt >= entry.updatedAt) {
             return;
@@ -935,7 +1031,7 @@ class BrowserStorage {
         const filesTx = db.transaction(STORE_FILES, 'readwrite');
         const filesStore = filesTx.objectStore(STORE_FILES);
         const filesRequest = filesStore.getAll();
-        
+
         await new Promise<void>((resolve, reject) => {
             filesRequest.onsuccess = () => {
                 const files = filesRequest.result as FileEntry[];
@@ -953,7 +1049,7 @@ class BrowserStorage {
         const imagesTx = db.transaction(STORE_IMAGES, 'readwrite');
         const imagesStore = imagesTx.objectStore(STORE_IMAGES);
         const imagesRequest = imagesStore.getAll();
-        
+
         await new Promise<void>((resolve, reject) => {
             imagesRequest.onsuccess = () => {
                 const images = imagesRequest.result as ImageEntry[];
@@ -971,7 +1067,7 @@ class BrowserStorage {
         const fontsTx = db.transaction(STORE_FONTS, 'readwrite');
         const fontsStore = fontsTx.objectStore(STORE_FONTS);
         const fontsRequest = fontsStore.getAll();
-        
+
         await new Promise<void>((resolve, reject) => {
             fontsRequest.onsuccess = () => {
                 const fonts = fontsRequest.result as FontEntry[];
@@ -996,6 +1092,46 @@ class BrowserStorage {
         } catch (e) {
             return null;
         }
+    }
+
+    // ==================== RAG Document Methods ====================
+
+    async storeRagDocument(doc: RagDocument): Promise<void> {
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            store.put(doc);
+        });
+    }
+
+    async getRagDocumentsByChatId(chatId: string): Promise<RagDocument[]> {
+        const db = await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_RAG, 'readonly');
+            const store = tx.objectStore(STORE_RAG);
+            const index = store.index('chatId');
+            const request = index.getAll(chatId);
+
+            request.onsuccess = () => {
+                resolve(request.result as RagDocument[]);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async deleteRagDocument(id: string): Promise<void> {
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            store.delete(id);
+        });
+    }
+
+    async deleteRagDocumentsByChatId(chatId: string): Promise<void> {
+        const docs = await this.getRagDocumentsByChatId(chatId);
+        if (docs.length === 0) return;
+
+        await this.transaction(STORE_RAG, 'readwrite', store => {
+            docs.forEach(doc => {
+                store.delete(doc.id);
+            });
+        });
     }
 }
 

@@ -2,6 +2,64 @@ const { app, BrowserWindow, shell, protocol, net, session, nativeTheme, ipcMain 
 const path = require('path');
 const fs = require('fs');
 
+// Register protocol as early as possible
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('modern-markdown-editor', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('modern-markdown-editor');
+}
+
+const { pathToFileURL } = require('url');
+
+// Register protocol as early as possible
+const PROTOCOL_SCHEME = 'modern-markdown-editor';
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+}
+
+// Try to load environment variables
+console.log('[Electron] Initializing environment...');
+try {
+  const possiblePaths = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+    path.join(app.getAppPath(), '.env'),
+    path.join(app.getAppPath(), '.env.local'),
+    path.join(path.dirname(app.getPath('exe')), '.env'),
+    path.join(path.dirname(app.getPath('exe')), '.env.local'),
+  ];
+
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      console.log('[Electron] Loading env from:', envPath);
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      envContent.split(/\r?\n/).forEach(line => {
+        const match = line.match(/^([^#=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          let value = match[2].trim();
+          // Remove wrapping quotes if present
+          if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length - 1);
+          }
+          if (key.startsWith('NEXT_PUBLIC_')) {
+            process.env[key] = value;
+            console.log(`[Electron] Set runtime env: ${key}`);
+          }
+        }
+      });
+    }
+  }
+} catch (e) {
+  console.log('[Electron] Error loading .env file:', e.message);
+}
+
 // Theme colors for title bar
 const THEME_COLORS = {
   dark: '#0a0a0a',
@@ -9,7 +67,6 @@ const THEME_COLORS = {
 };
 
 // Register the custom protocol as privileged BEFORE app is ready
-// This grants localStorage, IndexedDB, and treats it as a secure context
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',
@@ -24,80 +81,55 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling
+// Handle creating/removing shortcuts on Windows
 try {
   if (require('electron-squirrel-startup')) {
     app.quit();
   }
-} catch (e) {
-  // electron-squirrel-startup not available, ignore
-}
+} catch (e) { }
 
-// Keep a global reference of the window object to prevent garbage collection
 let mainWindow = null;
 
-// Get the path to the static export directory
 function getStaticPath() {
-  // In packaged app, resources are in app.asar
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'app.asar', 'out');
   }
-  // In development, use the out directory
   return path.join(__dirname, '..', 'out');
 }
 
-// MIME types for serving static files
-const MIME_TYPES = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.eot': 'application/vnd.ms-fontobject',
-  '.wasm': 'application/wasm',
-  '.md': 'text/markdown',
-  '.mdt': 'application/json',
-  '.txt': 'text/plain',
-};
-
-function getMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  return MIME_TYPES[ext] || 'application/octet-stream';
-}
-
 function createWindow() {
-  // Determine initial theme
   const isDarkMode = nativeTheme.shouldUseDarkColors;
   const backgroundColor = isDarkMode ? THEME_COLORS.dark : THEME_COLORS.light;
 
-  // Create the browser window - frameless for custom title bar
+  const iconPath = process.env.NODE_ENV === 'development'
+    ? path.join(__dirname, '..', 'public', 'favicon.png')
+    : path.join(getStaticPath(), 'favicon.png');
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    // Frameless window for custom title bar
-    frame: false,
-    // Transparent to avoid white flash
+    // macOS: Hide title bar but keep traffic lights
+    // Windows/Linux: Completely frameless
+    ...(process.platform === 'darwin'
+      ? {
+        titleBarStyle: 'hidden',
+        trafficLightPosition: { x: 12, y: 10 }, // Adjust traffic light position
+      }
+      : { frame: false }
+    ),
     backgroundColor: backgroundColor,
-    show: false, // Don't show until ready
+    show: false,
   });
 
-  // Listen for window control actions from renderer (works for any window)
+  // Handle IPC calls
   ipcMain.on('window-minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) win.minimize();
@@ -106,11 +138,8 @@ function createWindow() {
   ipcMain.on('window-maximize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) {
-      if (win.isMaximized()) {
-        win.unmaximize();
-      } else {
-        win.maximize();
-      }
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
     }
   });
 
@@ -119,187 +148,243 @@ function createWindow() {
     if (win) win.close();
   });
 
-  // Send maximize state changes to renderer for main window
-  mainWindow.on('maximize', () => {
-    mainWindow.webContents.send('window-maximized', true);
-  });
+  mainWindow.on('maximize', () => mainWindow.webContents.send('window-maximized', true));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-maximized', false));
 
-  mainWindow.on('unmaximize', () => {
-    mainWindow.webContents.send('window-maximized', false);
-  });
-
-  // Load the app
   const isDev = process.env.NODE_ENV === 'development';
-  
   if (isDev) {
-    // Development: load from Next.js dev server
     mainWindow.loadURL('http://localhost:3000');
-    // Open DevTools in development
     mainWindow.webContents.openDevTools();
   } else {
-    // Production: load via custom protocol
     mainWindow.loadURL('app://./index.html');
   }
 
-  // Show window when ready to prevent visual flash
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+
+
+  ipcMain.on('open-external', async (event, url) => {
+    console.log('[Main] Opening external URL:', url);
+    await require('electron').shell.openExternal(url);
   });
 
-  // Handle window.open() calls - create frameless windows for internal pages
+  ipcMain.handle('fetch-url', async (event, url) => {
+    console.log('[Main] Fetching URL:', url);
+    try {
+      const response = await net.fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const buffer = await response.arrayBuffer();
+      const text = Buffer.from(buffer).toString('utf8');
+
+      if (contentType.includes('text/html')) {
+        // Simple HTML to text extraction (very basic version for main process)
+        let processed = text
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        return { content: processed.substring(0, 50000) };
+      }
+
+      return { content: text.substring(0, 50000) };
+    } catch (error) {
+      console.error('[Main] Fetch URL error:', error);
+      return { error: error.message };
+    }
+  });
+
+  // Handle Auth Popups and External Links
   mainWindow.webContents.setWindowOpenHandler(({ url, features }) => {
-    // Check if it's an internal page (app:// protocol or localhost)
-    if (url.startsWith('app://') || url.includes('localhost')) {
-      // Parse window features (width, height, left, top)
+    // 1. Internal Application Pages (e.g., Export Panel)
+    // These need to open in a new Electron window with our preload script
+    const isInternal = url.startsWith('app://') ||
+      url.includes('localhost') ||
+      url.startsWith('file://') ||
+      url.includes('index.html');
+
+    if (isInternal) {
+      console.log('[Main] Opening internal window:', url);
       const parseFeature = (name) => {
         const match = features.match(new RegExp(`${name}=(\\d+)`));
         return match ? parseInt(match[1], 10) : undefined;
       };
 
-      const width = parseFeature('width') || 400;
-      const height = parseFeature('height') || 700;
-      const left = parseFeature('left');
-      const top = parseFeature('top');
-
-      // Return custom options for frameless window
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
-          width,
-          height,
-          x: left,
-          y: top,
-          frame: false, // Frameless for custom title bar
+          width: parseFeature('width') || 400,
+          height: parseFeature('height') || 700,
           backgroundColor: nativeTheme.shouldUseDarkColors ? THEME_COLORS.dark : THEME_COLORS.light,
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
           },
+          ...(process.platform === 'darwin'
+            ? {
+              titleBarStyle: 'hidden',
+              trafficLightPosition: { x: 12, y: 10 },
+            }
+            : { frame: false }
+          ),
         }
       };
     }
-    // Open external links in default browser
+
+    // 2. Everything else (External Links, Auth Popups)
+    // Open in the system's default browser
+    console.log('[Main] Opening external URL via deep link interception:', url);
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // Handle window closed
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-// Register custom protocol for serving static files
 function registerProtocol() {
   protocol.handle('app', (request) => {
     const staticPath = getStaticPath();
-    let urlPath = request.url.replace('app://.', '');
-    
-    // Remove query string and hash
+    // Normalize path by removing protocol and handling potential . prefix
+    let urlPath = request.url.replace('app://.', '').replace('app://', '');
     urlPath = urlPath.split('?')[0].split('#')[0];
-    
-    // Decode URI components
     urlPath = decodeURIComponent(urlPath);
-    
-    // Default to index.html for root
-    if (urlPath === '/' || urlPath === '') {
-      urlPath = '/index.html';
-    }
-    
-    // Handle Next.js routing - if no extension, try .html
+
+    if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
+
+    // Handle SPA-style routing for Next.js exported files
     if (!path.extname(urlPath) && !urlPath.endsWith('/')) {
-      // Try with .html extension first
       const htmlPath = path.join(staticPath, urlPath + '.html');
-      if (fs.existsSync(htmlPath)) {
-        urlPath = urlPath + '.html';
-      } else {
-        // Try as directory with index.html
+      if (fs.existsSync(htmlPath)) urlPath = urlPath + '.html';
+      else {
         const indexPath = path.join(staticPath, urlPath, 'index.html');
-        if (fs.existsSync(indexPath)) {
-          urlPath = urlPath + '/index.html';
-        }
+        if (fs.existsSync(indexPath)) urlPath = urlPath + '/index.html';
       }
     }
-    
+
     const filePath = path.join(staticPath, urlPath);
-    
-    // Security: ensure we don't serve files outside the static directory
     const normalizedPath = path.normalize(filePath);
     if (!normalizedPath.startsWith(path.normalize(staticPath))) {
       return new Response('Forbidden', { status: 403 });
     }
-    
-    // Check if file exists
+
     if (!fs.existsSync(filePath)) {
-      console.log('[Electron] File not found:', filePath);
-      // Return index.html for SPA routing fallback
       const indexPath = path.join(staticPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        return net.fetch('file://' + indexPath);
-      }
+      if (fs.existsSync(indexPath)) return net.fetch(pathToFileURL(indexPath).href);
       return new Response('Not Found', { status: 404 });
     }
-    
-    // Serve the file using net.fetch for proper handling
-    return net.fetch('file://' + filePath);
+
+    // Convert file path to valid file:// URL (critical for Windows net.fetch)
+    const fileUrl = pathToFileURL(filePath).href;
+    return net.fetch(fileUrl);
+  });
+
+  // Force Origin and Referer headers for Firebase requests
+  // Custom schemes like app:// often send null or missing headers on Windows
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.firebaseio.com/*', 'https://*.googleapis.com/*', 'https://*.firebaseapp.com/*'] },
+    (details, callback) => {
+      const { requestHeaders } = details;
+      if (!requestHeaders['Origin'] || requestHeaders['Origin'] === 'null') {
+        requestHeaders['Origin'] = 'app://.';
+      }
+      if (!requestHeaders['Referer']) {
+        requestHeaders['Referer'] = 'app://./index.html';
+      }
+      callback({ requestHeaders });
+    }
+  );
+}
+
+// Single instance lock
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+
+      // Handle deep links from secondary instances (more robust on Windows)
+      const url = commandLine.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
+      if (url) {
+        console.log('[Main] Received deep link from second instance:', url);
+        mainWindow.webContents.send('deep-link', url);
+      }
+    }
+  });
+
+  app.whenReady().then(() => {
+    registerProtocol();
+    createWindow();
+
+    // Check for deep link on startup (Windows/Linux)
+    if (process.platform !== 'darwin') {
+      const startupUrl = process.argv.find(arg => arg.startsWith(`${PROTOCOL_SCHEME}://`));
+      if (startupUrl) {
+        // Wait for window to be ready
+        setTimeout(() => {
+          if (mainWindow) {
+            console.log('[Main] Sending startup deep link:', startupUrl);
+            mainWindow.webContents.send('deep-link', startupUrl);
+          }
+        }, 1500);
+      }
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
 }
 
-// Create window when Electron is ready
-app.whenReady().then(() => {
-  // Register custom protocol before creating window
-  registerProtocol();
-  
-  createWindow();
-
-  // On macOS, re-create window when dock icon is clicked
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
-});
-
-// Quit when all windows are closed (except on macOS)
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (mainWindow) {
+    mainWindow.webContents.send('deep-link', url);
+  } else {
+    // If window not yet created, store the URL or wait
+    app.once('ready', () => {
+      setTimeout(() => {
+        if (mainWindow) mainWindow.webContents.send('deep-link', url);
+      }, 1000);
+    });
   }
 });
 
-// Security: Prevent new window creation except through setWindowOpenHandler
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
 app.on('web-contents-created', (event, contents) => {
   contents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
-    
-    // Allow app:// protocol for static export navigation
-    if (parsedUrl.protocol === 'app:') {
-      return;
-    }
-    
-    // Allow localhost for development
-    if (parsedUrl.hostname === 'localhost') {
-      return;
-    }
-    
-    // Block other navigations and open externally
+    if (parsedUrl.protocol === 'app:' || parsedUrl.hostname === 'localhost') return;
+
+    // Check if it's an auth redirect
+    if (navigationUrl.includes('firebaseapp.com') || navigationUrl.includes('google.com')) return;
+
     event.preventDefault();
     shell.openExternal(navigationUrl);
   });
 
-  // Set up window controls for child windows (like export window)
   contents.on('did-create-window', (childWindow) => {
-    // Remove menu from child windows
     childWindow.setMenu(null);
-
-    // Set up IPC for this child window's controls
-    childWindow.on('maximize', () => {
-      childWindow.webContents.send('window-maximized', true);
-    });
-
-    childWindow.on('unmaximize', () => {
-      childWindow.webContents.send('window-maximized', false);
-    });
+    childWindow.on('maximize', () => childWindow.webContents.send('window-maximized', true));
+    childWindow.on('unmaximize', () => childWindow.webContents.send('window-maximized', false));
   });
 });

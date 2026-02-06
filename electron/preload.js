@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Expose platform information
   platform: process.platform,
   isElectron: true,
-  
+
   // App version from package.json
   getVersion: () => {
     try {
@@ -28,6 +28,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWindowMaximized: (callback) => {
     ipcRenderer.on('window-maximized', (event, isMaximized) => callback(isMaximized));
   },
+
+  // Expose environment variables (limited set for security)
+  env: {
+    NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_CUSTOM_APP_ID,
+    NEXT_PUBLIC_AUTH_HANDLER_URL: process.env.NEXT_PUBLIC_AUTH_HANDLER_URL,
+    NEXT_PUBLIC_OPENAI_API_KEY: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+    TRIAL_OPENAI_API_KEY: process.env.TRIAL_OPENAI_API_KEY,
+  },
+
+  // Listen for deep links (e.g. for auth callbacks)
+  onDeepLink: (callback) => {
+    ipcRenderer.on('deep-link', (event, url) => callback(url));
+  },
+
+  // Open external links in default browser
+  openExternal: (url) => ipcRenderer.send('open-external', url),
+
+  // Fetch URL content via main process (bypasses CORS)
+  fetchUrl: (url) => ipcRenderer.invoke('fetch-url', url),
 });
 
 // Log that we're running in Electron

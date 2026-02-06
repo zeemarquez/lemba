@@ -19,6 +19,7 @@ import {
   updateCacheFromMarkdown,
   isCacheValid 
 } from '@/lib/markdown-processor';
+import { mergeFrontmatter, parseFrontmatter, type FrontmatterData } from '@/lib/frontmatter';
 
 interface PlateEditorProps {
   content: string;
@@ -28,12 +29,20 @@ interface PlateEditorProps {
 // Threshold for using async loading (characters)
 const ASYNC_LOAD_THRESHOLD = 5000;
 
+// Safe default value so we never pass undefined to usePlateEditor (avoids "undefined is not iterable" in platejs)
+const DEFAULT_EDITOR_VALUE = [{ type: 'p', children: [{ text: '' }] }];
+
 export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const { editorViewMode, setActiveHeadingId } = useStore();
   const mounted = useMounted();
+
+  const { data: frontmatterData, content: bodyContent } = useMemo(
+    () => parseFrontmatter(content),
+    [content]
+  );
   
   // Loading state for large documents
-  const [isLoading, setIsLoading] = useState(() => content.length > ASYNC_LOAD_THRESHOLD);
+  const [isLoading, setIsLoading] = useState(() => bodyContent.length > ASYNC_LOAD_THRESHOLD);
   const [loadProgress, setLoadProgress] = useState(0);
 
   // Use a ref to track if we're currently updating from Plate to avoid infinite loops
@@ -44,101 +53,96 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
   const lastDeserializedContent = useRef<string | null>(null);
   // Track the last nodes array reference we set - to avoid redundant setValue calls
   const lastSetNodesRef = useRef<any[] | null>(null);
+  // Track external content updates that arrive while we are typing
+  const pendingExternalContentRef = useRef<string | null>(null);
   // Track if initial async load has completed
   const initialLoadComplete = useRef(false);
   // Refs to store latest values for debounced function
   const editorRef = useRef<any>(null);
   const contentRef = useRef(content);
+  const frontmatterRef = useRef<FrontmatterData>({});
   const onChangeRef = useRef(onChange);
 
   // Update refs when values change
   useEffect(() => {
     contentRef.current = content;
+    frontmatterRef.current = frontmatterData;
     onChangeRef.current = onChange;
-  }, [content, onChange]);
+  }, [content, bodyContent, frontmatterData, onChange]);
 
-  // Compute initialValue - use placeholder for large docs, full parse for small docs
-  // This prevents blocking the main thread on startup
-  const initialValue = useMemo(() => {
-    // For small documents, parse synchronously (fast enough)
-    if (content.length <= ASYNC_LOAD_THRESHOLD) {
-      const { nodes } = processMarkdownDiff(content);
-      lastDeserializedContent.current = content;
-      lastSetNodesRef.current = nodes;
-      initialLoadComplete.current = true;
-      return nodes;
-    }
-    
-    // For large documents, start with a loading placeholder
-    // Actual content will be loaded asynchronously after mount
-    return [{ type: 'p', children: [{ text: '' }] }];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps - only compute once on mount
+  // Always use a safe placeholder for initial render. Never call processMarkdownDiff here:
+  // - It triggers createTempEditor() which uses EditorKit; in some bundle orders EditorKit
+  //   can be undefined during first paint, causing "undefined is not iterable" in platejs.
+  // - Real content is applied in useEffect after mount (see effect below).
+  const initialValue = useMemo(() => DEFAULT_EDITOR_VALUE, []);
 
   const editor = usePlateEditor({
-    plugins: EditorKit,
-    value: initialValue,
+    plugins: Array.isArray(EditorKit) ? EditorKit : [],
+    value: Array.isArray(initialValue) ? initialValue : DEFAULT_EDITOR_VALUE,
   });
 
   // Update editor ref
   editorRef.current = editor;
 
-  // Async loading for large documents - runs after mount to avoid blocking
+  // Load real content after mount (never during first render - avoids "undefined is not iterable" in platejs)
   useEffect(() => {
-    // Skip if already loaded or small document
-    if (initialLoadComplete.current || content.length <= ASYNC_LOAD_THRESHOLD) {
+    if (initialLoadComplete.current) return;
+
+    const isSmallDoc = bodyContent.length <= ASYNC_LOAD_THRESHOLD;
+
+    if (isSmallDoc) {
+      // Small doc: sync parse after mount so createTempEditor runs outside React render
+      try {
+        const { nodes } = processMarkdownDiff(bodyContent);
+        if (Array.isArray(nodes) && nodes.length > 0) {
+          editor.tf.setValue(nodes);
+          lastSetNodesRef.current = nodes;
+        }
+        lastDeserializedContent.current = bodyContent;
+        initialLoadComplete.current = true;
+        setIsLoading(false);
+      } catch (e) {
+        console.error('[PlateEditor] Sync load failed:', e);
+        initialLoadComplete.current = true;
+        setIsLoading(false);
+      }
       return;
     }
 
+    // Large doc: async chunked load
     let cancelled = false;
-    
     const loadContentAsync = async () => {
-      console.log('[PlateEditor] Starting async content load', { contentLength: content.length });
+      console.log('[PlateEditor] Starting async content load', { contentLength: bodyContent.length });
       const startTime = performance.now();
-      
       try {
-        // Use chunked processing that yields to main thread
-        const nodes = await processMarkdownChunked(content, (progress) => {
-          if (!cancelled) {
-            setLoadProgress(Math.round(progress));
-          }
+        const nodes = await processMarkdownChunked(bodyContent, (progress) => {
+          if (!cancelled) setLoadProgress(Math.round(progress));
         });
-        
         if (cancelled) return;
-        
-        console.log('[PlateEditor] Async load complete', { 
-          time: performance.now() - startTime,
-          nodeCount: nodes.length 
-        });
-        
-        // Set the editor value with loaded content
+        console.log('[PlateEditor] Async load complete', { time: performance.now() - startTime, nodeCount: nodes.length });
         editor.tf.setValue(nodes);
-        lastDeserializedContent.current = content;
+        lastDeserializedContent.current = bodyContent;
         lastSetNodesRef.current = nodes;
         initialLoadComplete.current = true;
         setIsLoading(false);
       } catch (error) {
         console.error('[PlateEditor] Async load failed:', error);
         if (!cancelled) {
-          // Fallback to sync load if async fails
-          const { nodes } = processMarkdownDiff(content);
-          editor.tf.setValue(nodes);
-          lastDeserializedContent.current = content;
+          const { nodes } = processMarkdownDiff(bodyContent);
+          editor.tf.setValue(Array.isArray(nodes) ? nodes : DEFAULT_EDITOR_VALUE);
+          lastDeserializedContent.current = bodyContent;
           lastSetNodesRef.current = nodes;
           initialLoadComplete.current = true;
           setIsLoading(false);
         }
       }
     };
-
-    // Start loading after a brief delay to let the UI render first
     const timeoutId = setTimeout(loadContentAsync, 50);
-    
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [content, editor]); // Only run on mount (content won't change during initial load)
+  }, [bodyContent, editor]);
 
   // Create debounced serialization function using refs to always use latest values
   const debouncedSerialize = useMemo(
@@ -147,6 +151,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // Use refs to get latest values at execution time
         const currentEditor = editorRef.current;
         const currentContent = contentRef.current;
+        const currentFrontmatter = frontmatterRef.current;
         const currentOnChange = onChangeRef.current;
 
         if (!currentEditor) return;
@@ -154,11 +159,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // Serialize and postprocess to normalize block equation format
         const rawMd = currentEditor.api.markdown.serialize({ value });
         const md = postprocessMathDelimiters(rawMd);
-        if (md !== currentContent) {
+        const fullMd = mergeFrontmatter(md, currentFrontmatter);
+        if (fullMd !== currentContent) {
           // Update cache with the serialized content and current nodes
           // This keeps the cache in sync during WYSIWYG editing
           updateCacheFromMarkdown(md, value);
-          currentOnChange(md);
+          currentOnChange(fullMd);
         }
       }, 300),
     [] // Empty deps - function uses refs for latest values
@@ -170,6 +176,40 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       debouncedSerialize.cancel();
     };
   }, [debouncedSerialize]);
+
+  // Flush current editor content on demand (e.g., before AI runs)
+  useEffect(() => {
+    const handleFlush = () => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+      try {
+        debouncedSerialize.flush();
+        const value = currentEditor.children ?? DEFAULT_EDITOR_VALUE;
+        const rawMd = currentEditor.api.markdown.serialize({ value });
+        const md = postprocessMathDelimiters(rawMd);
+        const fullMd = mergeFrontmatter(md, frontmatterRef.current);
+        if (fullMd !== contentRef.current) {
+          updateCacheFromMarkdown(md, value);
+          onChangeRef.current(fullMd);
+        }
+      } catch (error) {
+        console.error('[PlateEditor] Flush serialization failed:', error);
+      }
+    };
+    window.addEventListener('flush-editor-content', handleFlush as EventListener);
+    return () => {
+      window.removeEventListener('flush-editor-content', handleFlush as EventListener);
+    };
+  }, [debouncedSerialize]);
+
+  // When switching from editing to source mode, flush any pending Plate serialization
+  // so the latest WYSIWYG content is committed before SourceEditor is shown
+  useEffect(() => {
+    if (prevEditorViewMode.current !== 'source' && editorViewMode === 'source') {
+      debouncedSerialize.flush();
+    }
+    // Don't update prevEditorViewMode here - the sync effect below handles it
+  }, [editorViewMode, debouncedSerialize]);
 
   // Sync content from Source view back to Plate if content changed externally or in source mode
   useEffect(() => {
@@ -185,7 +225,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     }
 
     // Check if cache is already valid for this content (fast hash comparison)
-    const cacheValid = isCacheValid(content);
+    const cacheValid = isCacheValid(bodyContent);
     
     // Only deserialize when switching FROM source mode or when content changed
     // Note: We already checked editorViewMode !== 'source' above, so this is just checking prevEditorViewMode
@@ -198,36 +238,25 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
       return;
     }
 
-    if (!isUpdatingFromPlate.current) {
-      // Capture values at scheduling time to avoid stale closures
-      const contentToDeserialize = content;
-
-      // Defer deserialization to prevent blocking the main thread
-      // Use requestIdleCallback if available for better performance, otherwise setTimeout
-      const performDeserialization = () => {
-        
-        // Use optimized processor with caching and differential updates
-        // This only re-processes chunks that have changed
-        const { nodes, unchanged } = processMarkdownDiff(contentToDeserialize);
-        
-        // Skip setValue if:
-        // 1. Content is unchanged (cache hit) AND not switching from source, OR
-        // 2. The nodes reference is the same as what we already set (avoids expensive setValue)
-        if (unchanged && !isSwitchingFromSource) {
-          return;
-        }
-        
-        // Skip setValue if we'd be setting the exact same nodes array (by reference)
-        // This is the key optimization for mode switches when content hasn't changed
-        if (nodes === lastSetNodesRef.current) {
-          console.log('[PlateEditor] Skipping setValue - same nodes reference');
-          lastDeserializedContent.current = contentToDeserialize;
-          return;
-        }
-        
-        editor.tf.setValue(nodes);
-        lastSetNodesRef.current = nodes;
+    const applyDeserializedContent = (contentToDeserialize: string) => {
+      const { nodes, unchanged } = processMarkdownDiff(contentToDeserialize);
+      if (unchanged && !isSwitchingFromSource) {
+        return;
+      }
+      if (nodes === lastSetNodesRef.current) {
+        console.log('[PlateEditor] Skipping setValue - same nodes reference');
         lastDeserializedContent.current = contentToDeserialize;
+        return;
+      }
+      editor.tf.setValue(nodes);
+      lastSetNodesRef.current = nodes;
+      lastDeserializedContent.current = contentToDeserialize;
+    };
+
+    if (!isUpdatingFromPlate.current) {
+      const contentToDeserialize = bodyContent;
+      const performDeserialization = () => {
+        applyDeserializedContent(contentToDeserialize);
       };
 
       let cleanup: (() => void) | undefined;
@@ -251,9 +280,10 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
       return cleanup;
     } else {
+      pendingExternalContentRef.current = bodyContent;
       prevEditorViewMode.current = editorViewMode;
     }
-  }, [content, editor, editorViewMode, isLoading]);
+  }, [bodyContent, editor, editorViewMode, isLoading]);
 
   // Listen for navigation events from the outline (for WYSIWYG mode)
   const handleNavigateToLine = useCallback((event: CustomEvent<{ line: number }>) => {
@@ -261,7 +291,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     if (editorViewMode === 'source') return;
     
     const { line } = event.detail;
-    const lines = content.split('\n');
+    const lines = bodyContent.split('\n');
     
     // Find the heading text at the target line
     const targetLine = lines[line - 1];
@@ -298,15 +328,15 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
           }
         }
         
-        // Recursively check children if they exist
+        // Recursively check children if they exist (node.children may be text or element nodes)
         if ('children' in node && Array.isArray(node.children)) {
-          findHeadingNode(node.children as typeof editor.children, path);
+          findHeadingNode(node.children as unknown as typeof editor.children, path);
         }
       }
     };
     
     findHeadingNode(editor.children);
-  }, [editorViewMode, content, editor]);
+  }, [editorViewMode, bodyContent, editor]);
 
   useEffect(() => {
     window.addEventListener('navigate-to-line', handleNavigateToLine as EventListener);
@@ -317,12 +347,12 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
   // Helper function to find heading in markdown content and set active heading ID
   const findHeadingInMarkdown = useCallback((headingText: string, headingType: string) => {
-    if (!content) {
+    if (!bodyContent) {
       setActiveHeadingId(null);
       return;
     }
 
-    const lines = content.split('\n');
+    const lines = bodyContent.split('\n');
     let inCodeBlock = false;
 
     // Determine the expected number of # symbols
@@ -353,7 +383,7 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
 
     // Heading not found
     setActiveHeadingId(null);
-  }, [content, setActiveHeadingId]);
+  }, [bodyContent, setActiveHeadingId]);
 
   // Function to find the active heading based on cursor position in Plate editor
   const findActiveHeadingFromPlate = useCallback(() => {
@@ -546,6 +576,21 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
         // This prevents the effect from resetting the editor and losing focus
         setTimeout(() => {
           isUpdatingFromPlate.current = false;
+          const pendingExternal = pendingExternalContentRef.current;
+          if (pendingExternal && pendingExternal !== lastDeserializedContent.current) {
+            try {
+              const { nodes } = processMarkdownDiff(pendingExternal);
+              if (nodes && nodes !== lastSetNodesRef.current) {
+                editor.tf.setValue(nodes);
+                lastSetNodesRef.current = nodes;
+                lastDeserializedContent.current = pendingExternal;
+              }
+            } catch (error) {
+              console.error('[PlateEditor] Deferred sync failed:', error);
+            } finally {
+              pendingExternalContentRef.current = null;
+            }
+          }
         }, 0);
       }}
     >
@@ -586,10 +631,11 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
             }}
           >
             <SourceEditor
-              content={content}
+              content={bodyContent}
               onChange={(val) => {
                 isUpdatingFromPlate.current = false; // Source edit
-                onChange(val);
+                const fullMd = mergeFrontmatter(val, frontmatterRef.current);
+                onChange(fullMd);
               }}
             />
           </div>

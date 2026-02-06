@@ -7,6 +7,8 @@
 import {
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithCredential, // Add this import
+    signInWithCustomToken,
     signOut as firebaseSignOut,
     onAuthStateChanged as firebaseOnAuthStateChanged,
     User,
@@ -19,6 +21,38 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
+// Handle Deep Links for Auth (Electron only)
+if (typeof window !== 'undefined' && (window as any).electronAPI?.onDeepLink) {
+    (window as any).electronAPI.onDeepLink(async (url: string) => {
+        console.log('[Auth] Received deep link:', url);
+        try {
+            // Support hash routing if used
+            const actualUrl = url.replace('/#', '');
+            const urlObj = new URL(actualUrl);
+            const token = urlObj.searchParams.get('token');
+            const googleIdToken = urlObj.searchParams.get('id_token');
+            const googleAccessToken = urlObj.searchParams.get('access_token');
+
+            const auth = getFirebaseAuth();
+
+            if (token) {
+                console.log('[Auth] Found custom token in deep link, signing in...');
+                await signInWithCustomToken(auth, token);
+                console.log('[Auth] Signed in with custom token');
+            } else if (googleIdToken) {
+                console.log('[Auth] Found Google credentials in deep link, signing in...');
+                const credential = GoogleAuthProvider.credential(googleIdToken, googleAccessToken);
+                await signInWithCredential(auth, credential);
+                console.log('[Auth] Signed in with Google credential');
+            } else {
+                console.warn('[Auth] No token found in deep link URL');
+            }
+        } catch (error) {
+            console.error('[Auth] Error handling deep link:', error);
+        }
+    });
+}
+
 /**
  * Sign in with Google OAuth
  * @returns The authenticated user or null if failed
@@ -26,25 +60,82 @@ googleProvider.addScope('profile');
 export async function signInWithGoogle(): Promise<User | null> {
     if (!isFirebaseConfigured()) {
         console.error('Firebase is not configured. Please set environment variables.');
-        return null;
+        throw new Error('Firebase is not configured. Check your environment variables.');
+    }
+
+    const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
+
+    // In Electron, we prefer the external browser flow for a better UX on macOS
+    if (isElectron) {
+        console.log('[Auth] Electron detected, using external browser flow...');
+        try {
+            await signInWithBrowser();
+            // User will arrive via deep link
+            throw new Error('Please complete sign in in your browser.');
+        } catch (error: any) {
+            if (error.message === 'No auth redirect URL configured') {
+                // Fallback to popup if browser flow isn't configured, though not ideal
+                console.warn('[Auth] Browser flow not configured, falling back to popup.');
+            } else {
+                throw error;
+            }
+        }
     }
 
     try {
         const auth = getFirebaseAuth();
+        console.log('[Auth] Starting sign in with popup...');
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
     } catch (error: any) {
-        // Handle specific error codes
+        // ... rest of the existing error handling
         if (error.code === 'auth/popup-closed-by-user') {
             console.log('Sign-in popup was closed by user');
             return null;
         }
         if (error.code === 'auth/popup-blocked') {
-            console.error('Sign-in popup was blocked. Please allow popups for this site.');
+            console.error('Sign-in popup was blocked.');
+            if (isElectron) {
+                await signInWithBrowser();
+                throw new Error('Please complete sign in in your browser.');
+            }
             throw new Error('Popup blocked. Please allow popups and try again.');
         }
-        console.error('Error signing in with Google:', error);
         throw error;
+    }
+}
+
+/**
+ * Opens the system browser to the auth handler URL.
+ * Required environment variable: NEXT_PUBLIC_AUTH_HANDLER_URL
+ */
+export async function signInWithBrowser(): Promise<void> {
+    const { getAuthHandlerUrl } = await import('./config');
+    const authHandlerUrl = getAuthHandlerUrl();
+
+    if (!authHandlerUrl) {
+        console.warn('No auth handler URL configured (NEXT_PUBLIC_AUTH_HANDLER_URL)');
+        throw new Error('No auth redirect URL configured');
+    }
+
+    console.log('[Auth] Opening external browser for sign-in:', authHandlerUrl);
+
+    // Pass a state or return URL if needed by the handler
+    // e.g. ?redirect_uri=modern-markdown-editor://auth
+    const targetUrl = new URL(authHandlerUrl);
+    targetUrl.searchParams.set('redirect_uri', 'modern-markdown-editor://auth');
+
+    // Open external link
+    // usage of window.open in Electron with shell.openExternal logic handled by main process
+    // In Electron, _blank with a URL triggers the setWindowOpenHandler or will-navigate
+    // We want to force it to open in default browser
+    if (typeof window !== 'undefined') {
+        const electronAPI = (window as any).electronAPI;
+        if (electronAPI?.openExternal) {
+            electronAPI.openExternal(targetUrl.toString());
+        } else {
+            window.open(targetUrl.toString(), '_blank');
+        }
     }
 }
 
@@ -99,7 +190,7 @@ export function onAuthStateChanged(
     if (!isFirebaseConfigured()) {
         // Call callback immediately with null if not configured
         callback(null);
-        return () => {}; // Return no-op unsubscribe
+        return () => { }; // Return no-op unsubscribe
     }
 
     const auth = getFirebaseAuth();

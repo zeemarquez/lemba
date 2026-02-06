@@ -17,58 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/plate-ui/input";
-
-// Helper to parse frontmatter from markdown content
-export function parseVariablesFromFrontmatter(content: string): Record<string, string> {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-    const match = content.match(frontmatterRegex);
-    if (!match) return {};
-    
-    const frontmatter = match[1];
-    const variables: Record<string, string> = {};
-    
-    // Parse YAML-like key: value pairs
-    const lines = frontmatter.split('\n');
-    for (const line of lines) {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex > 0) {
-            const key = line.slice(0, colonIndex).trim();
-            const value = line.slice(colonIndex + 1).trim();
-            // Remove quotes if present
-            variables[key] = value.replace(/^["']|["']$/g, '');
-        }
-    }
-    
-    return variables;
-}
-
-// Helper to update frontmatter with variable values
-export function updateFrontmatterVariables(content: string, variables: Record<string, string>): string {
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
-    
-    // Build new frontmatter content
-    const entries = Object.entries(variables).filter(([_, v]) => v.trim() !== '');
-    if (entries.length === 0) {
-        // Remove frontmatter if no variables
-        return content.replace(frontmatterRegex, '');
-    }
-    
-    const newFrontmatter = entries.map(([key, value]) => {
-        // Quote values that contain special characters
-        const needsQuotes = /[:#\[\]{}|>&*!?]/.test(value) || value.includes('\n');
-        return `${key}: ${needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value}`;
-    }).join('\n');
-    
-    const frontmatterBlock = `---\n${newFrontmatter}\n---\n`;
-    
-    if (frontmatterRegex.test(content)) {
-        // Replace existing frontmatter
-        return content.replace(frontmatterRegex, frontmatterBlock);
-    } else {
-        // Add frontmatter at the beginning
-        return frontmatterBlock + content;
-    }
-}
+import { parseVariablesFromFrontmatter, updateFrontmatterVariables } from "@/lib/frontmatter";
 
 // Helper to filter tree
 const filterTree = (nodes: FileNode[], allowedExtensions: string[]): FileNode[] => {
@@ -185,10 +134,10 @@ export function ExportSidebar() {
 
     const activeTemplate = templates.find(t => t.id === activeTemplateId);
     const templateVariables = activeTemplate?.settings?.variables || [];
-    
+
     // Get active file content
     const activeFile = files.find(f => f.id === activeFileId);
-    
+
     // Parse variable values from frontmatter when file changes
     useEffect(() => {
         if (activeFile?.content) {
@@ -198,17 +147,17 @@ export function ExportSidebar() {
             setVariableValues({});
         }
     }, [activeFile?.content, activeFileId]);
-    
+
     // Save variable values to frontmatter
     const handleSaveVariables = async () => {
         if (!activeFile || !activeFileId) return;
-        
+
         const updatedContent = updateFrontmatterVariables(activeFile.content, variableValues);
         updateFileContent(activeFileId, updatedContent);
         await saveFile(activeFileId, updatedContent);
         setIsVariablesDialogOpen(false);
     };
-    
+
     // Count how many template variables have values
     const filledVariablesCount = templateVariables.filter(
         (v: TemplateVariable) => v.name && variableValues[v.name]?.trim()
@@ -412,20 +361,17 @@ export function ExportSidebar() {
                                 </ScrollArea>
                             </DialogContent>
                         </Dialog>
-                    </div>
 
-                    {/* Variables Button - only show if template has variables */}
-                    {templateVariables.length > 0 && (
-                        <div className="shrink-0 mb-3">
+                        {/* Variables Button - only show if template has variables */}
+                        {templateVariables.length > 0 && (
                             <Dialog open={isVariablesDialogOpen} onOpenChange={setIsVariablesDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Button
                                         variant="outline"
-                                        className="w-full h-8 text-xs justify-start px-2 font-normal bg-background"
+                                        className="h-8 px-2 aspect-square font-normal bg-background"
                                         title="Set variable values"
                                     >
-                                        <Variable size={14} className="mr-2 opacity-50 shrink-0" />
-                                        <span className="truncate">Variables</span>
+                                        <Variable size={14} className="opacity-50" />
                                     </Button>
                                 </DialogTrigger>
                                 <DialogContent className="p-0 gap-0 w-[300px]">
@@ -466,17 +412,18 @@ export function ExportSidebar() {
                                     </div>
                                 </DialogContent>
                             </Dialog>
-                        </div>
-                    )}
+                        )}
+                    </div>
+
 
                     <PdfPreview />
                 </div>
             </div>
 
             <div className="p-4 bg-background shrink-0">
-                <Button 
-                    className="w-full shadow-sm" 
-                    onClick={handleExport} 
+                <Button
+                    className="w-full shadow-sm"
+                    onClick={handleExport}
                     disabled={!activeFileId || !isInitialized || isExporting}
                 >
                     {isExporting ? (

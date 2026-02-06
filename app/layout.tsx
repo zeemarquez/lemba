@@ -3,8 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DisableBrowserZoom } from "@/components/disable-browser-zoom";
-import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { AuthProvider } from "@/components/auth";
+import { LayoutContent } from "@/components/layout-content";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,12 +33,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const trialEnabled = Boolean(process.env.TRIAL_OPENAI_API_KEY);
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__TRIAL_OPENAI_AVAILABLE__=${trialEnabled ? 'true' : 'false'};`,
+          }}
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
@@ -47,12 +53,7 @@ export default function RootLayout({
         >
           <AuthProvider>
             <DisableBrowserZoom />
-            <div className="flex flex-col h-screen overflow-hidden">
-              <ElectronTitleBar />
-              <div className="flex-1 min-h-0 overflow-hidden">
-                {children}
-              </div>
-            </div>
+            <LayoutContent>{children}</LayoutContent>
             {/* Global KaTeX styles for math rendering in editors */}
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.min.css" crossOrigin="anonymous" />
           </AuthProvider>

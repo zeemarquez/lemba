@@ -3,6 +3,7 @@ import { KEYS, NodeApi, getPluginType } from 'platejs';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { ELEMENT_PAGE_BREAK } from './page-break-plugin';
+import { KEY_PLACEHOLDER } from './placeholder-kit';
 
 /**
  * Custom math rules to ensure:
@@ -313,12 +314,168 @@ const alertRules = {
   },
 };
 
+const PLACEHOLDER_REGEX = /\{\{([^}]+)\}\}/g;
+
+type PlaceholderParseResult = {
+  placeholderType: 'page' | 'totalPages' | 'date' | 'title' | 'variable';
+  format?: string;
+  variableName?: string;
+};
+
+export function parsePlaceholderToken(token: string): PlaceholderParseResult | null {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+
+  if (trimmed === 'page') {
+    return { placeholderType: 'page' };
+  }
+  if (trimmed.startsWith('page:')) {
+    return { placeholderType: 'page', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+  }
+  if (trimmed === 'totalPages') {
+    return { placeholderType: 'totalPages' };
+  }
+  if (trimmed.startsWith('totalPages:')) {
+    return { placeholderType: 'totalPages', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+  }
+  if (trimmed === 'date') {
+    return { placeholderType: 'date' };
+  }
+  if (trimmed.startsWith('date:')) {
+    return { placeholderType: 'date', format: trimmed.split(':').slice(1).join(':').trim() || undefined };
+  }
+  if (trimmed === 'title') {
+    return { placeholderType: 'title' };
+  }
+  if (trimmed.startsWith('var:') || trimmed.startsWith('variable:')) {
+    const parts = trimmed.split(':');
+    const variableName = parts.slice(1).join(':').trim();
+    if (!variableName) return null;
+    return { placeholderType: 'variable', variableName };
+  }
+
+  return null;
+}
+
+function serializePlaceholderToken(node: any): string {
+  const placeholderType = node.placeholderType as string | undefined;
+  const format = typeof node.format === 'string' ? node.format.trim() : '';
+  const variableName = typeof node.variableName === 'string' ? node.variableName.trim() : '';
+
+  if (placeholderType === 'page') {
+    const token = format && format !== 'decimal' ? `page:${format}` : 'page';
+    return `{{${token}}}`;
+  }
+  if (placeholderType === 'totalPages') {
+    const token = format && format !== 'decimal' ? `totalPages:${format}` : 'totalPages';
+    return `{{${token}}}`;
+  }
+  if (placeholderType === 'date') {
+    const token = format && format !== 'default' ? `date:${format}` : 'date';
+    return `{{${token}}}`;
+  }
+  if (placeholderType === 'title') {
+    return '{{title}}';
+  }
+  if (placeholderType === 'variable') {
+    const token = variableName ? `var:${variableName}` : 'var';
+    return `{{${token}}}`;
+  }
+
+  return '{{placeholder}}';
+}
+
+function splitTextWithPlaceholders(value: string): any[] {
+  const nodes: any[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  PLACEHOLDER_REGEX.lastIndex = 0;
+  while ((match = PLACEHOLDER_REGEX.exec(value)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const rawToken = match[1];
+
+    if (start > lastIndex) {
+      nodes.push({ type: 'text', value: value.slice(lastIndex, start) });
+    }
+
+    const parsed = parsePlaceholderToken(rawToken);
+    if (parsed) {
+      nodes.push({ type: 'placeholder', ...parsed });
+    } else {
+      nodes.push({ type: 'text', value: match[0] });
+    }
+
+    lastIndex = end;
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push({ type: 'text', value: value.slice(lastIndex) });
+  }
+
+  return nodes;
+}
+
+function transformPlaceholdersInTree(node: any): any {
+  if (!node || typeof node !== 'object') return node;
+
+  if (node.type === 'code' || node.type === 'inlineCode' || node.type === 'html') {
+    return node;
+  }
+
+  if (node.type === 'text' && typeof node.value === 'string') {
+    const parts = splitTextWithPlaceholders(node.value);
+    if (parts.length === 1) {
+      return node;
+    }
+    return parts;
+  }
+
+  if (Array.isArray(node.children)) {
+    const nextChildren: any[] = [];
+    node.children.forEach((child: any) => {
+      const transformed = transformPlaceholdersInTree(child);
+      if (Array.isArray(transformed)) {
+        nextChildren.push(...transformed);
+      } else {
+        nextChildren.push(transformed);
+      }
+    });
+    node.children = nextChildren;
+  }
+
+  return node;
+}
+
+function remarkPlaceholders() {
+  return (tree: any) => {
+    transformPlaceholdersInTree(tree);
+  };
+}
+
+const placeholderRules = {
+  placeholder: {
+    deserialize: (mdastNode: any, _deco: any, options: any) => ({
+      type: getPluginType(options.editor, KEY_PLACEHOLDER),
+      placeholderType: mdastNode.placeholderType,
+      format: mdastNode.format,
+      variableName: mdastNode.variableName,
+      children: [{ text: '' }],
+    }),
+    serialize: (node: any) => ({
+      type: 'text',
+      value: serializePlaceholderToken(node),
+    }),
+  },
+};
+
 export const MarkdownKit = [
   MarkdownPlugin.configure({
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
-      remarkPlugins: [remarkMath, remarkGfm, remarkMention],
-      rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...alertRules } as any,
+      remarkPlugins: [remarkMath, remarkGfm, remarkMention, remarkPlaceholders],
+      rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...alertRules, ...placeholderRules } as any,
     },
   }),
 ];

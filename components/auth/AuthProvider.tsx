@@ -49,8 +49,8 @@ const AuthContext = createContext<AuthContextType>({
     isConfigured: false,
     accessLevel: null,
     hasSyncAccess: false,
-    signIn: async () => {},
-    signOut: async () => {},
+    signIn: async () => { },
+    signOut: async () => { },
     error: null,
 });
 
@@ -98,7 +98,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Listen for auth state changes
     useEffect(() => {
+        console.log('[AuthProvider] isConfigured:', isConfigured);
         if (!isConfigured) {
+            console.warn('[AuthProvider] Firebase not configured, skipping auth listener.');
             setIsLoading(false);
             return;
         }
@@ -107,10 +109,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
             // Check if this is a fresh sign-in (transition from no user to user)
             // Only consider it fresh if it's not the initial mount
             const isFreshSignIn = !isInitialMountRef.current && !previousUserRef.current && user !== null;
-            
+
             setUser(user);
             previousUserRef.current = user;
-            
+
             // Mark that initial mount is complete after first auth state check
             if (isInitialMountRef.current) {
                 isInitialMountRef.current = false;
@@ -140,11 +142,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             refreshStore();
                         },
                     });
-                    
+
                     // Hydrate on first login (check if this is first sync)
                     const lastSync = syncService.getLastSyncTime();
                     console.log('[Sync] Last sync timestamp:', lastSync);
-                    
+
                     if (lastSync === 0) {
                         console.log('[Sync] First sync - running hydrate...');
                         syncService.hydrate()
@@ -170,7 +172,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     // Basic user - show popup only on fresh sign-in and if not seen before
                     console.log('[Auth] Basic user - sync disabled');
                     syncService.stop();
-                    
+
                     if (isFreshSignIn && !hasSeenPopup(user.uid)) {
                         setShowBasicUserPopup(true);
                     }
@@ -179,7 +181,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 setAccessLevel(null);
                 syncService.stop();
             }
-            
+
             setIsLoading(false);
         });
 
@@ -230,7 +232,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return (
         <AuthContext.Provider value={value}>
             {children}
-            
+
             {/* Basic User Popup - shown when a basic user signs in */}
             <AlertDialog open={showBasicUserPopup} onOpenChange={(open) => {
                 setShowBasicUserPopup(open);
@@ -243,10 +245,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     <AlertDialogHeader>
                         <AlertDialogTitle>Basic Account</AlertDialogTitle>
                         <AlertDialogDescription>
-                            You are signed in with a Basic account. Cloud sync is not available 
+                            You are signed in with a Basic account. Cloud sync is not available
                             for Basic users. Your documents will only be saved locally on this device.
                             <br /><br />
-                            Upgrade to Premium to enable cloud sync and access your documents 
+                            Upgrade to Premium to enable cloud sync and access your documents
                             from any device.
                         </AlertDialogDescription>
                     </AlertDialogHeader>

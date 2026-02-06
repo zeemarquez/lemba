@@ -1,0 +1,29 @@
+Loading environment variables from .env.local...
+Current Hash: f83f9051e9be2bd8c619736f7c927eede361c513
+Using current version: 0.1.18
+Preparing dist/mac directory...
+Starting macOS build...
+  • electron-builder  version=26.4.0 os=23.6.0
+  • loaded configuration  file=package.json ("build" field)
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=darwin arch=x64 electron=40.0.0 appOutDir=dist/mac/mac
+  • cannot find path for dependency  name=undefined reference=undefined
+  • skipped macOS application code signing  reason=cannot find valid "Developer ID Application" identity or custom non-Apple code signing certificate, it could cause some undefined behaviour, e.g. macOS localized description not visible, see https://electron.build/code-signing allIdentities=     0 identities found
+                                                Valid identities only
+     0 valid identities found
+  • building        target=macOS zip arch=x64 file=dist/mac/Modern Markdown Editor-0.1.18-macOS-x64.zip
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=darwin arch=arm64 electron=40.0.0 appOutDir=dist/mac/mac-arm64
+  • building        target=DMG arch=x64 file=dist/mac/Modern Markdown Editor-0.1.18-macOS-x64.dmg
+  • cannot find path for dependency  name=undefined reference=undefined
+  • building block map  blockMapFile=dist/mac/Modern Markdown Editor-0.1.18-macOS-x64.dmg.blockmap
+  • falling back to ad-hoc signature for macOS application code signing
+  • signing         file=dist/mac/mac-arm64/Modern Markdown Editor.app platform=darwin type=distribution identityName=- identityHash=none provisioningProfile=none
+  • skipped macOS notarization  reason=`notarize` options were unable to be generated
+  • building        target=macOS zip arch=arm64 file=dist/mac/Modern Markdown Editor-0.1.18-macOS-arm64.zip
+  • building        target=DMG arch=arm64 file=dist/mac/Modern Markdown Editor-0.1.18-macOS-arm64.dmg
+  • building block map  blockMapFile=dist/mac/Modern Markdown Editor-0.1.18-macOS-arm64.dmg.blockmap
+  • building block map  blockMapFile=dist/mac/Modern Markdown Editor-0.1.18-macOS-x64.zip.blockmap
+  • building block map  blockMapFile=dist/mac/Modern Markdown Editor-0.1.18-macOS-arm64.zip.blockmap
+Updating build history...
+Build complete! Artifacts are in dist/

@@ -15,6 +15,32 @@ if ($currentHash -eq $lastWinHash -and -not $Version) {
     exit 0
 }
 
+# Load environment variables
+Load-EnvFile (Join-Path $scriptDir ".env.local")
+
+# Check required variables
+$requiredVars = @(
+    "NEXT_PUBLIC_FIREBASE_API_KEY",
+    "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+    "NEXT_PUBLIC_FIREBASE_APP_ID",
+    "NEXT_PUBLIC_AUTH_HANDLER_URL"
+)
+
+$missingVars = @()
+foreach ($var in $requiredVars) {
+    if (-not $env:$var) { $missingVars += $var }
+}
+
+if ($missingVars.Count -gt 0) {
+    Write-Host "Warning: The following environment variables are missing:" -ForegroundColor Yellow
+    foreach ($var in $missingVars) { Write-Host "  - $var" -ForegroundColor Yellow }
+    Write-Host "Cloud sync will NOT work in this build." -ForegroundColor Yellow
+    
+    $choice = Read-Host "Do you want to proceed anyway? (y/n)"
+    if ($choice -ne "y") { exit 1 }
+}
+
 Write-Host "Building Windows exe..." -ForegroundColor Cyan
 
 # Versioning

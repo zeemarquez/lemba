@@ -169,3 +169,27 @@
 .app-chrome svg {
   scale: var(--ui-icon-scale, 1);
 }
+
+/* Source mode: force markdown headings to white in dark theme */
+.dark .cm-editor .cm-header,
+.dark .cm-editor .cm-heading,
+.dark .cm-editor .cm-header-1,
+.dark .cm-editor .cm-header-2,
+.dark .cm-editor .cm-header-3,
+.dark .cm-editor .cm-header-4,
+.dark .cm-editor .cm-header-5,
+.dark .cm-editor .cm-header-6,
+.dark .cm-editor .cm-line .cm-header,
+.dark .cm-editor .cm-line .cm-heading,
+.dark .cm-editor .cm-line .cm-header-1,
+.dark .cm-editor .cm-line .cm-header-2,
+.dark .cm-editor .cm-line .cm-header-3,
+.dark .cm-editor .cm-line .cm-header-4,
+.dark .cm-editor .cm-line .cm-header-5,
+.dark .cm-editor .cm-line .cm-header-6 {
+  color: #ffffff !important;
+}
+
+.dark .cm-editor .cm-heading-white {
+  color: #ffffff !important;
+}

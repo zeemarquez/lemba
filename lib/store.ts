@@ -1,9 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
-import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry } from './types';
+import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
-export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry };
+import { PRELOADED_FONTS } from './preloaded-fonts';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL } from './agent';
+import type { LLMProvider } from './agent';
+import { agentLog } from './agent/debug';
+import { saveBackupBeforeApply } from './content-backup';
+export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument };
+export type { AgentMessage, DocumentDiff, AgentChat };
 
 
 
@@ -21,7 +27,7 @@ interface AppState {
     leftSidebarExpanded: boolean;
     rightSidebarExpanded: boolean;
     exportWindowOpen: boolean;
-    sidebarView: 'explorer' | 'templates';
+    sidebarView: 'explorer' | 'templates' | 'agent';
     currentView: 'file' | 'template';
     isSettingsOpen: boolean;
     editorViewMode: 'source' | 'editing' | 'viewing' | 'suggestion';
@@ -29,6 +35,28 @@ interface AppState {
     uiFontSize: 'small' | 'normal' | 'big';
     showOutline: boolean;
     activeHeadingId: string | null;
+
+    // Agent State (multiple chats)
+    chats: Record<string, AgentChat>;
+    activeChatId: string | null;
+    agentMessages: AgentMessage[];
+    pendingDiffs: Record<string, DocumentDiff>;
+    agentMentionedFiles: string[];
+    agentLoading: boolean;
+    /** Current orchestration step label (e.g. "Researching") when agentLoading and using orchestration */
+    agentCurrentStep: string | null;
+    agentError: string | null;
+    agentProvider: LLMProvider;
+    agentModel: string;
+    agentReadOnly: boolean;
+    /** API keys per provider (empty string = not set) */
+    agentApiKeys: Record<LLMProvider, string>;
+    /** Validity per provider (only true after successful validation in settings) */
+    agentProviderKeysValid: Record<LLMProvider, boolean>;
+    agentTemperature: number;
+    agentMaxTokens: number;
+    agentUseOrchestration: boolean; // Enable multi-agent orchestration mode
+    ragDocuments: RagDocument[]; // Documents attached to the current chat
 
     // Export Settings
     previewQuality: 'low' | 'medium' | 'high';
@@ -76,7 +104,7 @@ interface AppState {
     closeTab: (id: string) => void;
     toggleLeftSidebar: () => void;
     toggleRightSidebar: () => void;
-    setSidebarView: (view: 'explorer' | 'templates') => void;
+    setSidebarView: (view: 'explorer' | 'templates' | 'agent') => void;
     setRightSidebarOpen: (isOpen: boolean) => void;
     setExportWindowOpen: (isOpen: boolean) => void;
     setSettingsOpen: (isOpen: boolean) => void;
@@ -87,6 +115,40 @@ interface AppState {
     setActiveHeadingId: (headingId: string | null) => void;
     setSourceEditorFontFamily: (fontFamily: string) => void;
     setSourceEditorFontSize: (fontSize: number) => void;
+
+    // Agent Actions
+    addAgentMessage: (message: AgentMessage) => void;
+    sendAgentMessage: (content: string, mentions?: string[]) => Promise<void>;
+    clearAgentMessages: () => void;
+    addPendingDiff: (diff: DocumentDiff) => void;
+    getMergedPendingDiffs: () => Record<string, DocumentDiff>;
+    acceptAllPending: () => Promise<void>;
+    rejectAllPending: () => void;
+    approveDiff: (diffId: string) => Promise<void>;
+    rejectDiff: (diffId: string) => void;
+    setAgentMentionedFiles: (files: string[]) => void;
+    setAgentLoading: (loading: boolean) => void;
+    setAgentError: (error: string | null) => void;
+    setAgentProvider: (provider: LLMProvider) => void;
+    setAgentModel: (model: string) => void;
+    setAgentReadOnly: (readOnly: boolean) => void;
+    setAgentApiKey: (provider: LLMProvider, key: string) => void;
+    setAgentProviderKeyValid: (provider: LLMProvider, valid: boolean) => void;
+    setAgentTemperature: (temperature: number) => void;
+    setAgentMaxTokens: (maxTokens: number) => void;
+    setAgentUseOrchestration: (useOrchestration: boolean) => void;
+    // Chat history (chats are linked to the active document when created)
+    createNewChat: () => string;
+    switchChat: (chatId: string) => void;
+    clearAllChats: () => void;
+    getChatsList: () => AgentChat[];
+    /** Sync active chat to the current document (latest chat for this document, or new chat) */
+    ensureActiveChatForDocument: () => void;
+
+    // RAG Actions
+    fetchRagDocuments: () => Promise<void>;
+    addRagDocument: (doc: RagDocument) => Promise<void>;
+    removeRagDocument: (id: string) => Promise<void>;
 
     addTemplate: (template: Template) => void;
     updateTemplate: (id: string, updates: Partial<Template>) => void;
@@ -194,7 +256,8 @@ export const useStore = create<AppState>()(
                                             content,
                                             language: 'markdown'
                                         };
-                                        updates.files = [...currentState.files, newFile];
+                                        const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                                        updates.files = [...currentFiles, newFile];
                                     } catch (error) {
                                         console.error('Failed to load file on sync:', error);
                                     }
@@ -205,7 +268,8 @@ export const useStore = create<AppState>()(
                                 updates.activeTemplateId = newState.state.activeTemplateId;
                                 // Update activeTemplateCss if template changed
                                 if (newState.state.activeTemplateId) {
-                                    const template = currentState.templates.find(t => t.id === newState.state.activeTemplateId);
+                                    const currentTemplates = Array.isArray(currentState.templates) ? currentState.templates : [];
+                                    const template = currentTemplates.find(t => t.id === newState.state.activeTemplateId);
                                     if (template) {
                                         updates.activeTemplateCss = template.css;
                                     }
@@ -214,11 +278,17 @@ export const useStore = create<AppState>()(
 
                             // Sync other persisted fields - only if actually different
                             if (newState.state.openTabs !== undefined) {
+                                if (!Array.isArray(newState.state.openTabs)) {
+                                    console.error('[Store] openTabs from storage is not array', newState.state.openTabs);
+                                }
+                                const nextOpenTabs = Array.isArray(newState.state.openTabs)
+                                    ? newState.state.openTabs
+                                    : [];
                                 // Deep compare openTabs to avoid unnecessary updates that could cause loops
                                 const currentTabs = JSON.stringify(currentState.openTabs);
-                                const newTabs = JSON.stringify(newState.state.openTabs);
+                                const newTabs = JSON.stringify(nextOpenTabs);
                                 if (currentTabs !== newTabs) {
-                                    updates.openTabs = newState.state.openTabs;
+                                    updates.openTabs = nextOpenTabs;
                                 }
                             }
                             if (newState.state.currentView !== undefined && newState.state.currentView !== currentState.currentView) {
@@ -239,13 +309,17 @@ export const useStore = create<AppState>()(
                             const currentState = get();
 
                             if (syncData.fileId && syncData.content !== undefined) {
-                                const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                                const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                                const existingFile = currentFiles.find(f => f.id === syncData.fileId);
                                 if (existingFile && existingFile.content !== syncData.content) {
-                                    set((state) => ({
-                                        files: state.files.map((f) =>
-                                            f.id === syncData.fileId ? { ...f, content: syncData.content } : f
-                                        )
-                                    }));
+                                    set((state) => {
+                                        const files = Array.isArray(state.files) ? state.files : [];
+                                        return {
+                                            files: files.map((f) =>
+                                                f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                            )
+                                        };
+                                    });
                                 } else if (!existingFile) {
                                     // File not loaded, add it if it's the active file or if we should load it
                                     const shouldLoad = syncData.fileId === currentState.activeFileId;
@@ -256,7 +330,7 @@ export const useStore = create<AppState>()(
                                             content: syncData.content,
                                             language: 'markdown'
                                         };
-                                        set((state) => ({ files: [...state.files, newFile] }));
+                                        set((state) => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                                     }
                                 }
                             }
@@ -285,13 +359,17 @@ export const useStore = create<AppState>()(
 
                         // Check if we need to update file content
                         if (syncData.fileId && syncData.content !== undefined) {
-                            const existingFile = currentState.files.find(f => f.id === syncData.fileId);
+                            const currentFiles = Array.isArray(currentState.files) ? currentState.files : [];
+                            const existingFile = currentFiles.find(f => f.id === syncData.fileId);
                             if (existingFile && existingFile.content !== syncData.content) {
-                                set((state) => ({
-                                    files: state.files.map((f) =>
-                                        f.id === syncData.fileId ? { ...f, content: syncData.content } : f
-                                    )
-                                }));
+                                set((state) => {
+                                    const files = Array.isArray(state.files) ? state.files : [];
+                                    return {
+                                        files: files.map((f) =>
+                                            f.id === syncData.fileId ? { ...f, content: syncData.content } : f
+                                        )
+                                    };
+                                });
                             } else if (!existingFile && syncData.fileId === currentState.activeFileId) {
                                 // File not loaded but is active, load it
                                 const newFile: AppStateFile = {
@@ -300,7 +378,7 @@ export const useStore = create<AppState>()(
                                     content: syncData.content,
                                     language: 'markdown'
                                 };
-                                set((state) => ({ files: [...state.files, newFile] }));
+                                set((state) => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                             }
                         }
                     } catch (error) {
@@ -345,6 +423,25 @@ export const useStore = create<AppState>()(
                 sourceEditorFontFamily: 'monospace',
                 sourceEditorFontSize: 14,
 
+                // Agent Initial State (multiple chats)
+                chats: {},
+                activeChatId: null,
+                agentMessages: [],
+                pendingDiffs: {},
+                agentMentionedFiles: [],
+                agentLoading: false,
+                agentCurrentStep: null,
+                agentError: null,
+                agentProvider: 'openai',
+                agentModel: 'gpt-4o',
+                agentReadOnly: false,
+                agentApiKeys: { openai: '', anthropic: '', google: '' },
+                agentProviderKeysValid: { openai: false, anthropic: false, google: false },
+                agentTemperature: 0.7,
+                agentMaxTokens: 4096,
+                agentUseOrchestration: true,
+                ragDocuments: [],
+
                 // Actions implementation
                 fetchFileTree: async () => {
                     console.log('[Store] fetchFileTree called');
@@ -365,9 +462,9 @@ export const useStore = create<AppState>()(
                                 if (manifestResponse.ok) {
                                     const manifest = await manifestResponse.json();
                                     const preloadedFiles: string[] = manifest.files || [];
-                                    
+
                                     let firstFilePath: string | null = null;
-                                    
+
                                     // Load all preloaded files
                                     for (const fileName of preloadedFiles) {
                                         try {
@@ -375,8 +472,9 @@ export const useStore = create<AppState>()(
                                             if (response.ok) {
                                                 const content = await response.text();
                                                 const path = `Files/${fileName}`;
-                                                await browserStorage.createFile(path, content);
-                                                
+                                                // Overwrite true to prevent errors if file exists but wasn't in tree for some reason
+                                                await browserStorage.createFile(path, content, true);
+
                                                 // Track the first file to open it later
                                                 if (!firstFilePath) {
                                                     firstFilePath = path;
@@ -386,11 +484,11 @@ export const useStore = create<AppState>()(
                                             console.error(`Failed to load preloaded file ${fileName}:`, err);
                                         }
                                     }
-                                    
+
                                     // Re-fetch tree after creating preloaded files
                                     const result = await browserStorage.list();
                                     tree = result.tree;
-                                    
+
                                     // Open the first file
                                     if (firstFilePath) {
                                         setTimeout(() => get().openFile(firstFilePath!), 100);
@@ -432,7 +530,7 @@ export const useStore = create<AppState>()(
                                         // Update the id to match the storage path with folder structure
                                         const path = `${defaultTemplatesFolder}/${templateFile}`;
                                         templateData.id = path;
-                                        await browserStorage.createTemplate(path, templateData);
+                                        await browserStorage.createTemplate(path, templateData, true);
                                     }
                                 } catch (err) {
                                     console.error(`Failed to load template ${templateFile}:`, err);
@@ -478,26 +576,72 @@ export const useStore = create<AppState>()(
 
                 fetchFonts: async () => {
                     try {
-                        const fonts = await browserStorage.listFonts();
+                        const storedFonts = await browserStorage.listFonts();
+
+                        // Check for missing preloaded fonts
+                        const missingPreloaded = PRELOADED_FONTS.filter(pf =>
+                            !storedFonts.some(f => f.family === pf.family)
+                        );
+
+                        if (missingPreloaded.length > 0) {
+                            console.log(`[Store] Found ${missingPreloaded.length} missing preloaded fonts, loading...`);
+
+                            const loadedPreloaded = await Promise.all(
+                                missingPreloaded.map(async (pf) => {
+                                    try {
+                                        const response = await fetch(`/fonts/preloaded/${pf.fileName}`);
+                                        if (!response.ok) throw new Error(`Failed to fetch ${pf.family}`);
+                                        const blob = await response.blob();
+
+                                        const fontEntry: FontEntry = {
+                                            id: pf.family,
+                                            family: pf.family,
+                                            blob,
+                                            fileName: pf.fileName,
+                                            format: pf.format,
+                                            createdAt: Date.now(),
+                                            syncId: generateSyncId(),
+                                            updatedAt: Date.now(),
+                                            isDeleted: false,
+                                            userId: null
+                                        };
+
+                                        await browserStorage.saveFont(fontEntry);
+                                        return fontEntry;
+                                    } catch (e) {
+                                        console.error(`[Store] Failed to load preloaded font ${pf.family}:`, e);
+                                        return null;
+                                    }
+                                })
+                            );
+
+                            const validPreloaded = loadedPreloaded.filter((f): f is FontEntry => f !== null);
+                            storedFonts.push(...validPreloaded);
+                        }
+
                         // Set both customFonts and fontsLoaded atomically
-                        // fontsLoaded: true indicates fonts have been fetched from IndexedDB
-                        // (even if the result is an empty array)
-                        set({ customFonts: fonts, fontsLoaded: true });
-                        console.log(`[Store] fetchFonts completed: ${fonts.length} fonts loaded, fontsLoaded=true`);
+                        set({ customFonts: storedFonts, fontsLoaded: true });
+                        console.log(`[Store] fetchFonts completed: ${storedFonts.length} fonts loaded, fontsLoaded=true`);
                     } catch (error) {
                         console.error('Failed to fetch fonts:', error);
-                        // Even on error, mark as loaded to prevent infinite waiting
-                        // The app can function without custom fonts
                         set({ fontsLoaded: true });
                     }
                 },
 
                 restoreSession: async () => {
                     const { openTabs, files } = get();
-                    const newFiles = [...files];
+                    const safeOpenTabs = Array.isArray(openTabs) ? openTabs : [];
+                    const safeFiles = Array.isArray(files) ? files : [];
+                    if (!Array.isArray(openTabs)) {
+                        console.error('[Store] restoreSession openTabs not array', openTabs);
+                    }
+                    if (!Array.isArray(files)) {
+                        console.error('[Store] restoreSession files not array', files);
+                    }
+                    const newFiles = [...safeFiles];
                     let hasUpdates = false;
 
-                    for (const tab of openTabs) {
+                    for (const tab of safeOpenTabs) {
                         if (tab.type === 'file') {
                             const isLoaded = newFiles.some(f => f.id === tab.id);
                             // Optimization: Only load content for the active file immediately
@@ -531,7 +675,7 @@ export const useStore = create<AppState>()(
                         const fileEntry = await browserStorage.createFile(path, content);
                         await get().fetchFileTree();
                         await get().openFile(path);
-                        
+
                         // Trigger cloud sync (push + pull)
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(fileEntry);
@@ -546,7 +690,7 @@ export const useStore = create<AppState>()(
                     try {
                         const folderEntry = await browserStorage.createFolder(path);
                         await get().fetchFileTree();
-                        
+
                         // Trigger cloud sync (push + pull)
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(folderEntry);
@@ -563,7 +707,7 @@ export const useStore = create<AppState>()(
                         await get().fetchFileTree();
                         await get().fetchTemplates();
                         get().openTemplate(path);
-                        
+
                         // Trigger cloud sync (push + pull) - templates are stored as files
                         if (syncService.isActive) {
                             const fileEntry = await browserStorage.getFileEntry(path);
@@ -580,10 +724,11 @@ export const useStore = create<AppState>()(
                 saveTemplate: async (path: string, template: Template) => {
                     try {
                         await browserStorage.saveTemplate(path, template);
-                        set((state) => ({
-                            templates: state.templates.map((t) => (t.id === path ? template : t))
-                        }));
-                        
+                        set((state) => {
+                            const templates = Array.isArray(state.templates) ? state.templates : [];
+                            return { templates: templates.map((t) => (t.id === path ? template : t)) };
+                        });
+
                         // Trigger cloud sync (templates are stored as files)
                         if (syncService.isActive) {
                             const fileEntry = await browserStorage.getFileEntry(path);
@@ -606,7 +751,7 @@ export const useStore = create<AppState>()(
                             }
                             syncService.pullDelta().catch(console.error);
                         }
-                        
+
                         // Hard delete locally
                         await browserStorage.delete(path, type);
                         await get().fetchFileTree();
@@ -689,7 +834,9 @@ export const useStore = create<AppState>()(
                 },
 
                 openFile: async (path: string) => {
-                    const { files, openTabs } = get();
+                    const state = get();
+                    const files = Array.isArray(state.files) ? state.files : [];
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
                     const existingFile = files.find(f => f.id === path);
 
                     if (!existingFile) {
@@ -701,7 +848,7 @@ export const useStore = create<AppState>()(
                                 content: content,
                                 language: 'markdown'
                             };
-                            set(state => ({ files: [...state.files, newFile] }));
+                            set(state => ({ files: [...(Array.isArray(state.files) ? state.files : []), newFile] }));
                             // Sync file content to other windows
                             if (typeof window !== 'undefined') {
                                 try {
@@ -735,31 +882,34 @@ export const useStore = create<AppState>()(
 
                     const currentState = get();
                     const isAlreadyActive = currentState.activeFileId === path && currentState.currentView === 'file';
-                    const isInTabs = openTabs.some(tab => tab.id === path && tab.type === 'file');
-                    
+                    const currentOpenTabs = Array.isArray(currentState.openTabs) ? currentState.openTabs : [];
+                    const isInTabs = currentOpenTabs.some(tab => tab.id === path && tab.type === 'file');
+
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
                         return;
                     }
-                    
+
                     if (!isInTabs) {
                         set(state => ({
                             activeFileId: path,
                             currentView: 'file',
-                            openTabs: [...state.openTabs, { id: path, type: 'file' }]
+                            openTabs: [...(Array.isArray(state.openTabs) ? state.openTabs : []), { id: path, type: 'file' }]
                         }));
                     } else {
                         set({ activeFileId: path, currentView: 'file' });
                     }
+                    get().ensureActiveChatForDocument();
                 },
 
                 saveFile: async (path: string, content: string) => {
                     try {
                         const fileEntry = await browserStorage.writeFile(path, content);
                         // Update local file content and sync to other windows
-                        set((state) => ({
-                            files: state.files.map((f) => (f.id === path ? { ...f, content } : f))
-                        }));
+                        set((state) => {
+                            const files = Array.isArray(state.files) ? state.files : [];
+                            return { files: files.map((f) => (f.id === path ? { ...f, content } : f)) };
+                        });
                         // Sync file content to other windows
                         if (typeof window !== 'undefined') {
                             try {
@@ -772,7 +922,7 @@ export const useStore = create<AppState>()(
                                 console.error('Failed to sync file content:', error);
                             }
                         }
-                        
+
                         // Trigger cloud sync
                         if (syncService.isActive) {
                             syncQueue.enqueueFile(fileEntry);
@@ -783,9 +933,10 @@ export const useStore = create<AppState>()(
                 },
 
                 updateFileContent: (id, content) => {
-                    set((state) => ({
-                        files: state.files.map((f) => (f.id === id ? { ...f, content } : f))
-                    }));
+                    set((state) => {
+                        const files = Array.isArray(state.files) ? state.files : [];
+                        return { files: files.map((f) => (f.id === id ? { ...f, content } : f)) };
+                    });
                     // Sync file content to other windows
                     if (typeof window !== 'undefined') {
                         try {
@@ -801,11 +952,12 @@ export const useStore = create<AppState>()(
                 },
 
                 closeTab: (id) => set((state) => {
-                    const tabIndex = state.openTabs.findIndex(t => t.id === id);
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
+                    const tabIndex = openTabs.findIndex(t => t.id === id);
                     if (tabIndex === -1) return {};
 
-                    const tabToRemove = state.openTabs[tabIndex];
-                    const newTabs = state.openTabs.filter(t => t.id !== id);
+                    const tabToRemove = openTabs[tabIndex];
+                    const newTabs = openTabs.filter(t => t.id !== id);
 
                     const isClosingActive =
                         (state.currentView === 'file' && state.activeFileId === id && tabToRemove.type === 'file') ||
@@ -828,11 +980,12 @@ export const useStore = create<AppState>()(
                                 currentView: 'file'
                             };
                         } else {
+                            const templates = Array.isArray(state.templates) ? state.templates : [];
                             return {
                                 openTabs: newTabs,
                                 activeTemplateId: nextTab.id,
                                 currentView: 'template',
-                                activeTemplateCss: state.templates.find(t => t.id === nextTab.id)?.css || state.activeTemplateCss
+                                activeTemplateCss: templates.find(t => t.id === nextTab.id)?.css || state.activeTemplateCss
                             };
                         }
                     } else {
@@ -857,16 +1010,21 @@ export const useStore = create<AppState>()(
                 setActiveHeadingId: (headingId) => set({ activeHeadingId: headingId }),
                 setSourceEditorFontFamily: (fontFamily) => set({ sourceEditorFontFamily: fontFamily }),
                 setSourceEditorFontSize: (fontSize) => set({ sourceEditorFontSize: fontSize }),
-                addTemplate: (template) => set((state) => ({ templates: [...state.templates, template] })),
-                updateTemplate: (id, updates) => set((state) => ({
-                    templates: state.templates.map((t) => (t.id === id ? { ...t, ...updates } : t))
-                })),
-                updateTemplateCss: (id, css) => set((state) => ({
-                    templates: state.templates.map((t) => (t.id === id ? { ...t, css } : t)),
-                    activeTemplateCss: state.activeTemplateId === id ? css : state.activeTemplateCss
-                })),
+                addTemplate: (template) => set((state) => ({ templates: [...(Array.isArray(state.templates) ? state.templates : []), template] })),
+                updateTemplate: (id, updates) => set((state) => {
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    return { templates: templates.map((t) => (t.id === id ? { ...t, ...updates } : t)) };
+                }),
+                updateTemplateCss: (id, css) => set((state) => {
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    return {
+                        templates: templates.map((t) => (t.id === id ? { ...t, css } : t)),
+                        activeTemplateCss: state.activeTemplateId === id ? css : state.activeTemplateCss
+                    };
+                }),
                 setActiveTemplate: (id) => set((state) => {
-                    const template = state.templates.find(t => t.id === id);
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    const template = templates.find(t => t.id === id);
                     return {
                         activeTemplateId: id,
                         activeTemplateCss: template ? template.css : state.activeTemplateCss
@@ -876,21 +1034,23 @@ export const useStore = create<AppState>()(
                 setEditorViewMode: (editorViewMode) => set({ editorViewMode }),
                 openTemplate: (id) => {
                     const state = get();
-                    const template = state.templates.find(t => t.id === id);
+                    const templates = Array.isArray(state.templates) ? state.templates : [];
+                    const openTabs = Array.isArray(state.openTabs) ? state.openTabs : [];
+                    const template = templates.find(t => t.id === id);
                     const isAlreadyActive = state.activeTemplateId === id && state.currentView === 'template';
-                    const isInTabs = state.openTabs.some(tab => tab.id === id && tab.type === 'template');
-                    
+                    const isInTabs = openTabs.some(tab => tab.id === id && tab.type === 'template');
+
                     // Skip state update if already active and in tabs - prevents unnecessary updates that could cause loops
                     if (isAlreadyActive && isInTabs) {
                         return;
                     }
-                    
+
                     if (!isInTabs) {
                         set({
                             activeTemplateId: id,
                             activeTemplateCss: template ? template.css : state.activeTemplateCss,
                             currentView: 'template',
-                            openTabs: [...state.openTabs, { id, type: 'template' }],
+                            openTabs: [...openTabs, { id, type: 'template' }],
                         });
                     } else {
                         set({
@@ -898,6 +1058,620 @@ export const useStore = create<AppState>()(
                             activeTemplateCss: template ? template.css : state.activeTemplateCss,
                             currentView: 'template'
                         });
+                    }
+                },
+
+                // Agent Actions (sync to active chat in chats)
+                addAgentMessage: (message) => set((state) => {
+                    const agentMessages = Array.isArray(state.agentMessages) ? state.agentMessages : [];
+                    const nextMessages = [...agentMessages, message];
+                    const updates: Partial<AppState> = { agentMessages: nextMessages };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        const chat = state.chats[state.activeChatId];
+                        const title = chat.messages.length === 0 && message.role === 'user'
+                            ? (message.content.slice(0, 50).trim() || 'New chat') + (message.content.length > 50 ? '…' : '')
+                            : chat.title;
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...chat,
+                                title,
+                                messages: nextMessages,
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
+                }),
+
+                sendAgentMessage: async (content, _mentions = []) => {
+                    if (!get().activeChatId) {
+                        get().createNewChat();
+                    }
+                    // Use currently open/focused file for context (mentions UI is hidden for now)
+                    const state = get();
+                    const filesForContext =
+                        state.currentView === 'file' && state.activeFileId
+                            ? [state.activeFileId]
+                            : [];
+
+                    // Build RAG context from attached documents (text/url only; images go as vision parts)
+                    let ragContext = '';
+                    if (state.ragDocuments.length > 0) {
+                        const ragParts: string[] = [];
+                        for (const doc of state.ragDocuments) {
+                            if (doc.type === 'text' && doc.content) {
+                                ragParts.push(`--- Attached Document: ${doc.name} ---\n${doc.content}\n--- End of ${doc.name} ---`);
+                            } else if (doc.type === 'url' && doc.url) {
+                                if (doc.content) {
+                                    ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\nContent:\n${doc.content}\n--- End of ${doc.name} ---`);
+                                } else {
+                                    ragParts.push(`--- Attached Link: ${doc.name} ---\nURL: ${doc.url}\n(Content not fetched)\n--- End of ${doc.name} ---`);
+                                }
+                            }
+                            // type === 'image' is sent as vision attachment, not in ragContext
+                        }
+                        if (ragParts.length > 0) {
+                            ragContext = '\n\n[Attached Documents/Links for Context]:\n' + ragParts.join('\n\n');
+                        }
+                    }
+
+                    // Combine user content with RAG context
+                    const fullContent = ragContext
+                        ? `${content}${ragContext}`
+                        : content;
+
+                    // Create concise tags for visible display
+                    let displayTags = '';
+                    const ragDocuments = Array.isArray(state.ragDocuments) ? state.ragDocuments : [];
+                    if (ragDocuments.length > 0) {
+                        const tags = ragDocuments.map(doc => {
+                            if (doc.type === 'text') return `[📄 ${doc.name}]`;
+                            if (doc.type === 'image') return `[🖼 ${doc.name}]`;
+                            const shortName = doc.name.length > 30 ? doc.name.substring(0, 27) + '...' : doc.name;
+                            return `[🔗 ${shortName}]`;
+                        });
+                        displayTags = '\n\n' + tags.join(' ');
+                    }
+                    const visibleContent = content + displayTags;
+
+                    // Build image attachments for vision (data URL -> base64 + mimeType)
+                    const imageAttachments = ragDocuments
+                        .filter((d): d is typeof d & { type: 'image'; content: string } => d.type === 'image' && !!d.content)
+                        .map(doc => {
+                            const dataUrl = doc.content!;
+                            const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+                            const base64 = match ? match[2] : dataUrl;
+                            const mimeType = match ? match[1] : 'image/png';
+                            return { base64, mimeType, name: doc.name };
+                        });
+
+                    agentLog.info('sendAgentMessage', {
+                        mode: state.agentUseOrchestration ? 'orchestration' : 'single-agent',
+                        readOnly: state.agentReadOnly,
+                        fileContext: filesForContext,
+                        contentLength: content.length,
+                        ragDocuments: ragDocuments.length,
+                        ragContextLength: ragContext.length,
+                        imageAttachments: imageAttachments.length,
+                    });
+                    const userMessage = createMessage('user', visibleContent, [], undefined, fullContent, imageAttachments.length > 0 ? imageAttachments : undefined);
+                    const currentChatId = get().activeChatId;
+                    const ragDocsToClear = ragDocuments;
+                    set((s) => {
+                        const agentMessages = Array.isArray(s.agentMessages) ? s.agentMessages : [];
+                        const nextMessages = [...agentMessages, userMessage];
+                        const updates: Partial<AppState> = {
+                            agentMessages: nextMessages,
+                            agentMentionedFiles: filesForContext,
+                            agentLoading: true,
+                            agentCurrentStep: null,
+                            agentError: null,
+                            ragDocuments: [],
+                        };
+                        if (currentChatId && s.chats[currentChatId]) {
+                            const chat = s.chats[currentChatId];
+                            const title = chat.messages.length === 0
+                                ? (content.slice(0, 50).trim() || 'New chat') + (content.length > 50 ? '…' : '')
+                                : chat.title;
+                            updates.chats = {
+                                ...s.chats,
+                                [currentChatId]: {
+                                    ...chat,
+                                    title,
+                                    messages: nextMessages,
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    });
+                    if (ragDocsToClear.length > 0) {
+                        await Promise.all(ragDocsToClear.map((d) => browserStorage.deleteRagDocument(d.id)));
+                    }
+
+                    try {
+                        const state = get();
+                        const agentMessages = Array.isArray(state.agentMessages) ? state.agentMessages : [];
+                        const allMessages = [...agentMessages];
+
+                        // Callback for handling diff creation
+                        const onDiffCreated = (diff: DocumentDiff) => {
+                            set((s) => {
+                                const nextDiffs = { ...s.pendingDiffs, [diff.id]: diff };
+                                const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                                if (s.activeChatId && s.chats[s.activeChatId]) {
+                                    updates.chats = {
+                                        ...s.chats,
+                                        [s.activeChatId]: {
+                                            ...s.chats[s.activeChatId],
+                                            pendingDiffs: nextDiffs,
+                                            updatedAt: Date.now(),
+                                        },
+                                    };
+                                }
+                                return updates;
+                            });
+                        };
+
+                        let response: { content: string; diffs?: DocumentDiff[] };
+
+                        if (state.agentUseOrchestration) {
+                            // Use multi-agent orchestration system (any provider)
+                            const provider = modelToProvider(state.agentModel);
+                            const apiKey = state.agentApiKeys[provider]?.trim() || undefined;
+                            const stepLabels: Record<string, string> = {
+                                researcher: '🔍 Researching',
+                                planner: '📋 Planning',
+                                writer: '✍️ Writing',
+                                structure_review: '📐 Reviewing structure',
+                                linter: '✨ Linting',
+                                summarizer: '💬 Summarizing',
+                            };
+                            const initialContentOverrides =
+                                state.currentView === 'file' && state.activeFileId
+                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
+                                    : undefined;
+
+                            const orchestrationResult = await runOrchestration(
+                                allMessages,
+                                filesForContext,
+                                {
+                                    provider,
+                                    model: state.agentModel,
+                                    readOnly: state.agentReadOnly,
+                                    apiKey,
+                                    temperature: state.agentTemperature,
+                                    maxTokens: state.agentMaxTokens,
+                                    onDiffCreated,
+                                    initialContentOverrides,
+                                    onEvent: (event) => {
+                                        if (event.type === 'step_started') {
+                                            set({ agentCurrentStep: stepLabels[event.step.agentType] ?? event.step.agentType });
+                                        } else if (event.type === 'workflow_completed' || event.type === 'workflow_failed') {
+                                            set({ agentCurrentStep: null });
+                                        }
+                                    },
+                                }
+                            );
+                            response = {
+                                content: orchestrationResult.content,
+                                diffs: orchestrationResult.diffs,
+                            };
+                        } else {
+                            const provider = modelToProvider(state.agentModel);
+                            const apiKeyOverride = state.agentApiKeys[provider]?.trim() || undefined;
+                            const initialContentOverrides =
+                                state.currentView === 'file' && state.activeFileId
+                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
+                                    : undefined;
+
+                            response = await sendMessageToAI(
+                                allMessages,
+                                filesForContext,
+                                undefined,
+                                {
+                                    provider,
+                                    model: state.agentModel,
+                                    readOnly: state.agentReadOnly,
+                                    apiKeyOverride,
+                                    temperature: state.agentTemperature,
+                                    maxTokens: state.agentMaxTokens,
+                                    onDiffCreated,
+                                    initialContentOverrides,
+                                }
+                            );
+                        }
+
+                        agentLog.info('response received', { contentLength: response.content?.length ?? 0, diffs: response.diffs?.length ?? 0 });
+                        // Ensure all returned diffs are in pendingDiffs (fallback if onDiffCreated missed any)
+                        for (const diff of response.diffs ?? []) {
+                            get().addPendingDiff(diff);
+                        }
+                        const assistantMessage = createMessage(
+                            'assistant',
+                            response.content,
+                            undefined,
+                            response.diffs?.map(d => d.id)
+                        );
+                        set((s) => {
+                            const agentMessages = Array.isArray(s.agentMessages) ? s.agentMessages : [];
+                            const nextMessages = [...agentMessages, assistantMessage];
+                            const updates: Partial<AppState> = {
+                                agentMessages: nextMessages,
+                                agentLoading: false,
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        messages: nextMessages,
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
+                    } catch (error) {
+                        agentLog.error('AI service error', error);
+                        set({
+                            agentLoading: false,
+                            agentCurrentStep: null,
+                            agentError: error instanceof Error ? error.message : 'Failed to get AI response',
+                        });
+                    }
+                },
+
+                clearAgentMessages: () => set((state) => {
+                    const updates: Partial<AppState> = {
+                        agentMessages: [],
+                        pendingDiffs: {},
+                        agentMentionedFiles: [],
+                        agentError: null,
+                    };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...state.chats[state.activeChatId],
+                                messages: [],
+                                pendingDiffs: {},
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
+                }),
+
+                addPendingDiff: (diff) => set((state) => {
+                    const nextDiffs = { ...state.pendingDiffs, [diff.id]: diff };
+                    const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                    if (state.activeChatId && state.chats[state.activeChatId]) {
+                        updates.chats = {
+                            ...state.chats,
+                            [state.activeChatId]: {
+                                ...state.chats[state.activeChatId],
+                                pendingDiffs: nextDiffs,
+                                updatedAt: Date.now(),
+                            },
+                        };
+                    }
+                    return updates;
+                }),
+
+                getMergedPendingDiffs: () => {
+                    const state = get();
+                    const pending = Object.values(state.pendingDiffs).filter((d) => d.status === 'pending');
+                    const byFile: Record<string, DocumentDiff[]> = {};
+                    for (const d of pending) {
+                        if (!byFile[d.fileId]) byFile[d.fileId] = [];
+                        byFile[d.fileId].push(d);
+                    }
+                    const merged: Record<string, DocumentDiff> = {};
+                    for (const fileId of Object.keys(byFile)) {
+                        const m = mergeDiffsForFile(byFile[fileId]);
+                        if (m) merged[fileId] = m;
+                    }
+                    return merged;
+                },
+
+                acceptAllPending: async () => {
+                    const merged = get().getMergedPendingDiffs();
+                    const diffs = Object.values(merged);
+                    if (diffs.length === 0) return;
+                    try {
+                        const state = get();
+                        for (const diff of diffs) {
+                            const currentFile = state.files.find((f) => f.id === diff.fileId);
+                            const currentContent = currentFile?.content ?? '';
+                            const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                            if (norm(diff.originalContent) !== norm(currentContent)) {
+                                console.warn(
+                                    '[Store] Content drift when accepting diff: diff.originalContent differs from current file content. Backup saved. fileId=',
+                                    diff.fileId
+                                );
+                            }
+                            if (currentFile?.content !== undefined) {
+                                saveBackupBeforeApply(diff.fileId, currentFile.content);
+                            }
+                        }
+                        for (const diff of diffs) {
+                            const newContent = applyDiffToContent(diff.originalContent, diff);
+                            await get().saveFile(diff.fileId, newContent);
+                        }
+                        set((s) => {
+                            const updates: Partial<AppState> = {
+                                pendingDiffs: {},
+                                files: s.files.map((f) => {
+                                    const d = diffs.find((d) => d.fileId === f.id);
+                                    if (!d) return f;
+                                    return { ...f, content: applyDiffToContent(d.originalContent, d) };
+                                }),
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        pendingDiffs: {},
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
+                    } catch (error) {
+                        console.error('Failed to apply changes:', error);
+                        set({ agentError: 'Failed to apply changes' });
+                    }
+                },
+
+                rejectAllPending: () =>
+                    set((state) => {
+                        const updates: Partial<AppState> = { pendingDiffs: {} };
+                        if (state.activeChatId && state.chats[state.activeChatId]) {
+                            updates.chats = {
+                                ...state.chats,
+                                [state.activeChatId]: {
+                                    ...state.chats[state.activeChatId],
+                                    pendingDiffs: {},
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    }),
+
+                approveDiff: async (diffId) => {
+                    const state = get();
+                    const diff = state.pendingDiffs[diffId];
+                    if (!diff) {
+                        console.error('Diff not found:', diffId);
+                        return;
+                    }
+                    try {
+                        const currentFile = state.files.find((f) => f.id === diff.fileId);
+                        const currentContent = currentFile?.content ?? '';
+                        const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                        if (norm(diff.originalContent) !== norm(currentContent)) {
+                            console.warn(
+                                '[Store] Content drift when approving diff: diff.originalContent differs from current file content. Backup saved. fileId=',
+                                diff.fileId
+                            );
+                        }
+                        if (currentFile?.content !== undefined) {
+                            saveBackupBeforeApply(diff.fileId, currentFile.content);
+                        }
+                        const newContent = applyDiffToContent(diff.originalContent, diff);
+                        await get().saveFile(diff.fileId, newContent);
+                        set((s) => {
+                            const nextDiffs = {
+                                ...s.pendingDiffs,
+                                [diffId]: { ...diff, status: 'approved' as const },
+                            };
+                            const updates: Partial<AppState> = {
+                                files: s.files.map((f) =>
+                                    f.id === diff.fileId ? { ...f, content: newContent } : f
+                                ),
+                                pendingDiffs: nextDiffs,
+                            };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        pendingDiffs: nextDiffs,
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
+                    } catch (error) {
+                        console.error('Failed to apply diff:', error);
+                        set({ agentError: 'Failed to apply changes' });
+                    }
+                },
+
+                rejectDiff: (diffId) =>
+                    set((state) => {
+                        const nextDiffs = {
+                            ...state.pendingDiffs,
+                            [diffId]: { ...state.pendingDiffs[diffId], status: 'rejected' as const },
+                        };
+                        const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                        if (state.activeChatId && state.chats[state.activeChatId]) {
+                            updates.chats = {
+                                ...state.chats,
+                                [state.activeChatId]: {
+                                    ...state.chats[state.activeChatId],
+                                    pendingDiffs: nextDiffs,
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    }),
+
+                setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
+                setAgentLoading: (loading) => set({ agentLoading: loading }),
+                setAgentError: (error) => set({ agentError: error }),
+                setAgentProvider: (provider) => set({ agentProvider: provider }),
+                setAgentModel: (model) => set({ agentModel: model }),
+                setAgentReadOnly: (readOnly) => set({ agentReadOnly: readOnly }),
+                setAgentApiKey: (provider, key) =>
+                    set((s) => ({
+                        agentApiKeys: { ...s.agentApiKeys, [provider]: key },
+                        agentProviderKeysValid: { ...s.agentProviderKeysValid, [provider]: false },
+                    })),
+                setAgentProviderKeyValid: (provider, valid) =>
+                    set((s) => ({ agentProviderKeysValid: { ...s.agentProviderKeysValid, [provider]: valid } })),
+                setAgentTemperature: (temperature) => set({ agentTemperature: temperature }),
+                setAgentMaxTokens: (maxTokens) => set({ agentMaxTokens: maxTokens }),
+                setAgentUseOrchestration: (useOrchestration) => set({ agentUseOrchestration: useOrchestration }),
+
+                createNewChat: () => {
+                    const state = get();
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    const id = generateId();
+                    const now = Date.now();
+                    const chat: AgentChat = {
+                        id,
+                        title: 'New chat',
+                        documentId,
+                        messages: [],
+                        pendingDiffs: {},
+                        createdAt: now,
+                        updatedAt: now,
+                    };
+                    set((s) => ({
+                        chats: { ...s.chats, [id]: chat },
+                        activeChatId: id,
+                        agentMessages: [],
+                        pendingDiffs: {},
+                        agentMentionedFiles: [],
+                        agentError: null,
+                        ragDocuments: [],
+                    }));
+                    return id;
+                },
+
+                switchChat: (chatId) => {
+                    const state = get();
+                    const chat = state.chats[chatId];
+                    if (!chat) return;
+                    set({
+                        activeChatId: chatId,
+                        agentMessages: chat.messages,
+                        pendingDiffs: chat.pendingDiffs,
+                        agentMentionedFiles: [],
+                        agentError: null,
+                    });
+                    get().fetchRagDocuments();
+                },
+
+                clearAllChats: async () => {
+                    const state = get();
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    const chatIdsToRemove = Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === documentId)
+                        .map((c) => c.id);
+                    await Promise.all(
+                        chatIdsToRemove.map((chatId) =>
+                            browserStorage.deleteRagDocumentsByChatId(chatId)
+                        )
+                    );
+                    set((s) => {
+                        const nextChats = { ...s.chats };
+                        chatIdsToRemove.forEach((id) => delete nextChats[id]);
+                        return {
+                            chats: nextChats,
+                            activeChatId: null,
+                            agentMessages: [],
+                            pendingDiffs: {},
+                            agentMentionedFiles: [],
+                            agentError: null,
+                            ragDocuments: [],
+                        };
+                    });
+                    get().ensureActiveChatForDocument();
+                },
+
+                getChatsList: () => {
+                    const state = get();
+                    const documentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    return Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === documentId)
+                        .sort((a, b) => b.updatedAt - a.updatedAt);
+                },
+
+                ensureActiveChatForDocument: () => {
+                    const state = get();
+                    const targetDocumentId =
+                        state.currentView === 'file' && state.activeFileId
+                            ? state.activeFileId
+                            : null;
+                    const currentChat = state.activeChatId
+                        ? state.chats[state.activeChatId]
+                        : null;
+                    const currentChatDocumentId = currentChat?.documentId ?? null;
+                    if (currentChatDocumentId === targetDocumentId) return;
+
+                    const chatsForDoc = Object.values(state.chats)
+                        .filter((c) => (c.documentId ?? null) === targetDocumentId)
+                        .sort((a, b) => b.updatedAt - a.updatedAt);
+                    if (chatsForDoc.length > 0) {
+                        get().switchChat(chatsForDoc[0].id);
+                    } else {
+                        get().createNewChat();
+                    }
+                },
+
+                fetchRagDocuments: async () => {
+                    const { activeChatId } = get();
+                    if (!activeChatId) {
+                        set({ ragDocuments: [] });
+                        return;
+                    }
+                    try {
+                        const docs = await browserStorage.getRagDocumentsByChatId(activeChatId);
+                        set({ ragDocuments: docs });
+                    } catch (error) {
+                        console.error('Failed to fetch RAG documents:', error);
+                        set({ ragDocuments: [] });
+                    }
+                },
+
+                addRagDocument: async (doc: RagDocument) => {
+                    try {
+                        await browserStorage.storeRagDocument(doc);
+                        set(state => ({
+                            ragDocuments: [...(Array.isArray(state.ragDocuments) ? state.ragDocuments : []), doc]
+                        }));
+                    } catch (error) {
+                        console.error('Failed to add RAG document:', error);
+                    }
+                },
+
+                removeRagDocument: async (id: string) => {
+                    try {
+                        await browserStorage.deleteRagDocument(id);
+                        set(state => {
+                            const ragDocuments = Array.isArray(state.ragDocuments) ? state.ragDocuments : [];
+                            return { ragDocuments: ragDocuments.filter(d => d.id !== id) };
+                        });
+                    } catch (error) {
+                        console.error('Failed to remove RAG document:', error);
                     }
                 },
             };
@@ -919,19 +1693,78 @@ export const useStore = create<AppState>()(
                 sidebarView: state.sidebarView,
                 currentView: state.currentView,
                 editorViewMode: state.editorViewMode,
+                chats: state.chats,
+                activeChatId: state.activeChatId,
+                agentProvider: state.agentProvider,
+                agentModel: state.agentModel,
+                agentReadOnly: state.agentReadOnly,
+                agentApiKeys: state.agentApiKeys,
+                agentProviderKeysValid: state.agentProviderKeysValid,
+                agentTemperature: state.agentTemperature,
+                agentMaxTokens: state.agentMaxTokens,
+                agentUseOrchestration: state.agentUseOrchestration,
             }),
             merge: (persistedState, currentState) => {
-                // Ignore customFonts and fontsLoaded from localStorage as they cannot be persisted there:
-                // - customFonts contains blobs which cannot be serialized
-                // - fontsLoaded must start as false and only become true after fetchFonts() completes
-                // This prevents 'poisoned' empty objects from overwriting valid fetched fonts
-                // if hydration happens after fetchFonts.
+                const persisted = persistedState as Partial<AppState> & {
+                    chats?: Record<string, AgentChat>;
+                    activeChatId?: string | null;
+                    agentApiKeyOverride?: string;
+                };
                 const merged = {
                     ...currentState,
-                    ...(persistedState as object),
+                    ...persisted,
                     customFonts: currentState.customFonts,
                     fontsLoaded: currentState.fontsLoaded,
                 };
+                // Ensure persisted array/object shapes are valid (avoids "undefined is not iterable" on load)
+                if (!Array.isArray(merged.openTabs)) {
+                    merged.openTabs = [];
+                }
+                if (!Array.isArray(merged.files)) {
+                    merged.files = [];
+                }
+                if (!Array.isArray(merged.templates)) {
+                    merged.templates = [];
+                }
+                if (!Array.isArray(merged.fileTree)) {
+                    merged.fileTree = [];
+                }
+                if (!Array.isArray(merged.ragDocuments)) {
+                    merged.ragDocuments = [];
+                }
+                if (!merged.chats || typeof merged.chats !== 'object') {
+                    merged.chats = {};
+                }
+                if (!Array.isArray(merged.agentMessages)) {
+                    merged.agentMessages = [];
+                }
+                if (!merged.pendingDiffs || typeof merged.pendingDiffs !== 'object') {
+                    merged.pendingDiffs = {};
+                }
+                if (!Array.isArray(merged.agentMentionedFiles)) {
+                    merged.agentMentionedFiles = [];
+                }
+                // Migrate old single API key to per-provider keys
+                if (!merged.agentApiKeys || typeof merged.agentApiKeys !== 'object') {
+                    merged.agentApiKeys = { openai: '', anthropic: '', google: '' };
+                    if (persisted.agentApiKeyOverride && typeof persisted.agentApiKeyOverride === 'string') {
+                        merged.agentApiKeys.openai = persisted.agentApiKeyOverride;
+                    }
+                }
+                if (!merged.agentProviderKeysValid || typeof merged.agentProviderKeysValid !== 'object') {
+                    merged.agentProviderKeysValid = { openai: false, anthropic: false, google: false };
+                }
+                // In trial-only mode, enforce GPT-4o mini
+                if (isTrialOnlyOpenAI(merged.agentApiKeys?.openai ?? '')) {
+                    merged.agentModel = TRIAL_MODEL;
+                    merged.agentProvider = 'openai';
+                }
+                // Restore agentMessages and pendingDiffs from active chat
+                if (merged.activeChatId && merged.chats?.[merged.activeChatId]) {
+                    const chat = merged.chats[merged.activeChatId];
+                    merged.agentMessages = chat.messages ?? [];
+                    merged.pendingDiffs = chat.pendingDiffs ?? {};
+                }
                 return merged;
             }
         }

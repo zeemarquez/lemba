@@ -1,7 +1,8 @@
 "use client";
 
-import { useStore, TemplateVariable } from "@/lib/store";
+import { useStore, TemplateVariable, FontEntry } from "@/lib/store";
 import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle } from "lucide-react";
+import { PRELOADED_FONTS } from "@/lib/preloaded-fonts";
 import { ColorInput } from "./ColorInput";
 import * as LucideIcons from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
@@ -26,14 +27,12 @@ function kebabToPascal(s: string): string {
 // Available fonts in Typst WASM compiler (from typst.ts text assets)
 // These are the only built-in fonts that work for PDF export
 const FONT_FAMILIES = [
-    // Serif - Libertinus Serif (the main text font)
-    { label: 'Libertinus Serif (Classic)', value: "'Libertinus Serif', serif", category: 'Serif' },
+    // Serif
+    { label: 'Libertinus Serif', value: "'Libertinus Serif', serif", category: 'Serif' },
+    { label: 'New Computer Modern', value: "'New Computer Modern', serif", category: 'Serif' },
 
-    // Monospace - DejaVu Sans Mono
-    { label: 'DejaVu Sans Mono (Code)', value: "'DejaVu Sans Mono', monospace", category: 'Monospace' },
-
-    // Math/Academic - New Computer Modern
-    { label: 'New Computer Modern (Academic)', value: "'New Computer Modern', serif", category: 'Serif' },
+    // Monospace
+    { label: 'DejaVu Sans Mono', value: "'DejaVu Sans Mono', monospace", category: 'Monospace' },
 ];
 
 // Common page sizes supported by Typst
@@ -57,12 +56,28 @@ export function TemplateEditor() {
     const template = templates.find(t => t.id === activeTemplateId);
 
     const allFontFamilies = useMemo(() => {
-        const custom = customFonts.map(f => ({
-            label: `${f.family} (Custom)`,
-            value: `'${f.family}'`,
-            category: 'Custom'
-        }));
-        return [...FONT_FAMILIES, ...custom];
+        const preloadedMapped = PRELOADED_FONTS.map(pf => {
+            // Check if this preloaded font is already in customFonts (it should be after fetchFonts)
+            // We use the family name to match
+            const isInCustom = customFonts.some(cf => cf.family === pf.family);
+            return {
+                label: pf.family,
+                value: `'${pf.family}', ${pf.category === 'Serif' ? 'serif' : pf.category === 'Monospace' ? 'monospace' : 'sans-serif'}`,
+                category: pf.category,
+                isPreloaded: true,
+                isLoaded: isInCustom
+            };
+        });
+
+        const custom = customFonts
+            .filter(f => !PRELOADED_FONTS.some(pf => pf.family === f.family))
+            .map(f => ({
+                label: `${f.family} (Custom)`,
+                value: `'${f.family}'`,
+                category: 'Uploaded'
+            }));
+
+        return [...FONT_FAMILIES, ...preloadedMapped, ...custom];
     }, [customFonts]);
 
     const [settings, setSettings] = useState(template?.settings);
@@ -443,11 +458,11 @@ export function TemplateEditor() {
 
                         <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-8 ring-1 ring-border/50">
                             {/* Layout Selection and Page Size */}
-                            <div className="grid grid-cols-2 gap-8">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 {/* Page Orientation */}
                                 <div className="space-y-5">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Orientation</label>
-                                    <div className="flex gap-6">
+                                    <div className="flex flex-wrap gap-4 sm:gap-6">
                                         {[
                                             { id: 'vertical', label: 'Portrait', icon: Maximize },
                                             { id: 'horizontal', label: 'Landscape', icon: Maximize }
@@ -456,7 +471,7 @@ export function TemplateEditor() {
                                                 key={layout.id}
                                                 onClick={() => updateSetting('pageLayout', layout.id)}
                                                 className={cn(
-                                                    "w-40 flex flex-col items-center gap-3 p-5 rounded-[1.5rem] border-2 transition-all duration-300",
+                                                    "w-full sm:w-40 flex flex-col items-center gap-3 p-5 rounded-[1.5rem] border-2 transition-all duration-300",
                                                     settings.pageLayout === layout.id
                                                         ? "border-primary bg-primary text-primary-foreground shadow-lg scale-[1.02]"
                                                         : "border-border bg-muted/50 text-muted-foreground hover:border-border hover:bg-muted"
@@ -486,7 +501,7 @@ export function TemplateEditor() {
                                                         {settings.pageSize?.preset
                                                             ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
                                                             : settings.pageSize?.custom
-                                                                ? `Custom (${settings.pageSize.custom.width} × ${settings.pageSize.custom.height})`
+                                                                ? 'Custom'
                                                                 : 'A4'}
                                                     </span>
                                                     <ChevronDown className="w-4 h-4 opacity-50" />
@@ -649,7 +664,7 @@ export function TemplateEditor() {
                                             </button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto no-scrollbar">
-                                            {['Sans Serif', 'Serif', 'Monospace', 'Custom'].map((category, index) => {
+                                            {['Sans-Serif', 'Serif', 'Monospace', 'Uploaded'].map((category, index) => {
                                                 const categoryFonts = allFontFamilies.filter(f => f.category === category);
                                                 if (categoryFonts.length === 0) return null;
 
@@ -1932,7 +1947,7 @@ export function TemplateEditor() {
 
                             {/* Alert Customization */}
                             <div className="pt-6 border-t border-border space-y-8">
-                                
+
                                 {/* Alert Type Selector */}
                                 <div className="flex items-center gap-4 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
                                     {(['note', 'tip', 'important', 'warning', 'caution'] as const).map((alertType) => {
