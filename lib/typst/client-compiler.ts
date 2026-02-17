@@ -19,6 +19,11 @@ interface HeadingOptions {
     color?: string;
     textAlign?: string;
     borderBottom?: boolean;
+    indentSize?: string;
+    fontWeight?: string;
+    fontStyle?: string;
+    textDecoration?: string;
+    textTransform?: string;
     numbering?: HeadingNumbering;
 }
 
@@ -43,6 +48,10 @@ export interface TypstOptions {
     };
     backgroundColor?: string;
     textColor?: string;
+    textAlign?: 'left' | 'center' | 'right' | 'justify';
+    indentFirstLine?: boolean;
+    indentSize?: string;
+    lineHeight?: string;
     h1?: HeadingOptions;
     h2?: HeadingOptions;
     h3?: HeadingOptions;
@@ -784,22 +793,121 @@ export function generatePreamble(options: TypstOptions): string {
     const bgColor = settings.backgroundColor || '#ffffff';
     const textColor = settings.textColor || '#333333';
 
-    const headingStyles = (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const).map((tag, i) => {
+    // Unified Heading Styling and Numbering
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
+
+    // Check which levels have numbering enabled for counter definitions
+    const enabledLevels = levels.filter(tag => settings[tag]?.numbering?.enabled);
+
+    let counterDefs = '';
+    if (enabledLevels.length > 0) {
+        counterDefs = '// Custom counters for heading numbering\n';
+        counterDefs += '#set heading(numbering: none)\n';
+        levels.forEach((tag, i) => {
+            if (settings[tag]?.numbering?.enabled) {
+                counterDefs += `#let h${i + 1}c = counter("h${i + 1}-counter")\n`;
+            }
+        });
+        counterDefs += '\n';
+    }
+
+    const headingStyles = levels.map((tag, i) => {
         const h = settings[tag] || {};
         const level = i + 1;
         const size = fixTypstUnit(h.fontSize || (level === 1 ? '1.5em' : level === 2 ? '1.3em' : '1em'));
         const color = h.color || 'inherit';
         const align = h.textAlign || 'left';
 
-        let rules = `#show heading.where(level: ${level}): set text(size: ${size}, fill: rgb("${color !== 'inherit' ? color : textColor}"))\n`;
+        const isNumberingEnabled = h.numbering?.enabled || false;
+
+        // Base text and align settings
+        let rules = `#show heading.where(level: ${level}): set text(
+          size: ${size}, 
+          fill: rgb("${color !== 'inherit' ? color : textColor}"),
+          weight: ${h.fontWeight === '700' ? 'bold' : 'regular'},
+          style: ${h.fontStyle === 'italic' ? 'italic' : 'normal'}
+        )\n`;
         rules += `#show heading.where(level: ${level}): set align(${align})\n`;
 
-        if (h.borderBottom) {
-            rules += `#show heading.where(level: ${level}): it => block(below: 1em)[
-               #it
-               #line(length: 100%, stroke: 1pt + rgb("${color !== 'inherit' ? color : '#000000'}"))
-             ]\n`;
+        // Complex show rule for numbering + layout + transformations
+        rules += `#show heading.where(level: ${level}): it => {\n`;
+        // 1. Counter Management
+        if (isNumberingEnabled) {
+            rules += `  h${level}c.step()\n`;
         }
+        // Reset sub-counters
+        const childTags = levels.slice(i + 1);
+        childTags.forEach((childTag, j) => {
+            if (settings[childTag]?.numbering?.enabled) {
+                rules += `  h${i + j + 2}c.update(0)\n`;
+            }
+        });
+
+        // 2. Prepare Numbering String
+        let numberingExpr = 'none';
+        if (isNumberingEnabled) {
+            const ancestorLevels = levels.slice(0, i + 1)
+                .map((t, idx) => ({ tag: t, level: idx + 1 }))
+                .filter(l => settings[l.tag]?.numbering?.enabled);
+
+            const styleToTypst = (style: string): string => {
+                switch (style) {
+                    case 'decimal': return '"1"';
+                    case 'decimal-leading-zero': return '"01"';
+                    case 'lower-roman': return '"i"';
+                    case 'upper-roman': return '"I"';
+                    case 'lower-alpha': return '"a"';
+                    case 'upper-alpha': return '"A"';
+                    default: return '"1"';
+                }
+            };
+
+            const parts: string[] = [];
+            ancestorLevels.forEach((ancestor, idx) => {
+                parts.push(`h${ancestor.level}c.display(${styleToTypst(settings[ancestor.tag]?.numbering?.style || 'decimal')})`);
+                if (idx < ancestorLevels.length - 1) {
+                    parts.push(`[${settings[ancestor.tag]?.numbering?.separator || '.'}]`);
+                }
+            });
+
+            numberingExpr = `[${h.numbering?.prefix || ''}] + `;
+            parts.forEach((p, idx) => {
+                numberingExpr += p;
+                if (idx < parts.length - 1) numberingExpr += ' + ';
+            });
+            numberingExpr += ` + [${h.numbering?.suffix || '. '}]`;
+        }
+
+        // 3. Prepare Content (Text Transform & Decoration)
+        let bodyFinalExpr = `it.body`;
+        if (h.textTransform === 'uppercase') {
+            bodyFinalExpr = `upper(${bodyFinalExpr})`;
+        }
+        if (h.textDecoration === 'underline') {
+            bodyFinalExpr = `underline(${bodyFinalExpr})`;
+        }
+
+        const indentVal = h.indentSize ? fixTypstUnit(h.indentSize) : '0pt';
+
+        rules += `  let hb = block(below: 1em)[\n`;
+        rules += `    #pad(left: ${indentVal})[\n`;
+        if (isNumberingEnabled) {
+            rules += `      #context text(weight: "bold")[#${numberingExpr}]\n`;
+        }
+        rules += `      #${bodyFinalExpr}\n`;
+        rules += `    ]\n`;
+        if (h.borderBottom) {
+            rules += `    #line(length: 100%, stroke: 1pt + rgb("${color !== 'inherit' ? color : '#000000'}"))\n`;
+        }
+        rules += `  ]\n`;
+
+        // Include the indentation hack if enabled
+        if (settings.indentFirstLine) {
+            rules += `  hb + h(0pt) + v(-1.2em)\n`;
+        } else {
+            rules += `  hb\n`;
+        }
+        rules += `}\n`;
         return rules;
     }).join('\n');
 
@@ -947,9 +1055,17 @@ export function generatePreamble(options: TypstOptions): string {
   lang: "en"
 )
 
-// Heading numbering configuration
-${generateHeadingNumbering(settings)}
+// Paragraph and Alignment settings
+#set par(
+  justify: ${settings.textAlign === 'justify'},
+  first-line-indent: ${settings.indentFirstLine ? fixTypstUnit(settings.indentSize || '2em') : '0pt'},
+  leading: ${settings.lineHeight ? fixTypstUnit(settings.lineHeight) : '0.65em'}
+)
+${settings.textAlign && settings.textAlign !== 'justify' ? `#set align(${settings.textAlign})` : ''}
+${settings.indentFirstLine ? '#show heading: it => it + h(0pt) + v(-1.2em)' : ''}
 
+// Heading configuration
+${counterDefs}
 ${headingStyles}
 
 // Common styles

@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore, TemplateVariable, FontEntry } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle, Columns2 } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle, Columns2 } from "lucide-react";
 import { PRELOADED_FONTS } from "@/lib/preloaded-fonts";
 import { ColorInput } from "./ColorInput";
 import * as LucideIcons from "lucide-react";
@@ -136,7 +136,7 @@ export function TemplateEditor() {
     // Section definitions for the index
     const sections = useMemo(() => [
         { id: 'page-settings', label: 'Page Settings', icon: LayoutTemplate },
-        { id: 'typography', label: 'Typography', icon: TypeIcon },
+        { id: 'typography', label: 'Text Body', icon: TypeIcon },
         { id: 'headings', label: 'Headings', icon: HeadingIcon },
         { id: 'figures', label: 'Figures', icon: ImageIcon },
         { id: 'tables', label: 'Tables', icon: TableIcon },
@@ -224,9 +224,11 @@ export function TemplateEditor() {
                 color: ${style.color} !important; 
                 text-align: ${style.textAlign} !important;
                 border-bottom: ${style.borderBottom ? '1px solid ' + style.color : 'none'} !important;
-                text-transform: ${style.textTransform} !important;
+                text-transform: ${style.textTransform || 'none'} !important;
                 font-weight: ${style.fontWeight} !important;
+                font-style: ${style.fontStyle || 'normal'} !important;
                 text-decoration: ${style.textDecoration} !important;
+                padding-left: ${style.indentSize || '0'} !important;
                 margin-top: 1.5em !important;
                 margin-bottom: 0.5em !important;
             }
@@ -396,7 +398,12 @@ export function TemplateEditor() {
                 z-index: 9999;
             }
             ` : ''}
-            .prose p { margin: 1em 0; }
+            .prose p { 
+                margin: 1em 0;
+                text-align: ${s.textAlign || 'left'};
+                text-indent: ${s.indentFirstLine ? (s.indentSize || '2em') : '0'};
+                line-height: ${s.lineHeight ? (parseFloat(s.lineHeight) + 1) : '1.65'};
+            }
             .prose code {
                 background: #f4f4f4;
                 padding: 0.2em 0.4em;
@@ -685,7 +692,7 @@ export function TemplateEditor() {
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <TypeIcon size={22} className="text-foreground" />
                             </div>
-                            <h2 className="text-xl font-bold text-foreground tracking-tight">Typography</h2>
+                            <h2 className="text-xl font-bold text-foreground tracking-tight">Text body</h2>
                         </div>
 
                         <div className="p-6 bg-card border border-border rounded-[2rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] space-y-6 ring-1 ring-border/50">
@@ -747,17 +754,91 @@ export function TemplateEditor() {
                                 </div>
                             </div>
 
-                            <ColorInput
-                                label="Default Text Color"
-                                value={settings.textColor || ''}
-                                onChange={(v) => updateSetting('textColor', v)}
-                                defaultValue="#000000"
-                            />
+                            <div className="grid grid-cols-2 gap-6">
+                                <ColorInput
+                                    label="Default Text Color"
+                                    value={settings.textColor || ''}
+                                    onChange={(v) => updateSetting('textColor', v)}
+                                    defaultValue="#000000"
+                                />
+
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Alignment</label>
+                                    <div className="bg-muted/50 border border-border rounded-xl p-1 flex h-[52px]">
+                                        {[
+                                            { value: 'left', icon: AlignLeft },
+                                            { value: 'center', icon: AlignCenter },
+                                            { value: 'right', icon: AlignRight },
+                                            { value: 'justify', icon: AlignJustify }
+                                        ].map((align) => (
+                                            <button
+                                                key={align.value}
+                                                onClick={() => updateSetting('textAlign', align.value)}
+                                                className={cn(
+                                                    "flex-1 flex items-center justify-center rounded-lg transition-all outline-none focus:ring-2 focus:ring-primary/20",
+                                                    (settings.textAlign || 'left') === align.value
+                                                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                                                )}
+                                                title={align.value.charAt(0).toUpperCase() + align.value.slice(1)}
+                                            >
+                                                <align.icon size={18} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-4 border-t border-border grid grid-cols-2 gap-6">
+                                <div className="flex items-center gap-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground shrink-0">Indent</label>
+                                    <div
+                                        onClick={() => updateSetting('indentFirstLine', !settings.indentFirstLine)}
+                                        className={cn(
+                                            "w-10 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out relative shrink-0",
+                                            settings.indentFirstLine ? "bg-primary" : "bg-muted border border-border"
+                                        )}
+                                    >
+                                        <div className={cn(
+                                            "w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out absolute top-1 left-1",
+                                            settings.indentFirstLine ? "translate-x-4" : "translate-x-0"
+                                        )} />
+                                    </div>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        disabled={!settings.indentFirstLine}
+                                        className={cn(
+                                            "flex-1 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-semibold text-foreground transition-all outline-none h-[52px]",
+                                            settings.indentFirstLine
+                                                ? "hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                                : "opacity-50 cursor-not-allowed"
+                                        )}
+                                        value={settings.indentSize ? parseFloat(settings.indentSize) : 2}
+                                        onChange={(e) => updateSetting('indentSize', `${e.target.value}em`)}
+                                        placeholder="2"
+                                    />
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground shrink-0">Line Space</label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        className="flex-1 bg-muted/50 border border-border rounded-2xl px-4 py-3 text-sm font-semibold text-foreground transition-all outline-none h-[52px] hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                        value={settings.lineHeight ? parseFloat(settings.lineHeight) : 0.6}
+                                        onChange={(e) => updateSetting('lineHeight', `${e.target.value}em`)}
+                                        placeholder="0.6"
+                                    />
+                                </div>
+                            </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Headings Section */}
-                    <section id="section-headings" className="space-y-8 scroll-mt-16">
+                    < section id="section-headings" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <HeadingIcon size={22} className="text-foreground" />
@@ -784,17 +865,17 @@ export function TemplateEditor() {
                                 ))}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Font Size</label>
                                     <input
                                         type="number"
                                         min="8"
                                         max="200"
-                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-3 h-[52px] text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
                                         value={parseInt((settings as any)[activeHeadingLevel].fontSize) || 16}
                                         onChange={(e) => updateSetting(`${activeHeadingLevel}.fontSize`, `${e.target.value}px`)}
-                                        placeholder="e.g. 32"
+                                        placeholder="16"
                                     />
                                 </div>
                                 <ColorInput
@@ -804,12 +885,65 @@ export function TemplateEditor() {
                                     onChange={(v) => updateSetting(`${activeHeadingLevel}.color`, v)}
                                     defaultValue="#000000"
                                 />
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
+                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl h-[52px]">
+                                        <button
+                                            onClick={() => updateSetting(`${activeHeadingLevel}.fontWeight`, (settings as any)[activeHeadingLevel].fontWeight === '700' ? '400' : '700')}
+                                            className={cn(
+                                                "flex-1 flex items-center justify-center rounded-xl transition-all",
+                                                (settings as any)[activeHeadingLevel].fontWeight === '700'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Bold"
+                                        >
+                                            <Bold size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting(`${activeHeadingLevel}.fontStyle`, (settings as any)[activeHeadingLevel].fontStyle === 'italic' ? 'normal' : 'italic')}
+                                            className={cn(
+                                                "flex-1 flex items-center justify-center rounded-xl transition-all",
+                                                (settings as any)[activeHeadingLevel].fontStyle === 'italic'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Italic"
+                                        >
+                                            <Italic size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSetting(`${activeHeadingLevel}.textDecoration`, (settings as any)[activeHeadingLevel].textDecoration === 'underline' ? 'none' : 'underline')}
+                                            className={cn(
+                                                "flex-1 flex items-center justify-center rounded-xl transition-all",
+                                                (settings as any)[activeHeadingLevel].textDecoration === 'underline'
+                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                            title="Underline"
+                                        >
+                                            <Underline size={16} />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Indent</label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        className="w-full bg-muted/50 border border-border rounded-2xl px-5 py-3 h-[52px] text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                        value={parseFloat((settings as any)[activeHeadingLevel].indentSize || '0')}
+                                        onChange={(e) => updateSetting(`${activeHeadingLevel}.indentSize`, `${e.target.value}em`)}
+                                        placeholder="0"
+                                    />
+                                </div>
                                 <div className="space-y-3">
                                     <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Alignment</label>
-                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
+                                    <div className="flex gap-1 p-1 bg-muted/50 border border-border rounded-2xl h-[52px]">
                                         {[
                                             { id: 'left', icon: AlignLeft },
                                             { id: 'center', icon: AlignCenter },
@@ -819,11 +953,12 @@ export function TemplateEditor() {
                                                 key={align.id}
                                                 onClick={() => updateSetting(`${activeHeadingLevel}.textAlign`, align.id)}
                                                 className={cn(
-                                                    "p-2.5 rounded-xl transition-all",
+                                                    "flex-1 flex items-center justify-center rounded-xl transition-all",
                                                     (settings as any)[activeHeadingLevel].textAlign === align.id
                                                         ? "bg-background text-foreground shadow-sm ring-1 ring-border"
                                                         : "text-muted-foreground hover:text-foreground"
                                                 )}
+                                                title={align.id.charAt(0).toUpperCase() + align.id.slice(1)}
                                             >
                                                 <align.icon size={16} />
                                             </button>
@@ -831,66 +966,28 @@ export function TemplateEditor() {
                                     </div>
                                 </div>
                                 <div className="space-y-3">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Style</label>
-                                    <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
-                                        <button
-                                            onClick={() => updateSetting(`${activeHeadingLevel}.fontWeight`, (settings as any)[activeHeadingLevel].fontWeight === '700' ? '400' : '700')}
-                                            className={cn(
-                                                "p-2.5 rounded-xl transition-all",
-                                                (settings as any)[activeHeadingLevel].fontWeight === '700'
-                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            <Bold size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => updateSetting(`${activeHeadingLevel}.fontStyle`, (settings as any)[activeHeadingLevel].fontStyle === 'italic' ? 'normal' : 'italic')}
-                                            className={cn(
-                                                "p-2.5 rounded-xl transition-all",
-                                                (settings as any)[activeHeadingLevel].fontStyle === 'italic'
-                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            <Italic size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => updateSetting(`${activeHeadingLevel}.textDecoration`, (settings as any)[activeHeadingLevel].textDecoration === 'underline' ? 'none' : 'underline')}
-                                            className={cn(
-                                                "p-2.5 rounded-xl transition-all",
-                                                (settings as any)[activeHeadingLevel].textDecoration === 'underline'
-                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            <Underline size={16} />
-                                        </button>
+                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Transform</label>
+                                    <div className="flex gap-1 p-1 bg-muted/50 border border-border rounded-2xl h-[52px]">
+                                        {[
+                                            { id: 'none', label: 'None' },
+                                            { id: 'uppercase', label: 'AB' },
+                                            { id: 'capitalize', label: 'Ab' }
+                                        ].map((t) => (
+                                            <button
+                                                key={t.id}
+                                                onClick={() => updateSetting(`${activeHeadingLevel}.textTransform`, t.id)}
+                                                className={cn(
+                                                    "flex-1 flex items-center justify-center rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all",
+                                                    (settings as any)[activeHeadingLevel].textTransform === t.id
+                                                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                                                        : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                                title={t.id === 'none' ? 'None' : t.id === 'uppercase' ? 'UPPERCASE' : 'Capitalize'}
+                                            >
+                                                {t.label}
+                                            </button>
+                                        ))}
                                     </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Text Transform</label>
-                                <div className="flex gap-2 p-1 bg-muted/50 border border-border rounded-2xl w-fit">
-                                    {[
-                                        { id: 'none', label: 'None' },
-                                        { id: 'uppercase', label: 'UPPER' },
-                                        { id: 'capitalize', label: 'Title' }
-                                    ].map((t) => (
-                                        <button
-                                            key={t.id}
-                                            onClick={() => updateSetting(`${activeHeadingLevel}.textTransform`, t.id)}
-                                            className={cn(
-                                                "px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all",
-                                                (settings as any)[activeHeadingLevel].textTransform === t.id
-                                                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            {t.label}
-                                        </button>
-                                    ))}
                                 </div>
                             </div>
 
@@ -965,10 +1062,10 @@ export function TemplateEditor() {
                                 )}
                             </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Figures Section */}
-                    <section id="section-figures" className="space-y-8 scroll-mt-16">
+                    < section id="section-figures" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <ImageIcon size={22} className="text-foreground" />
@@ -1159,10 +1256,10 @@ export function TemplateEditor() {
                                 </div>
                             </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Tables Section */}
-                    <section id="section-tables" className="space-y-8 scroll-mt-16">
+                    < section id="section-tables" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <TableIcon size={22} className="text-foreground" />
@@ -1549,10 +1646,10 @@ export function TemplateEditor() {
                                 </div>
                             </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Front Page Section */}
-                    <section id="section-front-page" className="space-y-8 scroll-mt-16">
+                    < section id="section-front-page" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <FileText size={22} className="text-foreground" />
@@ -1606,10 +1703,10 @@ export function TemplateEditor() {
                                 </>
                             )}
                         </div>
-                    </section>
+                    </section >
 
                     {/* Index/Outline Section */}
-                    <section id="section-outline" className="space-y-8 scroll-mt-16">
+                    < section id="section-outline" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <List size={22} className="text-foreground" />
@@ -1748,10 +1845,10 @@ export function TemplateEditor() {
                                 </>
                             )}
                         </div>
-                    </section>
+                    </section >
 
                     {/* Header Section */}
-                    <section id="section-header" className="space-y-8 scroll-mt-16">
+                    < section id="section-header" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <ArrowUpFromLine size={22} className="text-foreground" />
@@ -1828,10 +1925,10 @@ export function TemplateEditor() {
                                 </>
                             )}
                         </div>
-                    </section>
+                    </section >
 
                     {/* Footer Section */}
-                    <section id="section-footer" className="space-y-8 scroll-mt-16">
+                    < section id="section-footer" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <ArrowDownToLine size={22} className="text-foreground" />
@@ -1908,10 +2005,10 @@ export function TemplateEditor() {
                                 </>
                             )}
                         </div>
-                    </section>
+                    </section >
 
                     {/* Variables Section */}
-                    <section id="section-variables" className="space-y-8 scroll-mt-16">
+                    < section id="section-variables" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <Variable size={22} className="text-foreground" />
@@ -1968,10 +2065,10 @@ export function TemplateEditor() {
                                 </Button>
                             </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Alerts Section */}
-                    <section id="section-alerts" className="space-y-8 scroll-mt-16">
+                    < section id="section-alerts" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <AlertCircle size={22} className="text-foreground" />
@@ -2130,10 +2227,10 @@ export function TemplateEditor() {
                                 })()}
                             </div>
                         </div>
-                    </section>
+                    </section >
 
                     {/* Code Blocks Section */}
-                    <section id="section-code-blocks" className="space-y-8 scroll-mt-16">
+                    < section id="section-code-blocks" className="space-y-8 scroll-mt-16" >
                         <div className="flex items-center gap-4">
                             <div className="p-3 bg-muted rounded-2xl border border-border shadow-sm">
                                 <CodeIcon size={22} className="text-foreground" />
@@ -2364,12 +2461,12 @@ export function TemplateEditor() {
                                 </div>
                             </div>
                         </div>
-                    </section>
-                </div>
-            </div>
+                    </section >
+                </div >
+            </div >
 
             {/* Right Side Index */}
-            <div className="w-48 shrink-0">
+            < div className="w-48 shrink-0" >
                 <div className="sticky top-0 p-6 pt-16">
                     <nav className="space-y-1">
                         {sections.map((section) => {
@@ -2401,7 +2498,7 @@ export function TemplateEditor() {
                         })}
                     </nav>
                 </div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }

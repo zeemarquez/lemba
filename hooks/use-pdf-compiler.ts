@@ -48,6 +48,9 @@ export interface TemplateSettings {
     fontSize?: string;
     textColor?: string;
     backgroundColor?: string;
+    textAlign?: 'left' | 'center' | 'right' | 'justify';
+    indentFirstLine?: boolean;
+    indentSize?: string;
     pageLayout?: 'vertical' | 'horizontal';
     columns?: 1 | 2 | 3;
     pageSize?: {

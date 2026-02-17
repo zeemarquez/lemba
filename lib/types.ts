@@ -43,6 +43,7 @@ export interface HeadingStyle {
     fontWeight: string;
     fontStyle: string;
     textDecoration: string;
+    indentSize?: string;
     numbering: {
         enabled: boolean;
         style: 'decimal' | 'decimal-leading-zero' | 'lower-roman' | 'upper-roman' | 'lower-alpha' | 'upper-alpha';
@@ -67,6 +68,10 @@ export interface Template {
         fontSize: string;
         textColor: string;
         backgroundColor: string;
+        textAlign?: 'left' | 'center' | 'right' | 'justify';
+        indentFirstLine?: boolean;
+        indentSize?: string;
+        lineHeight?: string;
         pageLayout: 'vertical' | 'horizontal';
         columns?: 1 | 2 | 3;
         pageSize?: {
