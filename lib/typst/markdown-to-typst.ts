@@ -711,10 +711,42 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             const maxWidthVal = options.tables?.maxWidth ?? 100;
             const tableHasWidthConstraints = (maxWidthVal > 0 && maxWidthVal < 100) || minWidthVal > 0;
 
+            // Pre-calculate column content lengths
+            const colWidths = new Array(cols).fill(0);
+
+            // Helper to get text length from tokens
+            const getLength = (cellTokens: any[]) => {
+                const text = parseInline(cellTokens, options);
+                // Strip Typst markup for better length estimation
+                return text.replace(/#.*?\[|\]/g, '').replace(/[\*_`]/g, '').length;
+            };
+
+            token.header.forEach((cell: any, colIndex: number) => {
+                if (colIndex >= cols) return;
+                const len = getLength(cell.tokens);
+                if (len > colWidths[colIndex]) colWidths[colIndex] = len;
+            });
+
+            token.rows.forEach((row: any) => {
+                row.forEach((cell: any, colIndex: number) => {
+                    if (colIndex >= cols) return;
+                    const len = getLength(cell.tokens);
+                    if (len > colWidths[colIndex]) colWidths[colIndex] = len;
+                });
+            });
+
+            // Ensure min width
+            for (let i = 0; i < cols; i++) if (colWidths[i] < 1) colWidths[i] = 1;
+
+            // Use logarithmic scaling for safer distribution; ensure min width for safety
+            const weights = colWidths.map(w => Math.log2(Math.max(w, 1) + 4));
+
             const equalWidth = options.tables?.equalWidthColumns === true;
             const columnSpec = equalWidth
                 ? `(${'1fr, '.repeat(cols).slice(0, -2)})`
-                : `(${'auto, '.repeat(cols).slice(0, -2)})`;
+                : (tableHasWidthConstraints
+                    ? `(${weights.map(w => w.toFixed(2) + 'fr').join(', ')})`
+                    : `(${'auto, '.repeat(cols).slice(0, -2)})`);
 
             let tableInner = `table(\n  columns: ${columnSpec},\n  inset: 10pt,\n  align: horizon,\n`;
 
@@ -729,7 +761,17 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             let totalLines = 0;
             const estimatedCharsPerLine = 80; // Rough estimate for text wrapping
 
-            token.header.forEach((cell: any) => {
+            // Pad missing cells for grid alignment
+            const padCells = (rowCells: any[], targetCols: number) => {
+                const padded = [...rowCells];
+                while (padded.length < targetCols) {
+                    padded.push({ tokens: [{ type: 'text', text: '' }] });
+                }
+                return padded;
+            };
+
+            const headerCells = padCells(token.header, cols);
+            headerCells.forEach((cell: any) => {
                 const cellContent = parseInline(cell.tokens, options);
                 let formattedContent = cellContent;
 
@@ -758,7 +800,8 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 tableInner += `  table.cell(${cellArgs.join(', ')})[${formattedContent}],\n`;
             });
             token.rows.forEach((row: any) => {
-                row.forEach((cell: any) => {
+                const rowCells = padCells(row, cols);
+                rowCells.forEach((cell: any) => {
                     const cellContent = parseInline(cell.tokens, options);
                     let formattedContent = cellContent;
 

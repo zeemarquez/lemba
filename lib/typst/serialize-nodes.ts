@@ -820,16 +820,44 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     const minWidth = isHeaderFooter ? 100 : (context.tables?.minWidth ?? 0);
     const maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
 
-    // Determine column sizing based on equalWidthColumns setting
-    // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
-    // When equalWidthColumns is true, use '1fr' for equal width columns
-    // SPECIAL CASE: If minWidth or maxWidth constraints are applied, we MUST use 1fr columns
-    // for the table to actually stretch/shrink to fill that constraint block.
-    // Typst's 'auto' columns do not expand to fill the container width.
-    const equalWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
-    const columns = equalWidth
-        ? `(${'1fr, '.repeat(maxCols).slice(0, -2)})`
-        : `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
+    // Pre-calculate column content lengths
+    const colWidths = new Array(maxCols).fill(0);
+    // Rough estimate of character width ratios (Typst is variable width, but this is a heuristic)
+    // We'll iterate all cells to find the max content length per column
+    rows.forEach(row => {
+        if (!row.children) return;
+        (row.children as TElement[]).forEach((cell, colIndex) => {
+            if (colIndex >= maxCols) return;
+            // Get raw text content length
+            const cellText = serializeNodesToTypst(cell.children, context).replace(/#.*?\[|\]/g, '').length;
+            if (cellText > colWidths[colIndex]) {
+                colWidths[colIndex] = cellText;
+            }
+        });
+    });
+
+    // Ensure no column has width 0 (avoid 0fr)
+    for (let i = 0; i < maxCols; i++) {
+        if (colWidths[i] < 1) colWidths[i] = 1; // Minimum weight
+    }
+
+    const hasWidthConstraints = (minWidth > 0) || (maxWidth > 0 && maxWidth < 100);
+    const forceEqualWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
+
+    let columns = '';
+    if (forceEqualWidth) {
+        columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+    } else if (hasWidthConstraints) {
+        // Use weighted fr units based on content length
+        // This makes the table fill the container (because of fr units)
+        // while maintaining relative column sizes (approximate "auto" behavior)
+        const totalWidth = colWidths.reduce((a, b) => a + b, 0);
+        // Normalize to be cleaner numbers if possible, but raw char counts work fine as ratios
+        columns = `(${colWidths.map(w => w + 'fr').join(', ')})`;
+    } else {
+        // Default auto sizing (hugs content, does not fill width)
+        columns = `(${'auto, '.repeat(maxCols).slice(0, -2)})`;
+    }
 
     // Check if borders should be hidden by examining cell borders
     // Plate stores borders on each cell, not on the table element
