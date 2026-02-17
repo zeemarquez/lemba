@@ -1224,14 +1224,14 @@ export function TemplateEditor() {
                                         </button>
                                     </div>
 
-                                    <div className="flex items-center gap-3">
-                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Max Width (%)</label>
+                                    <div className="flex flex-col gap-1.5 flex-1">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Max Width (%)</label>
                                         <input
                                             type="number"
                                             min="1"
                                             max="100"
                                             step="1"
-                                            className="w-24 bg-muted/50 border border-border rounded-2xl px-4 py-2.5 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            className="w-full bg-muted/50 border border-border rounded-2xl px-4 py-2.5 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
                                             value={settings.tables?.maxWidth || 100}
                                             onChange={(e) => {
                                                 const value = parseInt(e.target.value);
@@ -1240,6 +1240,25 @@ export function TemplateEditor() {
                                                 }
                                             }}
                                             placeholder="100"
+                                        />
+                                    </div>
+
+                                    <div className="flex flex-col gap-1.5 flex-1">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Min Width (%)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="100"
+                                            step="1"
+                                            className="w-full bg-full bg-muted/50 border border-border rounded-2xl px-4 py-2.5 text-sm font-semibold text-foreground transition-all outline-none hover:bg-muted focus:bg-background focus:ring-4 focus:ring-primary/5 focus:border-border"
+                                            value={settings.tables?.minWidth || 0}
+                                            onChange={(e) => {
+                                                const value = parseInt(e.target.value);
+                                                if (!isNaN(value) && value >= 0 && value <= 100) {
+                                                    updateSetting('tables.minWidth', value);
+                                                }
+                                            }}
+                                            placeholder="0"
                                         />
                                     </div>
                                 </div>

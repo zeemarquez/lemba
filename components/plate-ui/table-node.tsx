@@ -73,6 +73,7 @@ import {
 } from '@/components/plate-ui/dropdown-menu';
 import { Popover, PopoverContent } from '@/components/plate-ui/popover';
 import { cn } from '@/lib/utils';
+import { useStore, type AppState } from '@/lib/store';
 
 import { blockSelectionVariants } from './block-selection';
 import {
@@ -114,19 +115,39 @@ export const TableElement = withHOC(
 
     const isSelectingTable = useBlockSelected(props.element.id as string);
 
+    // Get table width constraints from the selected template
+    const template = useStore((state: AppState) => state.templates.find((t: any) => t.id === state.activeTemplateId) || state.templates[0]);
+    const tableSettings = template?.settings.tables;
+    const maxWidth = tableSettings?.maxWidth ?? 100;
+    const minWidth = tableSettings?.minWidth ?? 0;
+    const alignment = tableSettings?.alignment || 'center';
+
+    const hasWidthConstraints = (maxWidth > 0 && maxWidth < 100) || minWidth > 0;
+    const equalWidth = !!tableSettings?.equalWidthColumns;
+
     const content = (
       <PlateElement
         {...props}
         className={cn(
-          'overflow-x-auto py-5',
-          hasControls && '-ml-2 *:data-[slot=block-selection]:left-2'
+          'overflow-x-auto py-5 relative',
+          hasControls && '-ml-2 *:data-[slot=block-selection]:left-2',
+          alignment === 'center' && 'flex justify-center',
+          alignment === 'right' && 'flex justify-end'
         )}
         style={{ paddingLeft: marginLeft }}
       >
-        <div className="group/table relative w-fit">
+        <div
+          className="group/table relative h-full"
+          style={{
+            maxWidth: maxWidth < 100 ? `${maxWidth}%` : '100%',
+            minWidth: minWidth > 0 ? `${minWidth}%` : 'none',
+            width: equalWidth ? '100%' : 'fit-content'
+          }}
+        >
           <table
             className={cn(
-              'mr-0 ml-px table h-px table-fixed border-collapse',
+              'mr-0 ml-px table border-collapse',
+              equalWidth ? 'table-fixed w-full' : 'table-auto w-full min-w-full',
               isSelectingCell && 'selection:bg-transparent'
             )}
             {...tableProps}
@@ -444,7 +465,7 @@ function VerticalAlignDropdownMenu({
   const setVerticalAlign = React.useCallback(
     (align: VerticalAlign) => {
       setOpen(false);
-      
+
       // If cells are selected via table selection, use those
       if (selectedCells && selectedCells.length > 0) {
         for (const cell of selectedCells) {

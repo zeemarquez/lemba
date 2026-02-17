@@ -13,7 +13,7 @@ export type { AgentMessage, DocumentDiff, AgentChat };
 
 
 
-interface AppState {
+export interface AppState {
     // File System State
     fileTree: FileNode[];
     isLoadingFileTree: boolean;
@@ -183,7 +183,7 @@ const DEFAULT_TEMPLATE: Template = {
         header: { enabled: false, content: '', startPage: 1, margins: { bottom: '5mm', left: '0mm', right: '0mm' } },
         footer: { enabled: false, content: '', startPage: 1, margins: { top: '5mm', left: '0mm', right: '0mm' } },
         frontPage: { enabled: false, content: '' },
-        tables: { preventPageBreak: false, equalWidthColumns: false, alignment: 'center', maxWidth: 100, headerStyle: { bold: true, backgroundColor: '' } },
+        tables: { preventPageBreak: false, equalWidthColumns: false, alignment: 'center', maxWidth: 100, minWidth: 0, headerStyle: { bold: true, backgroundColor: '' } },
         outline: {
             enabled: false,
             title: {

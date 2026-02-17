@@ -13,6 +13,7 @@ interface SerializeContext {
         equalWidthColumns?: boolean;
         alignment?: 'left' | 'center' | 'right';
         maxWidth?: number;
+        minWidth?: number;
         headerStyle?: {
             bold?: boolean;
             italic?: boolean;
@@ -174,7 +175,7 @@ function emojiToTwemojiUrl(emoji: string): string {
             codePoints.push(cp.toString(16).toLowerCase());
         }
     }
-    
+
     // Twemoji CDN URL - using a stable version
     return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints.join('-')}.svg`;
 }
@@ -188,41 +189,41 @@ function emojiToTwemojiUrl(emoji: string): string {
  */
 function processTextWithEmojis(text: string): string {
     if (!text) return '';
-    
+
     // FAST PATH: If no emojis detected by quick regex, just escape and return
     // This avoids Array.from() and character iteration for most text
     if (!EMOJI_QUICK_TEST.test(text)) {
         return escapeTypst(text);
     }
-    
+
     // SLOW PATH: Text contains emojis, do full processing
     const segments: string[] = [];
     let currentSegment = '';
     let i = 0;
-    
+
     // Use Array.from to properly handle surrogate pairs
     const chars = Array.from(text);
-    
+
     while (i < chars.length) {
         const char = chars[i];
         const codePoint = char.codePointAt(0);
-        
+
         if (codePoint && isEmojiCodePoint(codePoint)) {
             // Save current segment if any
             if (currentSegment) {
                 segments.push(escapeTypst(currentSegment));
                 currentSegment = '';
             }
-            
+
             // Collect the full emoji sequence
             let emojiSequence = char;
             i++;
-            
+
             // Handle emoji sequences (skin tone modifiers, ZWJ sequences, flags)
             while (i < chars.length) {
                 const nextChar = chars[i];
                 const nextCodePoint = nextChar.codePointAt(0);
-                
+
                 if (nextCodePoint === 0xFE0F || // Variation selector-16
                     nextCodePoint === 0x200D || // Zero-width joiner
                     (nextCodePoint && nextCodePoint >= 0x1F3FB && nextCodePoint <= 0x1F3FF) || // Skin tone modifiers
@@ -233,7 +234,7 @@ function processTextWithEmojis(text: string): string {
                     break;
                 }
             }
-            
+
             // Convert emoji to Twemoji image
             const twemojiUrl = emojiToTwemojiUrl(emojiSequence);
             // Use box with baseline alignment for inline emoji rendering
@@ -244,12 +245,12 @@ function processTextWithEmojis(text: string): string {
             i++;
         }
     }
-    
+
     // Add remaining segment
     if (currentSegment) {
         segments.push(escapeTypst(currentSegment));
     }
-    
+
     return segments.join('');
 }
 
@@ -455,18 +456,18 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
             } else {
                 iconTypst = `image.decode("${escapeSvgForTypst(defaultSvg)}")`;
             }
-            
+
             // Helper function to convert color to Typst format
             const convertColorToTypst = (color: string | undefined, defaultColor: string): string => {
                 if (!color) return defaultColor;
-                
+
                 if (color.startsWith('hsla') || color.startsWith('hsl')) {
                     const hslMatch = color.match(/hsla?\((\d+),\s*(\d+)%,\s*(\d+)%/);
                     if (hslMatch) {
                         const h = parseInt(hslMatch[1]) / 360;
                         const s = parseInt(hslMatch[2]) / 100;
                         const l = parseInt(hslMatch[3]) / 100;
-                        
+
                         // HSL to RGB conversion
                         let r, g, b;
                         if (s === 0) {
@@ -475,16 +476,16 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
                             const hue2rgb = (p: number, q: number, t: number) => {
                                 if (t < 0) t += 1;
                                 if (t > 1) t -= 1;
-                                if (t < 1/6) return p + (q - p) * 6 * t;
-                                if (t < 1/2) return q;
-                                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                                if (t < 1 / 6) return p + (q - p) * 6 * t;
+                                if (t < 1 / 2) return q;
+                                if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
                                 return p;
                             };
                             const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
                             const p = 2 * l - q;
-                            r = hue2rgb(p, q, h + 1/3);
+                            r = hue2rgb(p, q, h + 1 / 3);
                             g = hue2rgb(p, q, h);
-                            b = hue2rgb(p, q, h - 1/3);
+                            b = hue2rgb(p, q, h - 1 / 3);
                         }
                         const hex = '#' + [r, g, b].map(x => {
                             const hex = Math.round(x * 255).toString(16);
@@ -499,7 +500,7 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
                     return `rgb("${color}")`;
                 }
             };
-            
+
             // Get background color - use type-specific setting or default
             let backgroundColor: string;
             switch (type) {
@@ -815,11 +816,16 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         if (row.children && row.children.length > maxCols) maxCols = row.children.length;
     });
 
+    const isHeaderFooter = context.insideContext === true;
+    const minWidth = isHeaderFooter ? 100 : (context.tables?.minWidth ?? 0);
+    const maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
+
     // Determine column sizing based on equalWidthColumns setting
     // When equalWidthColumns is false (default), use 'auto' to auto-size based on content
     // When equalWidthColumns is true, use '1fr' for equal width columns
-    // For header/footer tables (insideContext=true), always use '1fr' to fill width
-    const isHeaderFooter = context.insideContext === true;
+    // SPECIAL CASE: If minWidth or maxWidth constraints are applied, we MUST use 1fr columns
+    // for the table to actually stretch/shrink to fill that constraint block.
+    // Typst's 'auto' columns do not expand to fill the container width.
     const equalWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
     const columns = equalWidth
         ? `(${'1fr, '.repeat(maxCols).slice(0, -2)})`
@@ -957,7 +963,7 @@ function serializeTable(element: TElement, context: SerializeContext): string {
 
     // For header/footer tables (insideContext=true), always use 100% width and ignore preventPageBreak
     // Also skip alignment wrapping for header/footer tables to ensure they fill width
-    const maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
+    // maxWidth and minWidth are already defined above
 
     // Check if table is too large for a single page - if so, ignore preventPageBreak
     // Also ignore preventPageBreak for header/footer tables
@@ -970,17 +976,32 @@ function serializeTable(element: TElement, context: SerializeContext): string {
         return `${tableWithPrefix}\n`;
     }
 
-    // Apply alignment if specified - cells now have explicit alignment set, so table alignment won't affect them
     const alignment = context.tables?.alignment || 'center';
     let finalTable: string;
 
-    // Wrap in block() if preventPageBreak is enabled and table is not too large
-    if (shouldPreventPageBreak) {
-        // Combine breakable and width if maxWidth is less than 100%
-        const blockArgs: string[] = ['breakable: false'];
-        if (maxWidth < 100) {
-            blockArgs.push(`width: ${maxWidth}%`);
+    // Determine if we need to wrap in a block for preventPageBreak or width constraints
+    const tableHasWidthConstraints = (maxWidth > 0 && maxWidth < 100) || minWidth > 0;
+    const useBlock = shouldPreventPageBreak || tableHasWidthConstraints;
+
+    if (useBlock) {
+        const blockArgs: string[] = [];
+        if (shouldPreventPageBreak) blockArgs.push('breakable: false');
+
+        if (tableHasWidthConstraints) {
+            // Typst's #block() does not support min-width/max-width arguments.
+            // We use 'width'. 
+            // If equalWidth is true, we want it to fill the maxWidth.
+            // If equalWidth is false (autofit), we'll use maxWidth if content is large, 
+            // or minWidth if we want to ensure it's at least that wide.
+            // Since we can't do true min-width with auto-growth in Typst yet, 
+            // we prioritize maxWidth as the bounding box.
+            if (maxWidth > 0 && maxWidth < 100) {
+                blockArgs.push(`width: ${maxWidth}%`);
+            } else if (minWidth > 0) {
+                blockArgs.push(`width: ${minWidth}%`);
+            }
         }
+
         const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
 
         // Apply alignment to the block
@@ -993,20 +1014,14 @@ function serializeTable(element: TElement, context: SerializeContext): string {
             finalTable = `#align(center)[${tableBlock}]`;
         }
     } else {
-        // Apply maxWidth if less than 100%
-        let tableWithWidth = tableWithPrefix;
-        if (maxWidth < 100) {
-            tableWithWidth = `#block(width: ${maxWidth}%)[${tableWithPrefix}]`;
-        }
-
-        // Apply alignment directly to the table (or table with width block)
+        // Apply alignment directly to the table
         if (alignment === 'left') {
-            finalTable = `#align(left)[${tableWithWidth}]`;
+            finalTable = `#align(left)[${tableWithPrefix}]`;
         } else if (alignment === 'right') {
-            finalTable = `#align(right)[${tableWithWidth}]`;
+            finalTable = `#align(right)[${tableWithPrefix}]`;
         } else {
             // center is default
-            finalTable = `#align(center)[${tableWithWidth}]`;
+            finalTable = `#align(center)[${tableWithPrefix}]`;
         }
     }
 

@@ -128,6 +128,7 @@ export interface Template {
             equalWidthColumns?: boolean;
             alignment?: 'left' | 'center' | 'right';
             maxWidth?: number; // Maximum table width as percentage (default: 100)
+            minWidth?: number; // Minimum table width as percentage (default: 0)
             headerStyle?: {
                 bold?: boolean;
                 italic?: boolean;
