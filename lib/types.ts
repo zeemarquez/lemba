@@ -68,6 +68,7 @@ export interface Template {
         textColor: string;
         backgroundColor: string;
         pageLayout: 'vertical' | 'horizontal';
+        columns?: 1 | 2 | 3;
         pageSize?: {
             preset?: string; // e.g., 'a4', 'letter', 'a3', etc.
             custom?: {

@@ -49,6 +49,7 @@ export interface TemplateSettings {
     textColor?: string;
     backgroundColor?: string;
     pageLayout?: 'vertical' | 'horizontal';
+    columns?: 1 | 2 | 3;
     pageSize?: {
         preset?: string;
         custom?: {
@@ -187,15 +188,15 @@ export interface UsePdfCompilerReturn {
 /**
  * Convert Plate/markdown content to Typst
  */
-async function contentToTypst(content: string, context: { 
-    title?: string; 
-    scaleImages?: boolean; 
-    insideContext?: boolean; 
-    tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' }; 
-    pageNumberOffset?: number; 
-    variables?: Record<string, string>; 
-    figures?: { captionEnabled?: boolean; captionFormat?: string }; 
-    alerts?: { showHeader: boolean; note?: { icon?: string }; tip?: { icon?: string }; important?: { icon?: string }; warning?: { icon?: string }; caution?: { icon?: string } }; 
+async function contentToTypst(content: string, context: {
+    title?: string;
+    scaleImages?: boolean;
+    insideContext?: boolean;
+    tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' };
+    pageNumberOffset?: number;
+    variables?: Record<string, string>;
+    figures?: { captionEnabled?: boolean; captionFormat?: string };
+    alerts?: { showHeader: boolean; note?: { icon?: string }; tip?: { icon?: string }; important?: { icon?: string }; warning?: { icon?: string }; caution?: { icon?: string } };
     resolvedLucideSvgs?: Record<string, string>;
 }): Promise<string> {
     if (!content) return '';
@@ -219,9 +220,9 @@ async function contentToTypst(content: string, context: {
         // Not JSON, assume markdown string
     }
 
-    return markdownToTypst(content, { 
-        figures: context.figures, 
-        alerts: context.alerts, 
+    return markdownToTypst(content, {
+        figures: context.figures,
+        alerts: context.alerts,
         resolvedLucideSvgs: context.resolvedLucideSvgs,
         title: context.title,
         variables: context.variables,
@@ -307,7 +308,10 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
     const preamble = generatePreamble(typstOptions);
 
     // Build body content
-    let bodyContent = typstBody;
+    // START with empty body content.
+    // If we have front page or outline, we add them.
+    // Then we ALWAYS add the main processedBody (which is typstBody, possibly columnized).
+    let bodyContent = '';
 
     // Build outline section if enabled
     let outlineContent = '';
@@ -415,10 +419,26 @@ ${outlineEmptyPagesTypst}
     }
 
     if (frontPageContent) {
-        bodyContent = `${frontPageContent}\n#pagebreak()\n${frontPageEmptyPagesTypst}${outlineContent}${typstBody}`;
+        bodyContent = `${frontPageContent}\n#pagebreak()\n${frontPageEmptyPagesTypst}${outlineContent}`;
     } else if (outlineContent) {
-        bodyContent = `${outlineContent}${typstBody}`;
+        bodyContent = `${outlineContent}`;
     }
+
+    // Apply columns wrapper to main body content if needed
+    // We treat 1 column as default (no wrapper needed)
+    const columns = settings?.columns || 1;
+    let processedBody = typstBody;
+
+    if (columns > 1) {
+        processedBody = `#columns(${columns}, gutter: 4mm)[
+${processedBody}
+]`;
+    }
+
+    // Append the processed body (columnized or not)
+    // bodyContent now contains (FrontPage + Outline) OR (Outline) OR (Empty string).
+    // We just need to append the main content.
+    bodyContent += processedBody;
 
     const fullSourceRaw = `${preamble}\n\n${bodyContent}`;
     const typstResult = await processTypstImages(fullSourceRaw);
@@ -459,7 +479,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     // Try to create worker on mount
     useEffect(() => {
         let worker: Worker | null = null;
-        
+
         try {
             // Try to create worker - may fail in some environments
             worker = new Worker(
@@ -543,7 +563,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
     const initMainThread = useCallback(async (forceReinit: boolean = false) => {
         if (initializingRef.current) return;
         if (mainThreadInitializedRef.current && !forceReinit) return;
-        
+
         initializingRef.current = true;
 
         try {
@@ -557,7 +577,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
 
             await setCustomFonts(fontData);
             await initializeCompiler();
-            
+
             mainThreadInitializedRef.current = true;
             setIsInitialized(true);
             setInitError(null);
@@ -601,7 +621,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
             const validFonts = customFonts.filter(f => f.blob && f.blob.size > 0);
             // fontsChanged is true only if we've initialized before AND the signature differs
             const fontsChanged = fontsLoadedRef.current !== null && fontsLoadedRef.current !== fontSignature;
-            
+
             console.log('[usePdfCompiler] initWithFonts called, fonts:', validFonts.map(f => f.family), 'fontsChanged:', fontsChanged, 'fontsLoaded:', fontsLoaded);
 
             // Check if we should fall back to main thread (worker failed)
@@ -674,14 +694,14 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
                 };
                 workerRef.current.postMessage(cancelRequest);
             }
-            
+
             // Reject the pending promise
             const pending = pendingRequestsRef.current.get(currentCompilationIdRef.current);
             if (pending) {
                 pendingRequestsRef.current.delete(currentCompilationIdRef.current);
                 pending.reject(new Error('Compilation cancelled'));
             }
-            
+
             currentCompilationIdRef.current = null;
             setIsCompiling(false);
             setCompilationStage('idle');
@@ -740,7 +760,7 @@ export function usePdfCompiler(): UsePdfCompilerReturn {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 waitCount++;
             }
-            
+
             if (fontInitPromiseRef.current) {
                 console.log('[usePdfCompiler] Waiting for font initialization...');
                 await fontInitPromiseRef.current;

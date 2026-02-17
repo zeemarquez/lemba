@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore, TemplateVariable, FontEntry } from "@/lib/store";
-import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle } from "lucide-react";
+import { LayoutTemplate, Maximize, Type as TypeIcon, ArrowUpFromLine, ArrowDownToLine, CodeIcon, Heading as HeadingIcon, ListOrdered, AlignLeft, AlignCenter, AlignRight, Bold, Underline, Italic, Baseline, ChevronDown, FileText, TableIcon, List, Variable, Plus, Trash2, ImageIcon, AlertCircle, Columns2 } from "lucide-react";
 import { PRELOADED_FONTS } from "@/lib/preloaded-fonts";
 import { ColorInput } from "./ColorInput";
 import * as LucideIcons from "lucide-react";
@@ -491,90 +491,128 @@ export function TemplateEditor() {
                                 </div>
 
                                 {/* Page Size */}
-                                <div className="space-y-5">
-                                    <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Size</label>
-                                    <div className="space-y-4">
+                                <div className="space-y-8">
+                                    {/* Page Size */}
+                                    <div className="space-y-5">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Page Size</label>
+                                        <div className="space-y-4">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button className="w-full flex items-center justify-between bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-bold text-foreground hover:bg-muted transition-all outline-none focus:ring-4 focus:ring-primary/5 focus:border-border">
+                                                        <span>
+                                                            {settings.pageSize?.preset
+                                                                ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
+                                                                : settings.pageSize?.custom
+                                                                    ? 'Custom'
+                                                                    : 'A4'}
+                                                        </span>
+                                                        <ChevronDown className="w-4 h-4 opacity-50" />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto">
+                                                    {PAGE_SIZES.map((size) => (
+                                                        <DropdownMenuItem
+                                                            key={size.value}
+                                                            className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground"
+                                                            onSelect={() => updateSetting('pageSize', { preset: size.value })}
+                                                        >
+                                                            <div className="flex flex-col">
+                                                                <span className="font-semibold">{size.label}</span>
+                                                                <span className="text-xs text-muted-foreground">{size.dimensions}</span>
+                                                            </div>
+                                                        </DropdownMenuItem>
+                                                    ))}
+                                                    <DropdownMenuItem
+                                                        className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground border-t border-border mt-1"
+                                                        onSelect={() => updateSetting('pageSize', {
+                                                            custom: {
+                                                                width: settings.pageSize?.custom?.width || '210mm',
+                                                                height: settings.pageSize?.custom?.height || '297mm'
+                                                            }
+                                                        })}
+                                                    >
+                                                        <span className="font-semibold">Custom</span>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+
+                                            {/* Custom Size Inputs */}
+                                            {settings.pageSize?.custom && (
+                                                <div className="grid grid-cols-2 gap-4 p-4 bg-muted/30 border border-border rounded-2xl">
+                                                    <div className="space-y-2">
+                                                        <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Width</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                            value={settings.pageSize.custom.width}
+                                                            onChange={(e) => {
+                                                                const width = e.target.value;
+                                                                updateSetting('pageSize', {
+                                                                    custom: {
+                                                                        width,
+                                                                        height: settings.pageSize?.custom?.height || '297mm'
+                                                                    }
+                                                                });
+                                                            }}
+                                                            placeholder="210mm"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Height</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
+                                                            value={settings.pageSize.custom.height}
+                                                            onChange={(e) => {
+                                                                const height = e.target.value;
+                                                                updateSetting('pageSize', {
+                                                                    custom: {
+                                                                        width: settings.pageSize?.custom?.width || '210mm',
+                                                                        height
+                                                                    }
+                                                                });
+                                                            }}
+                                                            placeholder="297mm"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Columns */}
+                                    <div className="space-y-5">
+                                        <label className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground ml-1">Columns</label>
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
                                                 <button className="w-full flex items-center justify-between bg-muted/50 border border-border rounded-2xl px-5 py-4 text-sm font-bold text-foreground hover:bg-muted transition-all outline-none focus:ring-4 focus:ring-primary/5 focus:border-border">
-                                                    <span>
-                                                        {settings.pageSize?.preset
-                                                            ? PAGE_SIZES.find(s => s.value === settings.pageSize?.preset)?.label || 'A4'
-                                                            : settings.pageSize?.custom
-                                                                ? 'Custom'
-                                                                : 'A4'}
-                                                    </span>
+                                                    <div className="flex items-center gap-3">
+                                                        <Columns2 className="w-4 h-4 text-muted-foreground" />
+                                                        <span>{(settings.columns || 1)} Column{(settings.columns || 1) > 1 ? 's' : ''}</span>
+                                                    </div>
                                                     <ChevronDown className="w-4 h-4 opacity-50" />
                                                 </button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl max-h-[400px] overflow-y-auto">
-                                                {PAGE_SIZES.map((size) => (
+                                            <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] bg-popover border border-border rounded-xl p-1 shadow-xl">
+                                                {[1, 2, 3].map((cols) => (
                                                     <DropdownMenuItem
-                                                        key={size.value}
-                                                        className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground"
-                                                        onSelect={() => updateSetting('pageSize', { preset: size.value })}
+                                                        key={cols}
+                                                        className={cn(
+                                                            "px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground flex items-center gap-3",
+                                                            (settings.columns || 1) === cols && "bg-muted font-bold"
+                                                        )}
+                                                        onSelect={() => updateSetting('columns', cols)}
                                                     >
-                                                        <div className="flex flex-col">
-                                                            <span className="font-semibold">{size.label}</span>
-                                                            <span className="text-xs text-muted-foreground">{size.dimensions}</span>
+                                                        <div className="w-4 h-4 flex gap-0.5">
+                                                            {Array.from({ length: cols }).map((_, i) => (
+                                                                <div key={i} className="flex-1 bg-foreground/40 rounded-[1px]" />
+                                                            ))}
                                                         </div>
+                                                        <span>{cols} Column{cols > 1 ? 's' : ''}</span>
                                                     </DropdownMenuItem>
                                                 ))}
-                                                <DropdownMenuItem
-                                                    className="px-4 py-3 rounded-lg cursor-pointer focus:bg-accent focus:text-accent-foreground border-t border-border mt-1"
-                                                    onSelect={() => updateSetting('pageSize', {
-                                                        custom: {
-                                                            width: settings.pageSize?.custom?.width || '210mm',
-                                                            height: settings.pageSize?.custom?.height || '297mm'
-                                                        }
-                                                    })}
-                                                >
-                                                    <span className="font-semibold">Custom</span>
-                                                </DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>
-
-                                        {/* Custom Size Inputs */}
-                                        {settings.pageSize?.custom && (
-                                            <div className="grid grid-cols-2 gap-4 p-4 bg-muted/30 border border-border rounded-2xl">
-                                                <div className="space-y-2">
-                                                    <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Width</label>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
-                                                        value={settings.pageSize.custom.width}
-                                                        onChange={(e) => {
-                                                            const width = e.target.value;
-                                                            updateSetting('pageSize', {
-                                                                custom: {
-                                                                    width,
-                                                                    height: settings.pageSize?.custom?.height || '297mm'
-                                                                }
-                                                            });
-                                                        }}
-                                                        placeholder="210mm"
-                                                    />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <label className="text-[9px] font-bold text-muted-foreground uppercase ml-1">Height</label>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-foreground focus:ring-4 focus:ring-primary/5 focus:border-border transition-all outline-none"
-                                                        value={settings.pageSize.custom.height}
-                                                        onChange={(e) => {
-                                                            const height = e.target.value;
-                                                            updateSetting('pageSize', {
-                                                                custom: {
-                                                                    width: settings.pageSize?.custom?.width || '210mm',
-                                                                    height
-                                                                }
-                                                            });
-                                                        }}
-                                                        placeholder="297mm"
-                                                    />
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             </div>

@@ -558,11 +558,11 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                         const name = iconToUse.replace(/^lucide:/, '').trim();
                         const kebab = name.replace(/([a-z])([A-Z])/g, (_: string, a: string, b: string) => `${a}-${b.toLowerCase()}`).replace(/([A-Z])/g, (c: string) => c.toLowerCase()).replace(/^-/, '');
                         const resolved = options.resolvedLucideSvgs?.[name] ?? options.resolvedLucideSvgs?.[kebab];
-                        iconTypst = resolved ? `image.decode("${escapeSvgForTypst(resolved)}")` : `image.decode("${escapeSvgForTypst(defaultSvg)}")`;
+                        iconTypst = resolved ? `image(bytes("${escapeSvgForTypst(resolved)}"))` : `image(bytes("${escapeSvgForTypst(defaultSvg)}"))`;
                     } else if (iconToUse && !iconToUse.startsWith('lucide:')) {
                         iconTypst = `#text(size: 1.1em)[${iconToUse}]`;
                     } else {
-                        iconTypst = `image.decode("${escapeSvgForTypst(defaultSvg)}")`;
+                        iconTypst = `image(bytes("${escapeSvgForTypst(defaultSvg)}"))`;
                     }
 
                     // Helper function to convert color to Typst format
@@ -847,7 +847,7 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
             return `${finalTable}\n\n`;
         case 'html':
             if (token.text.match(/<!--\s*pagebreak\s*-->/i)) {
-                return '#pagebreak()\n\n';
+                return '#colbreak()\n\n';
             }
             // Parse <img> tags for sizing and alignment (Plate serializes resized images as HTML)
             const imgMatch = token.text.match(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/i);
