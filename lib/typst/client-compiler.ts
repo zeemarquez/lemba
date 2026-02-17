@@ -824,8 +824,8 @@ export function generatePreamble(options: TypstOptions): string {
         let rules = `#show heading.where(level: ${level}): set text(
           size: ${size}, 
           fill: rgb("${color !== 'inherit' ? color : textColor}"),
-          weight: ${h.fontWeight === '700' ? 'bold' : 'regular'},
-          style: ${h.fontStyle === 'italic' ? 'italic' : 'normal'}
+          weight: ${h.fontWeight === '700' ? '"bold"' : '"regular"'},
+          style: ${h.fontStyle === 'italic' ? '"italic"' : '"normal"'}
         )\n`;
         rules += `#show heading.where(level: ${level}): set align(${align})\n`;
 
