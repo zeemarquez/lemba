@@ -824,8 +824,8 @@ export function generatePreamble(options: TypstOptions): string {
         let rules = `#show heading.where(level: ${level}): set text(
           size: ${size}, 
           fill: rgb("${color !== 'inherit' ? color : textColor}"),
-          weight: ${h.fontWeight === '700' ? '"bold"' : '"regular"'},
-          style: ${h.fontStyle === 'italic' ? '"italic"' : '"normal"'}
+          weight: "${h.fontWeight === '700' ? 'bold' : 'regular'}",
+          style: "${h.fontStyle === 'italic' ? 'italic' : 'normal'}"
         )\n`;
         rules += `#show heading.where(level: ${level}): set align(${align})\n`;
 
@@ -870,12 +870,17 @@ export function generatePreamble(options: TypstOptions): string {
                 }
             });
 
-            numberingExpr = `[${h.numbering?.prefix || ''}] + `;
-            parts.forEach((p, idx) => {
-                numberingExpr += p;
-                if (idx < parts.length - 1) numberingExpr += ' + ';
-            });
-            numberingExpr += ` + [${h.numbering?.suffix || '. '}]`;
+            const numberingParts: string[] = [];
+            if (h.numbering?.prefix) {
+                numberingParts.push(`[${h.numbering.prefix}]`);
+            }
+            parts.forEach(p => numberingParts.push(p));
+            if (h.numbering?.suffix) {
+                numberingParts.push(`[${h.numbering.suffix}]`);
+            } else {
+                numberingParts.push(`[. ]`);
+            }
+            numberingExpr = numberingParts.join(' + ');
         }
 
         // 3. Prepare Content (Text Transform & Decoration)
@@ -892,7 +897,7 @@ export function generatePreamble(options: TypstOptions): string {
         rules += `  let hb = block(below: 1em)[\n`;
         rules += `    #pad(left: ${indentVal})[\n`;
         if (isNumberingEnabled) {
-            rules += `      #context text(weight: "bold")[#${numberingExpr}]\n`;
+            rules += `      #context text(weight: "bold")[#(${numberingExpr})]\n`;
         }
         rules += `      #${bodyFinalExpr}\n`;
         rules += `    ]\n`;

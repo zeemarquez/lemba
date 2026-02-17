@@ -4,7 +4,9 @@
 
 Lemba is a modern, open-source, offline-first Markdown editor designed for writers, researchers, and power users. It combines the simplicity of Markdown with the power of professional typesetting (powered by Typst) and the flexibility of Notion-style visual editing.
 
-[Launch Online](https://www.lemba.app/) | [Download for Desktop](#desktop-builds) | [Documentation](#)
+[Launch Online](https://write.lemba.app/) | [Download for Desktop](https://github.com/zeemarquez/lemba/releases) |
+
+![Screenshot](https://github.com/zeemarquez/lemba/blob/main/resources/images/screenshots_app/Screenshot%202026-01-22%20102036.png?raw=true)
 
 ## 📖 Table of Contents
 
