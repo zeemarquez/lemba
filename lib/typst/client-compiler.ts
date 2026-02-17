@@ -892,12 +892,15 @@ export function generatePreamble(options: TypstOptions): string {
             bodyFinalExpr = `underline(${bodyFinalExpr})`;
         }
 
+        const weight = h.fontWeight === '700' ? 'bold' : 'regular';
+        const style = h.fontStyle === 'italic' ? 'italic' : 'normal';
+        const fill = color !== 'inherit' ? color : textColor;
         const indentVal = h.indentSize ? fixTypstUnit(h.indentSize) : '0pt';
 
         rules += `  let hb = block(below: 1em)[\n`;
         rules += `    #pad(left: ${indentVal})[\n`;
         if (isNumberingEnabled) {
-            rules += `      #context text(weight: "bold")[#(${numberingExpr})]\n`;
+            rules += `      #context text(weight: "${weight}", style: "${style}", fill: rgb("${fill}"))[#(${numberingExpr})]\n`;
         }
         rules += `      #${bodyFinalExpr}\n`;
         rules += `    ]\n`;
