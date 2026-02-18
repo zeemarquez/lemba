@@ -15,11 +15,14 @@ import {
   ArrowRight,
   ArrowUp,
   CombineIcon,
+  SquareCode,
   SquareSplitHorizontalIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react';
+import type { TElement } from 'platejs';
 import {
+  KEYS,
   type TTableCellElement,
   type TTableElement,
   type TTableRowElement,
@@ -37,6 +40,12 @@ import {
   useSelected,
   withHOC,
 } from 'platejs/react';
+import {
+  ELEMENT_HTML_TABLE,
+  ELEMENT_HTML_TABLE_ROW,
+  ELEMENT_HTML_TABLE_CELL,
+  ELEMENT_HTML_TABLE_HEADER_CELL,
+} from '@/components/plate-editor/plugins/html-table-plugin';
 import * as React from 'react';
 
 import { Popover, PopoverContent } from '@/components/plate-ui/popover';
@@ -47,6 +56,56 @@ import {
   ToolbarButton,
   ToolbarGroup,
 } from './toolbar';
+function ConvertMarkdownTableToHtmlButton() {
+  const editor = useEditorRef();
+  const element = useElement<TTableElement>();
+
+  const convertToHtmlTable = React.useCallback(() => {
+    const path = editor.api.findPath(element);
+    if (path == null) return;
+    const rows = element.children as TTableRowElement[];
+    if (!rows?.length) return;
+
+    const at = [...path];
+
+    // Use setNodes to mutate types in-place instead of remove+insert.
+    // This keeps every path valid throughout the operation, so TableProvider
+    // never tries to access a null/deleted node.
+    // Wrap in setTimeout so TableProvider finishes its current render cycle
+    // before the type changes trigger a new one.
+    setTimeout(() => {
+      editor.tf.withoutNormalizing(() => {
+        // Table itself
+        editor.tf.setNodes({ type: ELEMENT_HTML_TABLE }, { at });
+
+        rows.forEach((row, rowIndex) => {
+          const rowPath = [...at, rowIndex];
+          editor.tf.setNodes({ type: ELEMENT_HTML_TABLE_ROW }, { at: rowPath });
+
+          (row.children as TTableCellElement[]).forEach((cell, cellIndex) => {
+            const cellPath = [...rowPath, cellIndex];
+            const htmlCellType =
+              cell.type === KEYS.th
+                ? ELEMENT_HTML_TABLE_HEADER_CELL
+                : ELEMENT_HTML_TABLE_CELL;
+            editor.tf.setNodes({ type: htmlCellType }, { at: cellPath });
+          });
+        });
+      });
+    }, 0);
+  }, [editor, element]);
+
+  return (
+    <ToolbarButton
+      onClick={convertToHtmlTable}
+      onMouseDown={(e) => e.preventDefault()}
+      tooltip="Convert to HTML table"
+    >
+      <SquareCode />
+    </ToolbarButton>
+  );
+}
+
 export const TableElement = withHOC(
   TableProvider,
   function TableElement({
@@ -203,6 +262,12 @@ function TableFloatingToolbar({
               >
                 <XIcon />
               </ToolbarButton>
+            </ToolbarGroup>
+          )}
+
+          {collapsedInside && (
+            <ToolbarGroup className="ml-auto">
+              <ConvertMarkdownTableToHtmlButton />
             </ToolbarGroup>
           )}
         </Toolbar>

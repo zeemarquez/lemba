@@ -1178,11 +1178,44 @@ function processHtmlTableToken(html: string, options: MarkdownToTypstOptions): s
 
     if (rows.length === 0) return '';
 
+    // Logical column count from first row (accounting for colspan)
+    const firstRow = rows[0];
+    const numCols = firstRow.cells.reduce((s, c) => s + (c.colSpan && c.colSpan > 1 ? c.colSpan : 1), 0);
     let maxCols = 0;
     rows.forEach(r => { if (r.cells.length > maxCols) maxCols = r.cells.length; });
 
-    // Use 1fr columns so table fills line width (matches markdown table / editor w-full)
-    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+    // Parse colgroup for explicit column widths (percentages)
+    let colWidthsPct: number[] | null = null;
+    const colgroup = table.querySelector('colgroup');
+    if (colgroup) {
+        const cols = colgroup.querySelectorAll('col');
+        if (cols.length === numCols) {
+            const pcts: number[] = [];
+            for (let i = 0; i < cols.length; i++) {
+                const col = cols[i] as HTMLElement;
+                const style = col.getAttribute('style') || '';
+                const styleMatch = style.match(/width:\s*([\d.]+)%/i);
+                const attrWidth = col.getAttribute('width');
+                const pct = styleMatch
+                    ? parseFloat(styleMatch[1])
+                    : attrWidth != null
+                        ? parseFloat(String(attrWidth).replace(/%\s*$/, ''))
+                        : NaN;
+                if (!Number.isNaN(pct) && pct > 0) pcts.push(pct);
+                else pcts.push(0);
+            }
+            if (pcts.length === numCols) {
+                const total = pcts.reduce((a, b) => a + b, 0);
+                if (total > 0) {
+                    colWidthsPct = pcts.map(w => (w / total) * 100);
+                }
+            }
+        }
+    }
+
+    const columns = colWidthsPct
+        ? `(${colWidthsPct.map(p => p + 'fr').join(', ')})`
+        : `(${'1fr, '.repeat(numCols).slice(0, -2)})`;
     let tableContent = `table(\n  columns: ${columns},\n  inset: 10pt,\n  align: horizon,\n`;
 
     const borderWidth = options.tables?.border?.width;

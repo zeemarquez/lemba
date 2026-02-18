@@ -10,9 +10,21 @@ export function HtmlTableElementStatic({
   children,
   ...props
 }: SlateElementProps<TElement>) {
+  const colWidths = (props.element as any).colWidths as number[] | undefined;
+  const hasColWidths = Array.isArray(colWidths) && colWidths.length > 0;
   return (
     <SlateElement {...props} className="overflow-x-auto py-5 relative">
-      <table className="w-full border-collapse border border-slate-300 dark:border-slate-700">
+      <table
+        className="w-full border-collapse border border-slate-300 dark:border-slate-700"
+        style={hasColWidths ? { tableLayout: 'fixed' } : undefined}
+      >
+        {hasColWidths && (
+          <colgroup>
+            {colWidths!.map((pct, i) => (
+              <col key={i} style={{ width: `${pct}%` }} />
+            ))}
+          </colgroup>
+        )}
         <tbody>{children}</tbody>
       </table>
     </SlateElement>

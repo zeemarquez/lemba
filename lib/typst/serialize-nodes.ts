@@ -1068,20 +1068,74 @@ function serializeHtmlTable(element: TElement, context: SerializeContext): strin
     const rows = element.children as TElement[];
     if (!rows || rows.length === 0) return '';
 
-    let maxCols = 0;
-    rows.forEach(row => {
-        if (row.children && row.children.length > maxCols) maxCols = row.children.length;
-    });
+    const firstRow = rows[0];
+    const numCols = firstRow?.children
+        ? (firstRow.children as TElement[]).reduce((s, c) => s + (Math.max(1, (c as any).colSpan ?? 1)), 0)
+        : 0;
+    if (numCols === 0) return '';
 
-    if (maxCols === 0) return '';
+    const rawColWidths = (element as any).colWidths;
+    const explicitColWidths = Array.isArray(rawColWidths)
+        ? (rawColWidths as unknown[]).map((p) => (typeof p === 'number' && Number.isFinite(p) ? p : Number(p)))
+        : undefined;
+    const hasExplicitWidths =
+        explicitColWidths != null &&
+        explicitColWidths.length === numCols &&
+        explicitColWidths.every((p) => Number.isFinite(p) && p > 0);
 
-    // Use 1fr columns so table fills line width (matches markdown table / editor w-full)
-    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+    let columns: string;
+    let useTemplateWidthBlock = false;
+    let minWidth = 0;
+    let maxWidth = 100;
+
+    if (hasExplicitWidths && explicitColWidths) {
+        // Use editor column widths (percentages) and override template width. Typst fr units are proportional.
+        const total = explicitColWidths.reduce((a, b) => a + b, 0);
+        const normalized = total > 0 ? explicitColWidths.map((p) => (p / total) * 100) : explicitColWidths;
+        columns = `(${normalized.map((p) => p + 'fr').join(', ')})`;
+    } else {
+        // Same as markdown tables: use template settings
+        const isHeaderFooter = context.insideContext === true;
+        minWidth = isHeaderFooter ? 100 : (context.tables?.minWidth ?? 0);
+        maxWidth = isHeaderFooter ? 100 : (context.tables?.maxWidth ?? 100);
+
+        const colContentLengths = new Array(numCols).fill(0);
+        let colIndex = 0;
+        rows.forEach((row) => {
+            colIndex = 0;
+            (row.children as TElement[]).forEach((cell) => {
+                if (colIndex < numCols) {
+                    const cellText = serializeNodesToTypst(cell.children, context).replace(/#.*?\[|\]/g, '').length;
+                    const span = Math.max(1, (cell as any).colSpan ?? 1);
+                    for (let k = 0; k < span && colIndex + k < numCols; k++) {
+                        if (cellText > colContentLengths[colIndex + k]) colContentLengths[colIndex + k] = cellText;
+                    }
+                }
+                colIndex += Math.max(1, (cell as any).colSpan ?? 1);
+            });
+        });
+        for (let i = 0; i < numCols; i++) {
+            if (colContentLengths[i] < 1) colContentLengths[i] = 1;
+        }
+
+        const hasWidthConstraints = (minWidth > 0) || (maxWidth > 0 && maxWidth < 100);
+        const forceEqualWidth = isHeaderFooter || context.tables?.equalWidthColumns === true;
+
+        if (forceEqualWidth) {
+            columns = `(${'1fr, '.repeat(numCols).slice(0, -2)})`;
+        } else if (hasWidthConstraints) {
+            const total = colContentLengths.reduce((a, b) => a + b, 0);
+            columns = `(${colContentLengths.map((w) => w + 'fr').join(', ')})`;
+        } else {
+            columns = `(${'auto, '.repeat(numCols).slice(0, -2)})`;
+        }
+        useTemplateWidthBlock = hasWidthConstraints && !isHeaderFooter;
+    }
 
     let tableContent = `table(\n  columns: ${columns},\n  inset: 10pt,\n  align: horizon,\n`;
 
-    rows.forEach(row => {
-        (row.children as TElement[]).forEach(cell => {
+    rows.forEach((row) => {
+        (row.children as TElement[]).forEach((cell) => {
             const isHeader = cell.type === 'html_table_header_cell';
             const cellText = serializeNodesToTypst(cell.children, context).trim();
             const colSpan = (cell as any).colSpan as number | undefined;
@@ -1113,6 +1167,26 @@ function serializeHtmlTable(element: TElement, context: SerializeContext): strin
 
     const alignment = context.tables?.alignment || 'center';
     const tableWithPrefix = `#${tableContent}`;
+
+    if (hasExplicitWidths) {
+        // Override template width: no block, just alignment
+        if (alignment === 'left') return `#align(left)[${tableWithPrefix}]\n`;
+        if (alignment === 'right') return `#align(right)[${tableWithPrefix}]\n`;
+        return `#align(center)[${tableWithPrefix}]\n`;
+    }
+
+    if (useTemplateWidthBlock) {
+        const blockArgs: string[] = [];
+        if (maxWidth > 0 && maxWidth < 100) {
+            blockArgs.push(`width: ${maxWidth}%`);
+        } else if (minWidth > 0) {
+            blockArgs.push(`width: ${minWidth}%`);
+        }
+        const tableBlock = `#block(${blockArgs.join(', ')})[${tableWithPrefix}]`;
+        if (alignment === 'left') return `#align(left)[${tableBlock}]\n`;
+        if (alignment === 'right') return `#align(right)[${tableBlock}]\n`;
+        return `#align(center)[${tableBlock}]\n`;
+    }
 
     if (alignment === 'left') return `#align(left)[${tableWithPrefix}]\n`;
     if (alignment === 'right') return `#align(right)[${tableWithPrefix}]\n`;

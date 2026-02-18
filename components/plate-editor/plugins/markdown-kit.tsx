@@ -213,10 +213,36 @@ function parseHtmlTableToNodes(html: string): any | null {
 
   if (rows.length === 0) return null;
 
-  return {
+  const tableNode: any = {
     type: ELEMENT_HTML_TABLE,
     children: rows,
   };
+
+  const colgroup = table.querySelector('colgroup');
+  if (colgroup) {
+    const colWidths: number[] = [];
+    for (const col of Array.from(colgroup.querySelectorAll('col'))) {
+      const el = col as HTMLElement;
+      const style = el.getAttribute('style') || '';
+      const styleMatch = style.match(/width:\s*([\d.]+)%/i);
+      const attrWidth = el.getAttribute('width');
+      const pct = styleMatch
+        ? parseFloat(styleMatch[1])
+        : attrWidth != null
+          ? parseFloat(String(attrWidth).replace(/%\s*$/, ''))
+          : NaN;
+      if (!Number.isNaN(pct) && pct > 0) colWidths.push(pct);
+      else colWidths.push(0);
+    }
+    if (colWidths.length > 0) {
+      const total = colWidths.reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        tableNode.colWidths = colWidths.map((w) => (w / total) * 100);
+      }
+    }
+  }
+
+  return tableNode;
 }
 
 function extractNodeText(children: any[]): string {
@@ -271,6 +297,15 @@ function serializeCellContent(children: any[]): string {
 
 function serializeHtmlTableToString(node: any): string {
   let html = '<table>\n';
+  const colWidths = node.colWidths;
+  if (Array.isArray(colWidths) && colWidths.length > 0) {
+    html += '  <colgroup>\n';
+    for (const pct of colWidths) {
+      const w = Math.round(Number(pct) * 10) / 10;
+      html += `    <col style="width: ${w}%" />\n`;
+    }
+    html += '  </colgroup>\n';
+  }
   let hasHeaders = false;
   let headersDone = false;
 

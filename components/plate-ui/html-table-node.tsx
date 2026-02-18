@@ -153,6 +153,28 @@ function deleteHtmlTableColumn(editor: any) {
 }
 
 // ---------------------------------------------------------------------------
+// Column resizing (percentages), colgroup, and resizer handles
+// ---------------------------------------------------------------------------
+
+function getColumnCount(element: TElement): number {
+  const firstRow = element.children?.[0] as TElement | undefined;
+  if (!firstRow?.children?.length) return 0;
+  return (firstRow.children as TElement[]).reduce(
+    (sum, c) => sum + (Math.max(1, (c as any).colSpan ?? 1)),
+    0
+  );
+}
+
+function normalizePercentWidths(widths: number[], minPct = 5): number[] {
+  const n = widths.length;
+  if (n === 0) return [];
+  let arr = widths.map((w) => Math.max(minPct, Math.min(100, w)));
+  const total = arr.reduce((a, b) => a + b, 0);
+  if (total !== 100) arr = arr.map((w) => (w / total) * 100);
+  return arr;
+}
+
+// ---------------------------------------------------------------------------
 // HtmlTableElement
 // ---------------------------------------------------------------------------
 
@@ -161,6 +183,72 @@ export function HtmlTableElement({
   ...props
 }: PlateElementProps<TElement>) {
   const readOnly = useReadOnly();
+  const element = useElement<TElement>();
+  const editor = useEditorRef();
+  const tableRef = React.useRef<HTMLTableElement>(null);
+
+  const numCols = getColumnCount(element);
+  const storedWidths = (element as any).colWidths as number[] | undefined;
+  const hasStoredWidths = Array.isArray(storedWidths) && storedWidths.length === numCols;
+
+  const [dragState, setDragState] = React.useState<{
+    resizerIndex: number;
+    startX: number;
+    startWidths: number[];
+    currentX: number;
+  } | null>(null);
+
+  const currentWidths = React.useMemo(() => {
+    if (!dragState || !tableRef.current) {
+      return hasStoredWidths ? storedWidths : numCols > 0 ? Array(numCols).fill(100 / numCols) : [];
+    }
+    const { resizerIndex, startX, startWidths, currentX } = dragState;
+    const tableWidth = tableRef.current.getBoundingClientRect().width;
+    if (tableWidth <= 0) return startWidths;
+    const deltaPct = ((currentX - startX) / tableWidth) * 100;
+    const next = [...startWidths];
+    next[resizerIndex] = next[resizerIndex] + deltaPct;
+    next[resizerIndex + 1] = next[resizerIndex + 1] - deltaPct;
+    return normalizePercentWidths(next);
+  }, [dragState, hasStoredWidths, storedWidths, numCols]);
+
+  const currentWidthsRef = React.useRef<number[]>(currentWidths);
+  currentWidthsRef.current = currentWidths;
+
+  React.useEffect(() => {
+    if (dragState === null) return;
+    const onMove = (e: MouseEvent) => {
+      setDragState((prev) => (prev ? { ...prev, currentX: e.clientX } : null));
+    };
+    const onUp = () => {
+      const tablePath = editor.api.findPath(element);
+      const widths = currentWidthsRef.current;
+      if (tablePath && widths.length === numCols) {
+        editor.tf.setNodes({ colWidths: widths }, { at: tablePath });
+      }
+      setDragState(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragState !== null, editor, element, numCols]);
+
+  const startResize = React.useCallback(
+    (resizerIndex: number, clientX: number) => {
+      if (readOnly || resizerIndex < 0 || resizerIndex >= numCols - 1) return;
+      const startWidths =
+        (hasStoredWidths ? storedWidths : Array(numCols).fill(100 / numCols)) as number[];
+      setDragState({ resizerIndex, startX: clientX, startWidths, currentX: clientX });
+    },
+    [readOnly, numCols, hasStoredWidths, storedWidths]
+  );
+
+  const showColgroup =
+    (hasStoredWidths || dragState !== null) && currentWidths.length === numCols && numCols > 0;
+  const tableLayout = showColgroup ? 'fixed' : undefined;
 
   const content = (
     <PlateElement
@@ -180,9 +268,55 @@ export function HtmlTableElement({
           HTML Table
         </div>
 
-        <table className="mr-0 table border-collapse table-auto w-full">
-          <tbody className="min-w-full">{children}</tbody>
-        </table>
+        <div className="relative min-h-[2rem]">
+          <table
+            ref={tableRef}
+            className="mr-0 table border-collapse w-full relative"
+            style={{
+              tableLayout: tableLayout ?? 'auto',
+            }}
+          >
+            {showColgroup && (
+              <colgroup>
+                {currentWidths.map((pct, i) => (
+                  <col key={i} style={{ width: `${pct}%` }} />
+                ))}
+              </colgroup>
+            )}
+            <tbody className="min-w-full">{children}</tbody>
+          </table>
+
+          {!readOnly && numCols > 1 && (
+            <div
+              className="absolute inset-0 z-20"
+              style={{ pointerEvents: 'none' }}
+              aria-hidden
+            >
+              {Array.from({ length: numCols - 1 }).map((_, i) => {
+                const leftPct = currentWidths
+                  .slice(0, i + 1)
+                  .reduce((a, b) => a + b, 0);
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-0 bottom-0 w-1.5 -ml-[3px] cursor-col-resize border-l border-transparent hover:border-primary/60 hover:bg-primary/20 min-w-[6px]"
+                    style={{
+                      left: `${leftPct}%`,
+                      pointerEvents: 'auto',
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      startResize(i, e.clientX);
+                    }}
+                    contentEditable={false}
+                    data-table-resizer
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </PlateElement>
   );
