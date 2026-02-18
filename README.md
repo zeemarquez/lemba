@@ -85,5 +85,23 @@ Lemba is built with modern web technologies to ensure performance across web and
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/zeemarquez/lemba.git](https://github.com/zeemarquez/lemba.git)
+   git clone https://github.com/zeemarquez/lemba.git
    cd lemba
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+   (Or use `yarn` or `pnpm` if you prefer.)
+
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+4. **Optional — run as a desktop app:** To run the Electron wrapper in development:
+   ```bash
+   npm run electron:dev
+   ```

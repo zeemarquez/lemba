@@ -16,6 +16,7 @@ import { BaseMediaKit } from './plugins/media-base-kit';
 import { BaseMentionKit } from './plugins/mention-base-kit';
 import { BaseSuggestionKit } from './plugins/suggestion-base-kit';
 import { BaseTableKit } from './plugins/table-base-kit';
+import { BaseHtmlTableKit } from './plugins/html-table-base-kit';
 import { BaseTocKit } from './plugins/toc-base-kit';
 import { BaseToggleKit } from './plugins/toggle-base-kit';
 
@@ -23,6 +24,7 @@ export const BaseEditorKit = [
   ...BaseBasicBlocksKit,
   ...BaseCodeBlockKit,
   ...BaseTableKit,
+  ...BaseHtmlTableKit,
   ...BaseToggleKit,
   ...BaseTocKit,
   ...BaseMediaKit,

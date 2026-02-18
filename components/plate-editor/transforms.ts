@@ -14,6 +14,7 @@ import {
 } from '@platejs/media';
 import { SuggestionPlugin } from '@platejs/suggestion/react';
 import { TablePlugin } from '@platejs/table/react';
+import { ELEMENT_HTML_TABLE, ELEMENT_HTML_TABLE_ROW, ELEMENT_HTML_TABLE_CELL, ELEMENT_HTML_TABLE_HEADER_CELL } from '@/components/plate-editor/plugins/html-table-plugin';
 import { insertToc } from '@platejs/toc';
 import {
   KEYS,
@@ -107,6 +108,17 @@ const insertBlockMap: Record<
     }),
   [KEYS.table]: (editor) =>
     editor.getTransforms(TablePlugin).insert.table({}, { select: true }),
+  [ELEMENT_HTML_TABLE]: (editor) => {
+    const emptyCell = () => ({ type: ELEMENT_HTML_TABLE_CELL, children: [{ type: 'p', children: [{ text: '' }] }] });
+    const headerCell = () => ({ type: ELEMENT_HTML_TABLE_HEADER_CELL, children: [{ type: 'p', children: [{ text: '' }] }] });
+    editor.tf.insertNodes({
+      type: ELEMENT_HTML_TABLE,
+      children: [
+        { type: ELEMENT_HTML_TABLE_ROW, children: [headerCell(), headerCell(), headerCell()] },
+        { type: ELEMENT_HTML_TABLE_ROW, children: [emptyCell(), emptyCell(), emptyCell()] },
+      ],
+    }, { select: true });
+  },
   [KEYS.toc]: (editor) => insertToc(editor, { select: true }),
   [KEYS.video]: (editor) => insertVideoPlaceholder(editor, { select: true }),
 };

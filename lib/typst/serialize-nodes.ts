@@ -669,6 +669,14 @@ function serializeElementNode(element: TElement, context: SerializeContext): str
         case 'table':
             return serializeTable(element, context);
 
+        case 'html_table':
+            return serializeHtmlTable(element, context);
+
+        case 'html_table_row':
+        case 'html_table_cell':
+        case 'html_table_header_cell':
+            return children;
+
         case 'placeholder':
             return serializePlaceholder(element, context);
 
@@ -1054,4 +1062,59 @@ function serializeTable(element: TElement, context: SerializeContext): string {
     }
 
     return `${finalTable}\n`;
+}
+
+function serializeHtmlTable(element: TElement, context: SerializeContext): string {
+    const rows = element.children as TElement[];
+    if (!rows || rows.length === 0) return '';
+
+    let maxCols = 0;
+    rows.forEach(row => {
+        if (row.children && row.children.length > maxCols) maxCols = row.children.length;
+    });
+
+    if (maxCols === 0) return '';
+
+    // Use 1fr columns so table fills line width (matches markdown table / editor w-full)
+    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+
+    let tableContent = `table(\n  columns: ${columns},\n  inset: 10pt,\n  align: horizon,\n`;
+
+    rows.forEach(row => {
+        (row.children as TElement[]).forEach(cell => {
+            const isHeader = cell.type === 'html_table_header_cell';
+            const cellText = serializeNodesToTypst(cell.children, context).trim();
+            const colSpan = (cell as any).colSpan as number | undefined;
+            const rowSpan = (cell as any).rowSpan as number | undefined;
+            const cellAlign = (cell as any).align as string | undefined;
+            const vertAlign = (cell as any).verticalAlign as string | undefined;
+            const bg = (cell as any).background as string | undefined;
+
+            const alignParts: string[] = [];
+            if (vertAlign === 'middle') alignParts.push('horizon');
+            else if (vertAlign === 'bottom') alignParts.push('bottom');
+            if (cellAlign === 'center') alignParts.push('center');
+            else if (cellAlign === 'right') alignParts.push('right');
+            else alignParts.push('left');
+
+            const cellArgs: string[] = [`align: ${alignParts.join(' + ')}`];
+            if (colSpan && colSpan > 1) cellArgs.push(`colspan: ${colSpan}`);
+            if (rowSpan && rowSpan > 1) cellArgs.push(`rowspan: ${rowSpan}`);
+            if (bg) cellArgs.push(`fill: rgb("${bg}")`);
+
+            let formattedContent = cellText;
+            if (isHeader) formattedContent = `*${formattedContent}*`;
+
+            tableContent += `  table.cell(${cellArgs.join(', ')})[${formattedContent}],\n`;
+        });
+    });
+
+    tableContent += `)`;
+
+    const alignment = context.tables?.alignment || 'center';
+    const tableWithPrefix = `#${tableContent}`;
+
+    if (alignment === 'left') return `#align(left)[${tableWithPrefix}]\n`;
+    if (alignment === 'right') return `#align(right)[${tableWithPrefix}]\n`;
+    return `#align(center)[${tableWithPrefix}]\n`;
 }

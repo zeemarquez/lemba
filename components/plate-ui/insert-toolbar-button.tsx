@@ -11,9 +11,9 @@ import {
   Heading1Icon,
   Heading2Icon,
   Heading3Icon,
-  LayersIcon,
   ImageIcon,
   HashIcon,
+  LayersIcon,
   Link2Icon,
   ListIcon,
   ListOrderedIcon,
@@ -24,6 +24,7 @@ import {
   RadicalIcon,
   SquareIcon,
   SmileIcon,
+  Table2Icon,
   TableIcon,
   TableOfContentsIcon,
   FoldVerticalIcon,
@@ -37,6 +38,7 @@ import {
   insertBlock,
   insertInlineElement,
 } from '@/components/plate-editor/transforms';
+import { ELEMENT_HTML_TABLE } from '@/components/plate-editor/plugins/html-table-plugin';
 import { ELEMENT_PAGE_BREAK } from '@/components/plate-editor/plugins/page-break-plugin';
 import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
 import { useStore } from '@/lib/store';
@@ -140,6 +142,11 @@ const groups: Group[] = [
         icon: <TableIcon />,
         label: 'Table',
         value: KEYS.table,
+      },
+      {
+        icon: <Table2Icon />,
+        label: 'HTML Table',
+        value: ELEMENT_HTML_TABLE,
       },
       {
         icon: <FileCodeIcon />,

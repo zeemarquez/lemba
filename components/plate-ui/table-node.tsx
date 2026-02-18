@@ -1,44 +1,25 @@
 'use client';
 
-import { useDraggable, useDropLine } from '@platejs/dnd';
 import {
-  BlockSelectionPlugin,
   useBlockSelected,
 } from '@platejs/selection/react';
-import { setCellBackground } from '@platejs/table';
 import {
   TablePlugin,
   TableProvider,
-  useTableBordersDropdownMenuContentState,
-  useTableCellElement,
-  useTableCellElementResizable,
-  useTableElement,
   useTableMergeState,
 } from '@platejs/table/react';
-import type * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { PopoverAnchor } from '@radix-ui/react-popover';
-import { cva } from 'class-variance-authority';
 import {
-  AlignVerticalDistributeCenterIcon,
-  AlignVerticalJustifyEndIcon,
-  AlignVerticalJustifyStartIcon,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
   CombineIcon,
-  EraserIcon,
-  Grid2X2Icon,
-  GripVertical,
-  PaintBucketIcon,
   SquareSplitHorizontalIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react';
 import {
-  KEYS,
-  PathApi,
-  type TElement,
   type TTableCellElement,
   type TTableElement,
   type TTableRowElement,
@@ -46,14 +27,11 @@ import {
 import {
   PlateElement,
   type PlateElementProps,
-  useComposedRef,
   useEditorPlugin,
   useEditorRef,
   useEditorSelector,
   useElement,
-  useElementSelector,
   useFocusedLast,
-  usePluginOption,
   useReadOnly,
   useRemoveNodeButton,
   useSelected,
@@ -61,39 +39,13 @@ import {
 } from 'platejs/react';
 import * as React from 'react';
 
-import { Button } from '@/components/plate-ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuTrigger,
-} from '@/components/plate-ui/dropdown-menu';
 import { Popover, PopoverContent } from '@/components/plate-ui/popover';
 import { cn } from '@/lib/utils';
-import { useStore, type AppState } from '@/lib/store';
-
 import { blockSelectionVariants } from './block-selection';
-import {
-  ColorDropdownMenuItems,
-  DEFAULT_COLORS,
-} from './font-color-toolbar-button';
-import { ResizeHandle } from './resize-handle';
-import {
-  BorderAllIcon,
-  BorderBottomIcon,
-  BorderLeftIcon,
-  BorderNoneIcon,
-  BorderRightIcon,
-  BorderTopIcon,
-} from './table-icons';
 import {
   Toolbar,
   ToolbarButton,
   ToolbarGroup,
-  ToolbarMenuGroup,
 } from './toolbar';
 export const TableElement = withHOC(
   TableProvider,
@@ -102,57 +54,18 @@ export const TableElement = withHOC(
     ...props
   }: PlateElementProps<TTableElement>) {
     const readOnly = useReadOnly();
-    const isSelectionAreaVisible = usePluginOption(
-      BlockSelectionPlugin,
-      'isSelectionAreaVisible'
-    );
-    const hasControls = !readOnly && !isSelectionAreaVisible;
-    const {
-      isSelectingCell,
-      marginLeft,
-      props: tableProps,
-    } = useTableElement();
 
     const isSelectingTable = useBlockSelected(props.element.id as string);
-
-    // Get table width constraints from the selected template
-    const template = useStore((state: AppState) => state.templates.find((t: any) => t.id === state.activeTemplateId) || state.templates[0]);
-    const tableSettings = template?.settings.tables;
-    const maxWidth = tableSettings?.maxWidth ?? 100;
-    const minWidth = tableSettings?.minWidth ?? 0;
-    const alignment = tableSettings?.alignment || 'center';
-
-    const hasWidthConstraints = (maxWidth > 0 && maxWidth < 100) || minWidth > 0;
-    const equalWidth = !!tableSettings?.equalWidthColumns;
 
     const content = (
       <PlateElement
         {...props}
-        className={cn(
-          'overflow-x-auto py-5 relative',
-          hasControls && '-ml-2 *:data-[slot=block-selection]:left-2',
-          alignment === 'center' && 'flex justify-center',
-          alignment === 'right' && 'flex justify-end'
-        )}
-        style={{ paddingLeft: marginLeft }}
+        className={cn('overflow-x-auto py-5 relative')}
+        style={{ width: undefined, minWidth: undefined, maxWidth: undefined }}
       >
-        <div
-          className="group/table relative h-full"
-          style={{
-            maxWidth: maxWidth < 100 ? `${maxWidth}%` : '100%',
-            minWidth: minWidth > 0 ? `${minWidth}%` : 'none',
-            width: equalWidth ? '100%' : 'fit-content'
-          }}
-        >
-          <table
-            className={cn(
-              'mr-0 ml-px table border-collapse',
-              equalWidth ? 'table-fixed w-full' : 'table-auto w-full min-w-full',
-              isSelectingCell && 'selection:bg-transparent'
-            )}
-            {...tableProps}
-          >
-            <tbody className="min-w-full">{children}</tbody>
+        <div className="group/table relative h-full w-full">
+          <table className="mr-0 table border-collapse table-auto w-full">
+            <tbody>{children}</tbody>
           </table>
 
           {isSelectingTable && (
@@ -203,9 +116,6 @@ function TableFloatingToolbar({
           contentEditable={false}
         >
           <ToolbarGroup>
-            <ColorDropdownMenu tooltip="Background color">
-              <PaintBucketIcon />
-            </ColorDropdownMenu>
             {canMerge && (
               <ToolbarButton
                 onClick={() => tf.table.merge()}
@@ -225,28 +135,10 @@ function TableFloatingToolbar({
               </ToolbarButton>
             )}
 
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <ToolbarButton tooltip="Cell borders">
-                  <Grid2X2Icon />
-                </ToolbarButton>
-              </DropdownMenuTrigger>
-
-              <DropdownMenuPortal>
-                <TableBordersDropdownMenuContent />
-              </DropdownMenuPortal>
-            </DropdownMenu>
-
-            <VerticalAlignDropdownMenu tooltip="Vertical align">
-              <AlignVerticalDistributeCenterIcon />
-            </VerticalAlignDropdownMenu>
-
             {collapsedInside && (
-              <ToolbarGroup>
-                <ToolbarButton tooltip="Delete table" {...buttonProps}>
-                  <Trash2Icon />
-                </ToolbarButton>
-              </ToolbarGroup>
+              <ToolbarButton tooltip="Delete table" {...buttonProps}>
+                <Trash2Icon />
+              </ToolbarButton>
             )}
           </ToolbarGroup>
 
@@ -319,289 +211,18 @@ function TableFloatingToolbar({
   );
 }
 
-function TableBordersDropdownMenuContent(
-  props: React.ComponentProps<typeof DropdownMenuPrimitive.Content>
-) {
-  const editor = useEditorRef();
-  const {
-    getOnSelectTableBorder,
-    hasBottomBorder,
-    hasLeftBorder,
-    hasNoBorders,
-    hasOuterBorders,
-    hasRightBorder,
-    hasTopBorder,
-  } = useTableBordersDropdownMenuContentState();
-
-  return (
-    <DropdownMenuContent
-      align="start"
-      className="min-w-[220px]"
-      onCloseAutoFocus={(e) => {
-        e.preventDefault();
-        editor.tf.focus();
-      }}
-      side="right"
-      sideOffset={0}
-      {...props}
-    >
-      <DropdownMenuGroup>
-        <DropdownMenuCheckboxItem
-          checked={hasTopBorder}
-          onCheckedChange={getOnSelectTableBorder('top')}
-        >
-          <BorderTopIcon />
-          <div>Top Border</div>
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={hasRightBorder}
-          onCheckedChange={getOnSelectTableBorder('right')}
-        >
-          <BorderRightIcon />
-          <div>Right Border</div>
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={hasBottomBorder}
-          onCheckedChange={getOnSelectTableBorder('bottom')}
-        >
-          <BorderBottomIcon />
-          <div>Bottom Border</div>
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={hasLeftBorder}
-          onCheckedChange={getOnSelectTableBorder('left')}
-        >
-          <BorderLeftIcon />
-          <div>Left Border</div>
-        </DropdownMenuCheckboxItem>
-      </DropdownMenuGroup>
-
-      <DropdownMenuGroup>
-        <DropdownMenuCheckboxItem
-          checked={hasNoBorders}
-          onCheckedChange={getOnSelectTableBorder('none')}
-        >
-          <BorderNoneIcon />
-          <div>No Border</div>
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={hasOuterBorders}
-          onCheckedChange={getOnSelectTableBorder('outer')}
-        >
-          <BorderAllIcon />
-          <div>Outside Borders</div>
-        </DropdownMenuCheckboxItem>
-      </DropdownMenuGroup>
-    </DropdownMenuContent>
-  );
-}
-
-function ColorDropdownMenu({
-  children,
-  tooltip,
-}: {
-  children: React.ReactNode;
-  tooltip: string;
-}) {
-  const [open, setOpen] = React.useState(false);
-
-  const editor = useEditorRef();
-  const selectedCells = usePluginOption(TablePlugin, 'selectedCells');
-
-  const onUpdateColor = React.useCallback(
-    (color: string) => {
-      setOpen(false);
-      setCellBackground(editor, { color, selectedCells: selectedCells ?? [] });
-    },
-    [selectedCells, editor]
-  );
-
-  const onClearColor = React.useCallback(() => {
-    setOpen(false);
-    setCellBackground(editor, {
-      color: null,
-      selectedCells: selectedCells ?? [],
-    });
-  }, [selectedCells, editor]);
-
-  return (
-    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
-      <DropdownMenuTrigger asChild>
-        <ToolbarButton tooltip={tooltip}>{children}</ToolbarButton>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start">
-        <ToolbarMenuGroup label="Colors">
-          <ColorDropdownMenuItems
-            className="px-2"
-            colors={DEFAULT_COLORS}
-            updateColor={onUpdateColor}
-          />
-        </ToolbarMenuGroup>
-        <DropdownMenuGroup>
-          <DropdownMenuItem className="p-2" onClick={onClearColor}>
-            <EraserIcon />
-            <span>Clear</span>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-type VerticalAlign = 'top' | 'middle' | 'bottom';
-
-function VerticalAlignDropdownMenu({
-  children,
-  tooltip,
-}: {
-  children: React.ReactNode;
-  tooltip: string;
-}) {
-  const [open, setOpen] = React.useState(false);
-  const editor = useEditorRef();
-  const selectedCells = usePluginOption(TablePlugin, 'selectedCells');
-
-  const setVerticalAlign = React.useCallback(
-    (align: VerticalAlign) => {
-      setOpen(false);
-
-      // If cells are selected via table selection, use those
-      if (selectedCells && selectedCells.length > 0) {
-        for (const cell of selectedCells) {
-          const path = editor.api.findPath(cell);
-          if (path) {
-            editor.tf.setNodes({ verticalAlign: align }, { at: path });
-          }
-        }
-      } else if (editor.selection) {
-        // Otherwise, find the cell at the current selection
-        const cellEntry = editor.api.node({
-          match: { type: ['td', 'th'] },
-          at: editor.selection,
-        });
-        if (cellEntry) {
-          editor.tf.setNodes({ verticalAlign: align }, { at: cellEntry[1] });
-        }
-      }
-    },
-    [selectedCells, editor]
-  );
-
-  return (
-    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
-      <DropdownMenuTrigger asChild>
-        <ToolbarButton tooltip={tooltip}>{children}</ToolbarButton>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start">
-        <DropdownMenuGroup>
-          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('top')}>
-            <AlignVerticalJustifyStartIcon />
-            <span>Align Top</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('middle')}>
-            <AlignVerticalDistributeCenterIcon />
-            <span>Align Middle</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem className="p-2" onClick={() => setVerticalAlign('bottom')}>
-            <AlignVerticalJustifyEndIcon />
-            <span>Align Bottom</span>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 export function TableRowElement({
   children,
   ...props
 }: PlateElementProps<TTableRowElement>) {
-  const { element } = props;
-  const readOnly = useReadOnly();
-  const selected = useSelected();
-  const editor = useEditorRef();
-  const isSelectionAreaVisible = usePluginOption(
-    BlockSelectionPlugin,
-    'isSelectionAreaVisible'
-  );
-  const hasControls = !readOnly && !isSelectionAreaVisible;
-
-  const { isDragging, previewRef, handleRef } = useDraggable({
-    element,
-    type: element.type,
-    canDropNode: ({ dragEntry, dropEntry }) =>
-      PathApi.equals(
-        PathApi.parent(dragEntry[1]),
-        PathApi.parent(dropEntry[1])
-      ),
-    onDropHandler: (_, { dragItem }) => {
-      const dragElement = (dragItem as { element: TElement }).element;
-
-      if (dragElement) {
-        editor.tf.select(dragElement);
-      }
-    },
-  });
-
   return (
     <PlateElement
       {...props}
       as="tr"
-      attributes={{
-        ...props.attributes,
-        'data-selected': selected ? 'true' : undefined,
-      }}
-      className={cn('group/row', isDragging && 'opacity-50')}
-      ref={useComposedRef(props.ref, previewRef)}
+      className="group/row"
     >
-      {hasControls && (
-        <td className="w-2 select-none" contentEditable={false}>
-          <RowDragHandle dragRef={handleRef} />
-          <RowDropLine />
-        </td>
-      )}
-
       {children}
     </PlateElement>
-  );
-}
-
-function RowDragHandle({ dragRef }: { dragRef: React.Ref<any> }) {
-  const editor = useEditorRef();
-  const element = useElement();
-
-  return (
-    <Button
-      className={cn(
-        '-translate-y-1/2 absolute top-1/2 left-0 z-51 h-6 w-4 p-0 focus-visible:ring-0 focus-visible:ring-offset-0',
-        'cursor-grab active:cursor-grabbing',
-        'opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-has-data-[resizing="true"]/row:opacity-0'
-      )}
-      onClick={() => {
-        editor.tf.select(element);
-      }}
-      ref={dragRef}
-      variant="outline"
-    >
-      <GripVertical className="text-muted-foreground" />
-    </Button>
-  );
-}
-
-function RowDropLine() {
-  const { dropLine } = useDropLine();
-
-  if (!dropLine) return null;
-
-  return (
-    <div
-      className={cn(
-        'absolute inset-x-0 left-2 z-50 h-0.5 bg-brand/50',
-        dropLine === 'top' ? '-top-px' : '-bottom-px'
-      )}
-    />
   );
 }
 
@@ -611,120 +232,32 @@ export function TableCellElement({
 }: PlateElementProps<TTableCellElement> & {
   isHeader?: boolean;
 }) {
-  const { api } = useEditorPlugin(TablePlugin);
-  const readOnly = useReadOnly();
   const element = props.element;
-
-  const tableId = useElementSelector(([node]) => node.id as string, [], {
-    key: KEYS.table,
-  });
-  const rowId = useElementSelector(([node]) => node.id as string, [], {
-    key: KEYS.tr,
-  });
-  const isSelectingTable = useBlockSelected(tableId);
-  const isSelectingRow = useBlockSelected(rowId) || isSelectingTable;
-  const isSelectionAreaVisible = usePluginOption(
-    BlockSelectionPlugin,
-    'isSelectionAreaVisible'
-  );
-
-  const { borders, colIndex, colSpan, minHeight, rowIndex, selected, width } =
-    useTableCellElement();
-
-  const { bottomProps, hiddenLeft, leftProps, rightProps } =
-    useTableCellElementResizable({
-      colIndex,
-      colSpan,
-      rowIndex,
-    });
 
   return (
     <PlateElement
       {...props}
       as={isHeader ? 'th' : 'td'}
-      attributes={{
-        ...props.attributes,
-        colSpan: api.table.getColSpan(element),
-        rowSpan: api.table.getRowSpan(element),
-      }}
       className={cn(
-        'h-full overflow-visible border-none bg-background p-0',
+        'relative align-top h-full overflow-visible border-none p-0',
         element.background ? 'bg-(--cellBackground)' : 'bg-background',
         isHeader && 'text-left *:m-0',
-        'before:size-full',
-        selected && 'before:z-10 before:bg-brand/5',
+        'before:inset-0 before:size-full',
         "before:absolute before:box-border before:select-none before:content-['']",
-        borders.bottom?.size && 'before:border-b before:border-b-border',
-        borders.right?.size && 'before:border-r before:border-r-border',
-        borders.left?.size && 'before:border-l before:border-l-border',
-        borders.top?.size && 'before:border-t before:border-t-border'
+        'before:border-t before:border-r before:border-b before:border-l before:border-border'
       )}
       style={
         {
           '--cellBackground': element.background,
-          maxWidth: width || 240,
-          minWidth: width || 120,
+          minWidth: 120,
+          width: 'auto',
+          maxWidth: 'none',
         } as React.CSSProperties
       }
     >
-      <div
-        className={cn(
-          "relative z-20 box-border h-full px-3 py-2 flex flex-col",
-          (element as any).verticalAlign === 'middle' && 'justify-center',
-          (element as any).verticalAlign === 'bottom' && 'justify-end',
-          (!(element as any).verticalAlign || (element as any).verticalAlign === 'top') && 'justify-start'
-        )}
-        style={{ minHeight }}
-      >
+      <div className="relative z-20 box-border h-full px-3 py-2 flex flex-col">
         {props.children}
       </div>
-
-      {!isSelectionAreaVisible && (
-        <div
-          className="group absolute top-0 size-full select-none"
-          contentEditable={false}
-          suppressContentEditableWarning={true}
-        >
-          {!readOnly && (
-            <>
-              <ResizeHandle
-                {...rightProps}
-                className="-top-2 -right-1 h-[calc(100%_+_8px)] w-2"
-                data-col={colIndex}
-              />
-              <ResizeHandle {...bottomProps} className="-bottom-1 h-2" />
-              {!hiddenLeft && (
-                <ResizeHandle
-                  {...leftProps}
-                  className="-left-1 top-0 w-2"
-                  data-resizer-left={colIndex === 0 ? 'true' : undefined}
-                />
-              )}
-
-              <div
-                className={cn(
-                  'absolute top-0 z-30 hidden h-full w-1 bg-ring',
-                  'right-[-1.5px]',
-                  columnResizeVariants({ colIndex: colIndex as any })
-                )}
-              />
-              {colIndex === 0 && (
-                <div
-                  className={cn(
-                    'absolute top-0 z-30 h-full w-1 bg-ring',
-                    'left-[-1.5px]',
-                    'fade-in hidden animate-in group-has-[[data-resizer-left]:hover]/table:block group-has-[[data-resizer-left][data-resizing="true"]]/table:block'
-                  )}
-                />
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {isSelectingRow && (
-        <div className={blockSelectionVariants()} contentEditable={false} />
-      )}
     </PlateElement>
   );
 }
@@ -734,21 +267,3 @@ export function TableCellHeaderElement(
 ) {
   return <TableCellElement {...props} isHeader />;
 }
-
-const columnResizeVariants = cva('fade-in hidden animate-in', {
-  variants: {
-    colIndex: {
-      0: 'group-has-[[data-col="0"]:hover]/table:block group-has-[[data-col="0"][data-resizing="true"]]/table:block',
-      1: 'group-has-[[data-col="1"]:hover]/table:block group-has-[[data-col="1"][data-resizing="true"]]/table:block',
-      2: 'group-has-[[data-col="2"]:hover]/table:block group-has-[[data-col="2"][data-resizing="true"]]/table:block',
-      3: 'group-has-[[data-col="3"]:hover]/table:block group-has-[[data-col="3"][data-resizing="true"]]/table:block',
-      4: 'group-has-[[data-col="4"]:hover]/table:block group-has-[[data-col="4"][data-resizing="true"]]/table:block',
-      5: 'group-has-[[data-col="5"]:hover]/table:block group-has-[[data-col="5"][data-resizing="true"]]/table:block',
-      6: 'group-has-[[data-col="6"]:hover]/table:block group-has-[[data-col="6"][data-resizing="true"]]/table:block',
-      7: 'group-has-[[data-col="7"]:hover]/table:block group-has-[[data-col="7"][data-resizing="true"]]/table:block',
-      8: 'group-has-[[data-col="8"]:hover]/table:block group-has-[[data-col="8"][data-resizing="true"]]/table:block',
-      9: 'group-has-[[data-col="9"]:hover]/table:block group-has-[[data-col="9"][data-resizing="true"]]/table:block',
-      10: 'group-has-[[data-col="10"]:hover]/table:block group-has-[[data-col="10"][data-resizing="true"]]/table:block',
-    },
-  },
-});

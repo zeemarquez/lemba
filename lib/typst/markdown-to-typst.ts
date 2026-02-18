@@ -989,6 +989,12 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
                 }
                 return `${result}\n\n`;
             }
+
+            // Parse HTML tables
+            if (/<table[\s>]/i.test(token.text) && /<\/table>/i.test(token.text)) {
+                return processHtmlTableToken(token.text, options);
+            }
+
             return '';
         case 'hr':
             return '#line(length: 100%)\n\n';
@@ -1044,6 +1050,183 @@ function convertLatexToTypst(latex: string): string {
     }
 }
 
+/**
+ * Convert HTML cell content (with <br>, <p>, <ul>, <ol>) to Typst format.
+ * Preserves line breaks and list structure for PDF rendering.
+ */
+function htmlCellContentToTypst(cell: Element, processText: (s: string) => string): string {
+    const parts: string[] = [];
+    const BLOCK_TAGS = new Set(['p', 'div', 'ul', 'ol', 'br']);
+
+    function getInlineText(node: Node): string {
+        if (node.nodeType === Node.TEXT_NODE) return processText((node.textContent || '').trim());
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const el = node as Element;
+        const tag = el.tagName.toLowerCase();
+        const inner = getElementText(el);
+        if (tag === 'strong' || tag === 'b') return inner ? `*${inner}*` : '';
+        if (tag === 'em' || tag === 'i') return inner ? `_${inner}_` : '';
+        if (tag === 'code') return inner ? `\`${inner}\`` : '';
+        return inner;
+    }
+
+    function getElementText(el: Element): string {
+        return Array.from(el.childNodes).map(getInlineText).join('').trim();
+    }
+
+    for (const node of Array.from(cell.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const t = (node.textContent || '').trim();
+            if (t) parts.push(processText(t));
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as Element;
+            const tag = el.tagName.toLowerCase();
+
+            if (tag === 'br') {
+                // Don't push a part - the join adds one line break between parts
+                // Pushing '\' would create an extra part and double the line break
+            } else if (tag === 'p' || tag === 'div') {
+                const t = getElementText(el);
+                if (t) parts.push(processText(t));
+            } else if (tag === 'ul') {
+                for (const li of Array.from(el.children)) {
+                    if (li.tagName.toLowerCase() === 'li') {
+                        const t = getElementText(li as Element);
+                        if (t) parts.push(`- ${processText(t)}`);
+                    }
+                }
+            } else if (tag === 'ol') {
+                for (const li of Array.from(el.children)) {
+                    if (li.tagName.toLowerCase() === 'li') {
+                        const t = getElementText(li as Element);
+                        if (t) parts.push(`+ ${processText(t)}`);
+                    }
+                }
+            } else if (!BLOCK_TAGS.has(tag)) {
+                const t = getElementText(el);
+                if (t) parts.push(t);
+            }
+        }
+    }
+
+    // Join with backslash+newline so Typst sees \ at end of line (creates line break)
+    const result = parts.join(' \\\n').replace(/\s*\\\s*$/, '').trim();
+    return result || '';
+}
+
+function processHtmlTableToken(html: string, options: MarkdownToTypstOptions): string {
+    if (typeof DOMParser === 'undefined') return '';
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const table = doc.querySelector('table');
+    if (!table) return '';
+
+    interface HtmlTableCell {
+        text: string;
+        isHeader: boolean;
+        colSpan?: number;
+        rowSpan?: number;
+        align?: string;
+        verticalAlign?: string;
+        background?: string;
+    }
+
+    const rows: { cells: HtmlTableCell[] }[] = [];
+    const processText = (s: string) => processTextWithEmojis(s);
+
+    function processRow(tr: Element) {
+        const cells: HtmlTableCell[] = [];
+        for (const child of Array.from(tr.children)) {
+            const tag = child.tagName.toLowerCase();
+            if (tag !== 'th' && tag !== 'td') continue;
+            const colspan = child.getAttribute('colspan');
+            const rowspan = child.getAttribute('rowspan');
+
+            const style = (child as HTMLElement).getAttribute('style') || '';
+            const bgMatch = style.match(/background-color:\s*([^;]+)/i);
+            const vaMatch = style.match(/vertical-align:\s*(top|middle|bottom)/i);
+            const taMatch = style.match(/text-align:\s*(left|center|right)/i);
+            const alignAttr = child.getAttribute('align');
+
+            const richText = htmlCellContentToTypst(child, processText);
+            const text = richText || child.textContent?.trim() || '';
+
+            cells.push({
+                text,
+                isHeader: tag === 'th',
+                colSpan: colspan ? parseInt(colspan) : undefined,
+                rowSpan: rowspan ? parseInt(rowspan) : undefined,
+                align: taMatch?.[1] || alignAttr || undefined,
+                verticalAlign: vaMatch?.[1] || undefined,
+                background: bgMatch?.[1]?.trim() || undefined,
+            });
+        }
+        if (cells.length > 0) rows.push({ cells });
+    }
+
+    for (const child of Array.from(table.children)) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === 'thead' || tag === 'tbody' || tag === 'tfoot') {
+            for (const tr of Array.from(child.children)) {
+                if (tr.tagName.toLowerCase() === 'tr') processRow(tr);
+            }
+        } else if (tag === 'tr') {
+            processRow(child);
+        }
+    }
+
+    if (rows.length === 0) return '';
+
+    let maxCols = 0;
+    rows.forEach(r => { if (r.cells.length > maxCols) maxCols = r.cells.length; });
+
+    // Use 1fr columns so table fills line width (matches markdown table / editor w-full)
+    const columns = `(${'1fr, '.repeat(maxCols).slice(0, -2)})`;
+    let tableContent = `table(\n  columns: ${columns},\n  inset: 10pt,\n  align: horizon,\n`;
+
+    const borderWidth = options.tables?.border?.width;
+    const borderColor = options.tables?.border?.color;
+    if (borderWidth || borderColor) {
+        const strokeParts: string[] = [];
+        if (borderWidth) strokeParts.push(`${borderWidth}pt`);
+        if (borderColor) strokeParts.push(`rgb("${borderColor}")`);
+        tableContent += `  stroke: ${strokeParts.join(' + ')},\n`;
+    }
+
+    rows.forEach(row => {
+        row.cells.forEach(cell => {
+            const alignParts: string[] = [];
+            if (cell.verticalAlign === 'middle') alignParts.push('horizon');
+            else if (cell.verticalAlign === 'bottom') alignParts.push('bottom');
+            if (cell.align === 'center') alignParts.push('center');
+            else if (cell.align === 'right') alignParts.push('right');
+            else alignParts.push('left');
+
+            const cellArgs: string[] = [`align: ${alignParts.join(' + ')}`];
+            if (cell.colSpan && cell.colSpan > 1) cellArgs.push(`colspan: ${cell.colSpan}`);
+            if (cell.rowSpan && cell.rowSpan > 1) cellArgs.push(`rowspan: ${cell.rowSpan}`);
+            if (cell.background) cellArgs.push(`fill: rgb("${cell.background}")`);
+
+            // Use cell.text directly: htmlCellContentToTypst already processed each segment
+            // (processTextWithEmojis would escape \ and break Typst line breaks)
+            let content = cell.text;
+            if (cell.isHeader) content = `*${content}*`;
+
+            tableContent += `  table.cell(${cellArgs.join(', ')})[${content}],\n`;
+        });
+    });
+
+    tableContent += ')';
+
+    const alignment = options.tables?.alignment || 'center';
+    const tableWithPrefix = `#${tableContent}`;
+
+    if (alignment === 'left') return `#align(left)[${tableWithPrefix}]\n\n`;
+    if (alignment === 'right') return `#align(right)[${tableWithPrefix}]\n\n`;
+    return `#align(center)[${tableWithPrefix}]\n\n`;
+}
+
 function parseInline(tokens: any[], options: MarkdownToTypstOptions): string {
     if (!tokens) return '';
     let output = '';
@@ -1070,6 +1253,15 @@ function parseInline(tokens: any[], options: MarkdownToTypstOptions): string {
                 break;
             case 'br':
                 output += ' \n';
+                break;
+            case 'html':
+                // Convert <br>, <br/>, <br /> to Typst line break (avoids literal "<br/>" causing "unclosed label")
+                const htmlVal = (token.text ?? token.raw ?? '').trim();
+                if (/^<br\s*\/?>\s*$/i.test(htmlVal)) {
+                    output += ' \\\n';
+                } else {
+                    if (token.raw) output += processTextWithEmojis(token.raw);
+                }
                 break;
             case 'link':
                 output += `#link("${escapeTypstString(token.href)}")[${parseInline(token.tokens, options)}]`;

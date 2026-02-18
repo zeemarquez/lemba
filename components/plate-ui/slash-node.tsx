@@ -19,6 +19,7 @@ import {
   SparklesIcon,
   Square,
   Table,
+  Table2,
   TableOfContentsIcon,
 } from 'lucide-react';
 import { KEYS, type TComboboxInputElement } from 'platejs';
@@ -30,6 +31,7 @@ import {
   insertBlock,
   insertInlineElement,
 } from '@/components/plate-editor/transforms';
+import { ELEMENT_HTML_TABLE } from '@/components/plate-editor/plugins/html-table-plugin';
 
 import {
   InlineCombobox,
@@ -129,6 +131,12 @@ const groups: Group[] = [
         icon: <Table />,
         label: 'Table',
         value: KEYS.table,
+      },
+      {
+        icon: <Table2 />,
+        keywords: ['html', 'html table'],
+        label: 'HTML Table',
+        value: ELEMENT_HTML_TABLE,
       },
       {
         icon: <Quote />,

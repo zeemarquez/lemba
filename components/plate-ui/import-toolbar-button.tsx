@@ -1,6 +1,7 @@
 'use client';
 
 import { MarkdownPlugin } from '@platejs/markdown';
+import { preprocessHtmlTables, preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
 
 import type { DropdownMenuProps } from '@radix-ui/react-dropdown-menu';
 import { ArrowUpToLineIcon } from 'lucide-react';
@@ -36,7 +37,8 @@ export function ImportToolbarButton(props: DropdownMenuProps) {
     }
 
     if (type === 'markdown') {
-      return editor.getApi(MarkdownPlugin).markdown.deserialize(text);
+      const preprocessed = preprocessHtmlTables(preprocessMathDelimiters(text));
+      return editor.getApi(MarkdownPlugin).markdown.deserialize(preprocessed);
     }
 
     return [];

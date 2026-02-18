@@ -1,9 +1,15 @@
-import { MarkdownPlugin, convertChildrenDeserialize, remarkMention } from '@platejs/markdown';
+import { MarkdownPlugin, convertChildrenDeserialize, convertNodesSerialize, remarkMention } from '@platejs/markdown';
 import { KEYS, NodeApi, getPluginType } from 'platejs';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { ELEMENT_PAGE_BREAK } from './page-break-plugin';
 import { KEY_PLACEHOLDER } from './placeholder-kit';
+import {
+  ELEMENT_HTML_TABLE,
+  ELEMENT_HTML_TABLE_ROW,
+  ELEMENT_HTML_TABLE_CELL,
+  ELEMENT_HTML_TABLE_HEADER_CELL,
+} from './html-table-plugin';
 
 /**
  * Custom math rules to ensure:
@@ -38,6 +44,374 @@ const mathRules = {
 };
 
 /**
+ * Parse inline DOM content into Plate text nodes, preserving bold/italic/code marks.
+ */
+function parseInlineContent(node: Node): any[] {
+  const results: any[] = [];
+
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.textContent || '';
+      if (text) results.push({ text });
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as Element;
+      const tag = el.tagName.toLowerCase();
+
+      if (tag === 'strong' || tag === 'b') {
+        const inner = parseInlineContent(el);
+        inner.forEach((n: any) => { n.bold = true; });
+        results.push(...inner);
+      } else if (tag === 'em' || tag === 'i') {
+        const inner = parseInlineContent(el);
+        inner.forEach((n: any) => { n.italic = true; });
+        results.push(...inner);
+      } else if (tag === 'code') {
+        results.push({ text: el.textContent || '', code: true });
+      } else if (tag === 'br') {
+        results.push({ text: '\n' });
+      } else {
+        results.push(...parseInlineContent(el));
+      }
+    }
+  }
+
+  return results.length > 0 ? results : [{ text: '' }];
+}
+
+const BLOCK_TAGS = new Set(['p', 'div', 'ul', 'ol', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+/**
+ * Parse the children of a <td>/<th> cell into Plate block nodes.
+ * Handles <br>, <p>, <div>, <ul>, <ol> for rich cell content.
+ */
+function parseCellChildren(cell: Element): any[] {
+  const hasBlockContent = Array.from(cell.childNodes).some(
+    (n) => n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has((n as Element).tagName.toLowerCase())
+  );
+
+  if (!hasBlockContent) {
+    return [{ type: 'p', children: parseInlineContent(cell) }];
+  }
+
+  const blocks: any[] = [];
+  let pendingInline: any[] = [];
+
+  function flushInline() {
+    if (pendingInline.length === 0) return;
+    const hasContent = pendingInline.some((n: any) => typeof n.text === 'string' && n.text.trim());
+    if (hasContent) {
+      blocks.push({ type: 'p', children: pendingInline });
+    }
+    pendingInline = [];
+  }
+
+  for (const node of Array.from(cell.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      if (text.trim()) pendingInline.push({ text });
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as Element;
+      const tag = el.tagName.toLowerCase();
+
+      if (tag === 'br') {
+        flushInline();
+      } else if (tag === 'p' || tag === 'div') {
+        flushInline();
+        blocks.push({ type: 'p', children: parseInlineContent(el) });
+      } else if (tag === 'ul' || tag === 'ol') {
+        flushInline();
+        const listStyleType = tag === 'ol' ? 'decimal' : 'disc';
+        for (const li of Array.from(el.children)) {
+          if (li.tagName.toLowerCase() === 'li') {
+            blocks.push({
+              type: 'p',
+              indent: 1,
+              listStyleType,
+              children: parseInlineContent(li),
+            });
+          }
+        }
+      } else {
+        pendingInline.push(...parseInlineContent(el));
+      }
+    }
+  }
+
+  flushInline();
+
+  return blocks.length > 0 ? blocks : [{ type: 'p', children: [{ text: '' }] }];
+}
+
+/**
+ * Parse an HTML table string into structured Plate nodes.
+ * Uses DOMParser to handle complex HTML (colspan, rowspan, nested tags).
+ */
+function parseHtmlTableToNodes(html: string): any | null {
+  if (typeof DOMParser === 'undefined') return null;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const table = doc.querySelector('table');
+  if (!table) return null;
+
+  const rows: any[] = [];
+
+  function processRow(tr: Element) {
+    const cells: any[] = [];
+
+    for (const child of Array.from(tr.children)) {
+      const tag = child.tagName.toLowerCase();
+      if (tag !== 'th' && tag !== 'td') continue;
+
+      const isHeader = tag === 'th';
+      const colspan = child.getAttribute('colspan');
+      const rowspan = child.getAttribute('rowspan');
+
+      const cellNode: any = {
+        type: isHeader ? ELEMENT_HTML_TABLE_HEADER_CELL : ELEMENT_HTML_TABLE_CELL,
+        children: parseCellChildren(child),
+      };
+
+      if (colspan && parseInt(colspan) > 1) cellNode.colSpan = parseInt(colspan);
+      if (rowspan && parseInt(rowspan) > 1) cellNode.rowSpan = parseInt(rowspan);
+
+      const style = (child as HTMLElement).getAttribute('style') || '';
+      const bgMatch = style.match(/background-color:\s*([^;]+)/i);
+      if (bgMatch) cellNode.background = bgMatch[1].trim();
+
+      const vaMatch = style.match(/vertical-align:\s*(top|middle|bottom)/i);
+      if (vaMatch) cellNode.verticalAlign = vaMatch[1];
+
+      const taMatch = style.match(/text-align:\s*(left|center|right)/i);
+      if (taMatch) cellNode.align = taMatch[1];
+
+      const alignAttr = child.getAttribute('align');
+      if (alignAttr && !taMatch) cellNode.align = alignAttr;
+
+      cells.push(cellNode);
+    }
+
+    if (cells.length > 0) {
+      rows.push({
+        type: ELEMENT_HTML_TABLE_ROW,
+        children: cells,
+      });
+    }
+  }
+
+  // Process rows in order: thead, tbody, tfoot, and direct tr children
+  for (const child of Array.from(table.children)) {
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'thead' || tag === 'tbody' || tag === 'tfoot') {
+      for (const tr of Array.from(child.children)) {
+        if (tr.tagName.toLowerCase() === 'tr') processRow(tr);
+      }
+    } else if (tag === 'tr') {
+      processRow(child);
+    }
+  }
+
+  if (rows.length === 0) return null;
+
+  return {
+    type: ELEMENT_HTML_TABLE,
+    children: rows,
+  };
+}
+
+function extractNodeText(children: any[]): string {
+  if (!children || !Array.isArray(children)) return '';
+
+  return children
+    .map((child: any) => {
+      if (typeof child.text === 'string') return child.text;
+      if (child.children) return extractNodeText(child.children);
+      return '';
+    })
+    .join('');
+}
+
+/**
+ * Serialize the block children of a cell into an HTML string.
+ * Handles multiple paragraphs (joined with <br>) and list items (<ul>/<ol>).
+ */
+function serializeCellContent(children: any[]): string {
+  if (!children || !Array.isArray(children)) return '';
+
+  const parts: string[] = [];
+  let currentListTag: string | null = null;
+  let listItems: string[] = [];
+
+  function flushList() {
+    if (listItems.length === 0) return;
+    parts.push(`<${currentListTag}>${listItems.map((li) => `<li>${li}</li>`).join('')}</${currentListTag}>`);
+    listItems = [];
+    currentListTag = null;
+  }
+
+  for (const child of children) {
+    if (child.listStyleType) {
+      const tag = child.listStyleType === 'decimal' ? 'ol' : 'ul';
+      if (currentListTag && currentListTag !== tag) flushList();
+      currentListTag = tag;
+      listItems.push(extractNodeText(child.children || []));
+    } else {
+      flushList();
+      parts.push(extractNodeText(child.children || []));
+    }
+  }
+
+  flushList();
+
+  // Replace \\n with <br> so we never output raw newlines (which can become &#xA; when encoded)
+  const ensureBrNotNewline = (s: string) => s.replace(/\n/g, '<br>');
+  if (parts.length <= 1 && !parts[0]?.startsWith('<')) return ensureBrNotNewline(parts[0] || '');
+  return parts.map(ensureBrNotNewline).join('<br>');
+}
+
+function serializeHtmlTableToString(node: any): string {
+  let html = '<table>\n';
+  let hasHeaders = false;
+  let headersDone = false;
+
+  for (const row of node.children || []) {
+    if (row.type !== ELEMENT_HTML_TABLE_ROW) continue;
+
+    const isHeaderRow =
+      row.children?.length > 0 &&
+      row.children.every((c: any) => c.type === ELEMENT_HTML_TABLE_HEADER_CELL);
+
+    if (isHeaderRow && !headersDone) {
+      if (!hasHeaders) {
+        html += '  <thead>\n';
+        hasHeaders = true;
+      }
+    } else if (hasHeaders && !headersDone) {
+      html += '  </thead>\n  <tbody>\n';
+      headersDone = true;
+    } else if (!hasHeaders && !headersDone) {
+      html += '  <tbody>\n';
+      headersDone = true;
+    }
+
+    html += '    <tr>\n';
+    for (const cell of row.children || []) {
+      const tag = cell.type === ELEMENT_HTML_TABLE_HEADER_CELL ? 'th' : 'td';
+      const attrs: string[] = [];
+      if (cell.colSpan && cell.colSpan > 1) attrs.push(`colspan="${cell.colSpan}"`);
+      if (cell.rowSpan && cell.rowSpan > 1) attrs.push(`rowspan="${cell.rowSpan}"`);
+
+      const styles: string[] = [];
+      if (cell.background) styles.push(`background-color: ${cell.background}`);
+      if (cell.verticalAlign && cell.verticalAlign !== 'top') styles.push(`vertical-align: ${cell.verticalAlign}`);
+      if (cell.align && cell.align !== 'left') styles.push(`text-align: ${cell.align}`);
+      if (styles.length > 0) attrs.push(`style="${styles.join('; ')}"`);
+
+      const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+      const content = serializeCellContent(cell.children);
+      html += `      <${tag}${attrStr}>${content}</${tag}>\n`;
+    }
+    html += '    </tr>\n';
+  }
+
+  if (hasHeaders && !headersDone) {
+    html += '  </thead>\n';
+  } else if (headersDone) {
+    html += '  </tbody>\n';
+  }
+
+  html += '</table>';
+  return html;
+}
+
+/**
+ * Recursively replace mdast "break" nodes with "html" nodes (value: "<br>")
+ * so line breaks in table cells serialize as <br> in source mode.
+ */
+function replaceBreaksWithBr(nodes: any[]): any[] {
+  return nodes.map((node) => {
+    if (node.type === 'break') {
+      return { type: 'html', value: '<br>' };
+    }
+    if (node.children) {
+      return { ...node, children: replaceBreaksWithBr(node.children) };
+    }
+    return node;
+  });
+}
+
+/**
+ * Expand text nodes containing \\n into [text, html<br>, text, ...] so mdast-util-to-markdown
+ * outputs <br> instead of encoding \\n as &#xA; (which happens in table cell context).
+ */
+function expandNewlinesInTextNodes(nodes: any[]): any[] {
+  const result: any[] = [];
+  for (const node of nodes) {
+    if (node.type === 'text' && typeof node.value === 'string' && node.value.includes('\n')) {
+      const parts = node.value.split('\n');
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) result.push({ type: 'html', value: '<br>' });
+        if (parts[i]) result.push({ type: 'text', value: parts[i] });
+      }
+    } else if (node.children) {
+      result.push({ ...node, children: expandNewlinesInTextNodes(node.children) });
+    } else {
+      result.push(node);
+    }
+  }
+  return result;
+}
+
+/**
+ * Custom td/th serialize: ensure line breaks (Enter or Shift+Enter) become <br> in source.
+ * - Multiple blocks: join with <br/> (default behavior)
+ * - Break nodes inside paragraphs: replace with <br> (mdast would otherwise use space in tables)
+ */
+const tableCellRules = {
+  td: {
+    serialize: (node: any, options: any) => {
+      const children = convertNodesSerialize(node.children, options);
+      let result: any[];
+      if (children.length > 1) {
+        result = [];
+        for (let i = 0; i < children.length; i++) {
+          result.push(children[i]);
+          if (i < children.length - 1) result.push({ type: 'html', value: '<br>' });
+        }
+      } else {
+        result = children;
+      }
+      return { type: 'tableCell', children: expandNewlinesInTextNodes(replaceBreaksWithBr(result)) };
+    },
+  },
+  th: {
+    serialize: (node: any, options: any) => {
+      const children = convertNodesSerialize(node.children, options);
+      let result: any[];
+      if (children.length > 1) {
+        result = [];
+        for (let i = 0; i < children.length; i++) {
+          result.push(children[i]);
+          if (i < children.length - 1) result.push({ type: 'html', value: '<br>' });
+        }
+      } else {
+        result = children;
+      }
+      return { type: 'tableCell', children: expandNewlinesInTextNodes(replaceBreaksWithBr(result)) };
+    },
+  },
+};
+
+const htmlTableRules = {
+  [ELEMENT_HTML_TABLE]: {
+    serialize: (node: any) => ({
+      type: 'html',
+      value: serializeHtmlTableToString(node),
+    }),
+  },
+};
+
+/**
  * Page break rules for markdown serialization/deserialization
  * Uses HTML comment format: <!-- pagebreak -->
  */
@@ -58,6 +432,12 @@ const pageBreakRules = {
           type: getPluginType(options.editor, ELEMENT_PAGE_BREAK),
           children: [{ text: '' }],
         };
+      }
+
+      // Handle HTML tables
+      if (value && /<table[\s>]/i.test(value) && /<\/table>/i.test(value)) {
+        const tableNode = parseHtmlTableToNodes(value);
+        if (tableNode) return tableNode;
       }
 
       // Handle image HTML (original html deserialize logic will be merged)
@@ -96,6 +476,18 @@ const pageBreakRules = {
           children: [{ text: '' }],
         };
       }
+
+      // Convert <br>, <br/>, <br /> to newline so line breaks in table cells render correctly
+      const brValue = (value || '').replace(/^\s+|\s+$/g, '');
+      if (/^<br\s*\/?>\s*$/i.test(brValue)) {
+        return { text: '\n' };
+      }
+
+      // Decode &#xA; and &#10; (newline entities) to actual newline for proper display
+      const decoded = (value || '')
+        .replace(/&#x0?0?A;/gi, '\n')
+        .replace(/&#10;/g, '\n');
+      if (decoded !== value) return { text: decoded };
 
       // Return as text for other HTML
       return { text: mdastNode.value };
@@ -475,10 +867,48 @@ export const MarkdownKit = [
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention, remarkPlaceholders],
-      rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...alertRules, ...placeholderRules } as any,
+      rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...tableCellRules, ...htmlTableRules, ...alertRules, ...placeholderRules } as any,
     },
   }),
 ];
+
+/**
+ * Preprocess HTML tables in markdown to ensure they are treated as a single
+ * HTML block by remark. Removes blank lines between <table> and </table> tags
+ * so remark doesn't split the table into multiple nodes.
+ */
+export function preprocessHtmlTables(markdown: string): string {
+  if (!markdown || !markdown.includes('<table')) return markdown;
+
+  const lines = markdown.split('\n');
+  const result: string[] = [];
+  let inTable = false;
+  let tableDepth = 0;
+
+  for (const line of lines) {
+    const openCount = (line.match(/<table[\s>]/gi) || []).length;
+    const closeCount = (line.match(/<\/table>/gi) || []).length;
+
+    if (openCount > 0 && !inTable) {
+      inTable = true;
+      tableDepth = openCount - closeCount;
+    } else if (inTable) {
+      tableDepth += openCount - closeCount;
+      if (tableDepth <= 0) {
+        inTable = false;
+        tableDepth = 0;
+      }
+    }
+
+    if (inTable && line.trim() === '') {
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  return result.join('\n');
+}
 
 /**
  * Preprocess markdown to normalize block equation syntax.

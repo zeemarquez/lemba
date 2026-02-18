@@ -12,7 +12,7 @@ import { KEYS } from 'platejs';
 import { createPlateEditor } from 'platejs/react';
 import { EditorKit } from '@/components/plate-editor/editor-kit';
 import { KEY_PLACEHOLDER } from '@/components/plate-editor/plugins/placeholder-kit';
-import { parsePlaceholderToken, preprocessMathDelimiters } from '@/components/plate-editor/plugins/markdown-kit';
+import { parsePlaceholderToken, preprocessMathDelimiters, preprocessHtmlTables } from '@/components/plate-editor/plugins/markdown-kit';
 
 // Type for cached chunk data
 interface CachedChunk {
@@ -188,7 +188,7 @@ function createTempEditor() {
  */
 function deserializeChunk(chunk: string, tempEditor: any): any[] {
     try {
-        const preprocessed = preprocessMathDelimiters(chunk);
+        const preprocessed = preprocessHtmlTables(preprocessMathDelimiters(chunk));
         const nodes = tempEditor.api.markdown.deserialize(preprocessed);
         const normalized = normalizePlaceholdersInNodes(nodes);
         if (normalized.length > 0) {

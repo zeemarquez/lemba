@@ -5,7 +5,7 @@ import { DocumentDiff } from "@/lib/agent";
 import { cn } from "@/lib/utils";
 import { createPlateEditor } from "platejs/react";
 import { EditorKit } from "@/components/plate-editor/editor-kit";
-import { preprocessMathDelimiters } from "@/components/plate-editor/plugins/markdown-kit";
+import { preprocessMathDelimiters, preprocessHtmlTables } from "@/components/plate-editor/plugins/markdown-kit";
 
 // TypeScript interfaces for Plate node types
 interface PlateTextNode {
@@ -132,7 +132,7 @@ export function WysiwygDiffOverlay({ diff }: WysiwygDiffOverlayProps) {
         // Deserialize the markdown line to Plate nodes
         let nodes: PlateNode[] = [];
         try {
-            const preprocessed = preprocessMathDelimiters(lineInfo.content);
+            const preprocessed = preprocessHtmlTables(preprocessMathDelimiters(lineInfo.content));
             nodes = tempEditor.api.markdown.deserialize(preprocessed) as PlateNode[];
         } catch {
             // Fallback to plain text if deserialization fails
