@@ -40,7 +40,7 @@ function tableKeyDown(props: { editor: any; event: React.KeyboardEvent }) {
       return;
     }
   }
-  onKeyDownTable(props);
+  onKeyDownTable(props as any);
 }
 
 export const TableKit = [
