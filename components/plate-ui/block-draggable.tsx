@@ -26,9 +26,7 @@ import {
 import { cn } from '@/lib/utils';
 
 /** Draggers (drag handles) are disabled for all elements. */
-export const BlockDraggable: RenderNodeWrapper = () => {
-  return;
-};
+export const BlockDraggable: RenderNodeWrapper = (_props) => undefined;
 
 function Draggable(props: PlateElementProps) {
   const { children, editor, element, path } = props;
