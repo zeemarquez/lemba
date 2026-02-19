@@ -4,14 +4,107 @@ import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting } from '@codemirror/language';
+import { syntaxHighlighting, foldService, codeFolding, foldGutter } from '@codemirror/language';
 import { tags, tagHighlighter } from '@lezer/highlight';
+import type { EditorState } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { useTheme } from 'next-themes';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { useStore } from '@/lib/store';
 import { debounce } from 'lodash';
 import { listIndentExtension } from './list-indent-extension';
+
+/** Fold service for HTML tables: fold from a line containing <table to matching </table> */
+function htmlTableFoldService(state: EditorState, lineStart: number, lineEnd: number): { from: number; to: number } | null {
+    const lineText = state.doc.sliceString(lineStart, lineEnd);
+    if (!/<table[\s>]/i.test(lineText)) return null;
+
+    const doc = state.doc;
+    const docLength = doc.length;
+    let depth = 1; // we are inside the opening <table> on this line
+    let pos = lineEnd;
+    const tableOpenRegex = /<table[\s>]/gi;
+    const tableCloseRegex = /<\/table\s*>/gi;
+
+    while (pos < docLength) {
+        const fromHere = doc.sliceString(pos, docLength);
+        tableOpenRegex.lastIndex = 0;
+        tableCloseRegex.lastIndex = 0;
+        const nextOpen = tableOpenRegex.exec(fromHere);
+        const nextClose = tableCloseRegex.exec(fromHere);
+        const nextOpenIdx = nextOpen !== null ? pos + nextOpen.index : docLength;
+        const nextCloseIdx = nextClose !== null ? pos + nextClose.index : docLength;
+
+        if (nextClose !== null && (nextCloseIdx < nextOpenIdx || nextOpen === null)) {
+            depth--;
+            if (depth === 0) {
+                const closeTagEnd = nextCloseIdx + nextClose[0].length;
+                return { from: lineEnd, to: closeTagEnd };
+            }
+            pos = nextCloseIdx + 1;
+        } else if (nextOpen !== null) {
+            depth++;
+            pos = nextOpenIdx + 1;
+        } else {
+            break;
+        }
+    }
+    return null;
+}
+
+const htmlTableFold = foldService.of(htmlTableFoldService);
+
+/** Outline-style chevron SVGs (same as DocumentOutline: size 14, muted) */
+function createChevronMarker(open: boolean): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'cm-fold-marker outline-chevron';
+    span.setAttribute('aria-hidden', 'true');
+    span.title = open ? 'Fold section' : 'Unfold section';
+    span.style.display = 'inline-flex';
+    span.style.alignItems = 'center';
+    span.style.justifyContent = 'center';
+    span.style.width = '14px';
+    span.style.height = '14px';
+    span.style.flexShrink = '0';
+    span.style.cursor = 'pointer';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', open ? 'm6 9 6 6 6-6' : 'm9 18 6-6-6-6'); // ChevronDown : ChevronRight (Lucide)
+    svg.appendChild(path);
+    span.appendChild(svg);
+    return span;
+}
+
+/** Fold gutter matching DocumentOutline: single chevron per line, no vertical line */
+const outlineStyleFoldGutter = foldGutter({
+    markerDOM: (open) => createChevronMarker(open),
+    openText: '',  // unused when markerDOM is set; avoid any text fallback
+    closedText: '',
+});
+
+const foldGutterTheme = EditorView.theme({
+    '.cm-gutters': {
+        border: 'none',
+    },
+    '.cm-gutters.cm-gutters-before': {
+        borderRightWidth: '0',
+    },
+    '.cm-foldGutter .outline-chevron': {
+        color: 'var(--muted-foreground)',
+    },
+    '.cm-foldGutter .outline-chevron:hover': {
+        backgroundColor: 'var(--accent)',
+        borderRadius: '2px',
+    },
+});
 
 interface SourceEditorProps {
     content: string;
@@ -276,6 +369,10 @@ export function SourceEditor({ content, onChange }: SourceEditorProps) {
     const extensions = useMemo(() => [
         listIndentExtension,
         markdown({ base: markdownLanguage, codeLanguages: languages }),
+        codeFolding(),
+        outlineStyleFoldGutter,
+        foldGutterTheme,
+        htmlTableFold,
         fontExtension,
         cursorTrackingExtension,
         placeholderDecoration,

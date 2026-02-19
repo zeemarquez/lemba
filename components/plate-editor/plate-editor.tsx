@@ -7,6 +7,7 @@ import { useMounted } from '@/hooks/use-mounted';
 import { debounce } from 'lodash';
 
 import { EditorKit } from '@/components/plate-editor/editor-kit';
+import { CollapsedHeadingsProvider } from '@/components/plate-ui/collapsible-headings-context';
 import { Editor, EditorContainer } from '@/components/plate-ui/editor';
 import { FixedToolbar } from '@/components/plate-ui/fixed-toolbar';
 import { FixedToolbarButtons } from '@/components/plate-ui/fixed-toolbar-buttons';
@@ -645,9 +646,11 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
               visibility: editorViewMode !== 'source' ? 'visible' : 'hidden',
             }}
           >
-            <EditorContainer>
-              <Editor variant="demo" />
-            </EditorContainer>
+            <CollapsedHeadingsProvider>
+              <EditorContainer>
+                <Editor variant="demo" />
+              </EditorContainer>
+            </CollapsedHeadingsProvider>
           </div>
         </div>
       </div>

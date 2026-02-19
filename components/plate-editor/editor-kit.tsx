@@ -11,6 +11,7 @@ import { BasicMarksKit } from '@/components/plate-editor/plugins/basic-marks-kit
 import { BlockMenuKit } from '@/components/plate-editor/plugins/block-menu-kit';
 import { BlockPlaceholderKit } from '@/components/plate-editor/plugins/block-placeholder-kit';
 import { CalloutKit } from '@/components/plate-editor/plugins/callout-kit';
+import { CollapsibleHeadingsPlugin } from '@/components/plate-editor/plugins/collapsible-headings-kit';
 import { CodeBlockKit } from '@/components/plate-editor/plugins/code-block-kit';
 import { ColumnKit } from '@/components/plate-editor/plugins/column-kit';
 import { CommentKit } from '@/components/plate-editor/plugins/comment-kit';
@@ -49,6 +50,7 @@ export const EditorKit = [
     node: { component: PageBreakElement },
   }),
   ...BasicBlocksKit,
+  CollapsibleHeadingsPlugin,
   ...CodeBlockKit,
   ...TableKit,
   ...HtmlTableKit,
