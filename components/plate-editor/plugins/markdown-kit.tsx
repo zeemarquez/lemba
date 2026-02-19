@@ -897,11 +897,42 @@ const placeholderRules = {
   },
 };
 
+/**
+ * Custom remark-stringify join functions to prevent formatting regressions
+ * during the Plate → markdown serialization round-trip.
+ *
+ * mdast-util-to-markdown's joinDefaults only suppresses blank lines between
+ * nodes when the parent's `spread` property is an explicit boolean.  The
+ * listToMdastTree helper inside @platejs/markdown leaves `listItem.spread`
+ * undefined, so the default "two newlines" separator is used between the
+ * paragraph text and any nested sub-list inside a list item.  That turns
+ * every tight (no-blank-line) nested list into a loose list on the first
+ * source→editing→source round-trip.
+ *
+ * Returning 0 here means "exactly one newline" (no blank line) which keeps
+ * nested lists tight and matches the original source markdown.
+ */
+const remarkStringifyJoin = [
+  (left: any, right: any, parent: any) => {
+    // Suppress the blank line that would otherwise appear between the text
+    // of a list item and its nested sub-list.
+    if (
+      parent.type === 'listItem' &&
+      left.type === 'paragraph' &&
+      right.type === 'list'
+    ) {
+      return 0;
+    }
+    return undefined;
+  },
+];
+
 export const MarkdownKit = [
   MarkdownPlugin.configure({
     options: {
       plainMarks: [KEYS.suggestion, KEYS.comment],
       remarkPlugins: [remarkMath, remarkGfm, remarkMention, remarkPlaceholders],
+      remarkStringifyOptions: { join: remarkStringifyJoin } as any,
       rules: { ...mathRules, ...imageRules, ...pageBreakRules, ...tableCellRules, ...htmlTableRules, ...alertRules, ...placeholderRules } as any,
     },
   }),

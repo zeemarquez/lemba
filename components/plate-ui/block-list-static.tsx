@@ -25,20 +25,86 @@ export const BlockListStatic: RenderStaticNodeWrapper = (props) => {
   return (props) => <List {...props} />;
 };
 
+/**
+ * Same hierarchical label logic as BlockList but without React hooks so it
+ * can be used in static (server-side) rendering.
+ */
+function getHierarchicalLabel(
+  element: TListElement,
+  editorChildren: any[]
+): string | null {
+  const indent = (element.indent as number) ?? 1;
+  const listStart = (element.listStart as number) ?? 1;
+
+  if ((element.listStyleType as string) !== 'decimal') return null;
+  if (indent <= 1) return null;
+
+  const nodeIndex = editorChildren.indexOf(element);
+  if (nodeIndex === -1) return null;
+
+  const numbers: number[] = [listStart];
+  let targetIndent = indent - 1;
+
+  for (let i = nodeIndex - 1; i >= 0 && targetIndent >= 1; i--) {
+    const node = editorChildren[i] as any;
+    const nodeIndent = (node.indent as number) ?? 0;
+    const nodeListStyleType = node.listStyleType as string | undefined;
+
+    if (!nodeListStyleType || !nodeIndent) continue;
+
+    if (nodeIndent === targetIndent) {
+      if (nodeListStyleType !== 'decimal') return null;
+      numbers.unshift((node.listStart as number) ?? 1);
+      targetIndent--;
+    } else if (nodeIndent < targetIndent) {
+      break;
+    }
+  }
+
+  if (targetIndent > 0) return null;
+
+  return numbers.join('.');
+}
+
 function List(props: SlateRenderElementProps) {
   const { listStart, listStyleType } = props.element as TListElement;
   const { Li, Marker } = config[listStyleType] ?? {};
-  const List = isOrderedList(props.element) ? 'ol' : 'ul';
+  const ListTag = isOrderedList(props.element) ? 'ol' : 'ul';
+
+  const label = getHierarchicalLabel(
+    props.element as TListElement,
+    (props.editor as any)?.children ?? []
+  );
 
   return (
-    <List
+    <ListTag
       className="relative m-0 p-0"
-      start={listStart}
-      style={{ listStyleType }}
+      start={label ? undefined : listStart}
+      style={{ listStyleType: label ? 'none' : listStyleType }}
     >
       {Marker && <Marker {...props} />}
-      {Li ? <Li {...props} /> : <li>{props.children}</li>}
-    </List>
+      {Li ? (
+        <Li {...props} />
+      ) : label ? (
+        <li>
+          <span
+            style={{
+              position: 'absolute',
+              left: 0,
+              transform: 'translateX(-100%)',
+              paddingRight: '0.25em',
+              userSelect: 'none',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {label}.
+          </span>
+          {props.children}
+        </li>
+      ) : (
+        <li>{props.children}</li>
+      )}
+    </ListTag>
   );
 }
 

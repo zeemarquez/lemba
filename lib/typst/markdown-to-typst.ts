@@ -495,7 +495,20 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
         case 'list':
             const listType = token.ordered ? '+' : '-';
             return token.items.map((item: any) => {
-                const content = parseTokens(item.tokens, options).trim();
+                // Process each child token separately so that inline text tokens
+                // and nested block-level list tokens are joined with a newline.
+                // Without this, a text token ("B") and a following list token ("+ C\n...")
+                // get concatenated directly as "B+ C..." with no separator.
+                const parts: string[] = [];
+                for (const t of (item.tokens || [])) {
+                    if (t.type === 'list') {
+                        parts.push(processToken(t, options).trimEnd());
+                    } else {
+                        const part = processToken(t, options);
+                        if (part.trim()) parts.push(part.trim());
+                    }
+                }
+                const content = parts.join('\n');
                 const indented = content.split('\n').join('\n  ');
                 return `${listType} ${indented}\n`;
             }).join('') + '\n';

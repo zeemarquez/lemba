@@ -11,6 +11,7 @@ import { useTheme } from 'next-themes';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { useStore } from '@/lib/store';
 import { debounce } from 'lodash';
+import { listIndentExtension } from './list-indent-extension';
 
 interface SourceEditorProps {
     content: string;
@@ -273,6 +274,7 @@ export function SourceEditor({ content, onChange }: SourceEditorProps) {
     }, [theme]);
 
     const extensions = useMemo(() => [
+        listIndentExtension,
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         fontExtension,
         cursorTrackingExtension,

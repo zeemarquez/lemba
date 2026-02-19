@@ -1080,6 +1080,19 @@ ${headingStyles}
 #show link: underline
 #show table: set table(stroke: 0.5pt + gray)
 
+// Hierarchical numbering for ordered lists: top-level shows "1.", nested shows "2.1", "2.2", etc.
+#set enum(
+  full: true,
+  numbering: (..nums) => {
+    let values = nums.pos()
+    if values.len() == 1 {
+      str(values.at(0)) + "."
+    } else {
+      values.map(str).join(".")
+    }
+  }
+)
+
 ${generateCodeBlockStyles(options)}
 `;
 }

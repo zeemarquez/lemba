@@ -140,13 +140,29 @@ function splitIntoChunks(markdown: string): string[] {
     const lines = markdown.split('\n');
     const chunks: string[] = [];
     let currentChunk: string[] = [];
+    // Track whether we are inside a fenced code block so we never split on
+    // a `#` line that is actually a comment inside the fence.
+    let inCodeBlock = false;
 
     // Chunk by headers (h1, h2, h3) or by size threshold
     const CHUNK_SIZE_THRESHOLD = 2000; // characters
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const isHeader = /^#{1,3}\s/.test(line);
+        const trimmed = line.trim();
+
+        // Toggle code-block state when we encounter a fenced code fence
+        // (3+ backticks or 3+ tildes at the start of the line, possibly
+        //  with up to 3 spaces of indentation per CommonMark spec).
+        if (/^(`{3,}|~{3,})/.test(trimmed)) {
+            inCodeBlock = !inCodeBlock;
+        }
+
+        // Only treat a line as a header when we are NOT inside a code block.
+        // This prevents `# comment` lines inside bash/python/etc. code blocks
+        // from being mistaken for headings and splitting the chunk at the wrong
+        // boundary, which would corrupt the code block across chunks.
+        const isHeader = !inCodeBlock && /^#{1,3}\s/.test(line);
         const currentChunkText = currentChunk.join('\n');
 
         // Start a new chunk if:
@@ -154,7 +170,7 @@ function splitIntoChunks(markdown: string): string[] {
         // 2. Current chunk exceeds threshold and we hit any header
         if (
             (isHeader && currentChunk.length > 0) ||
-            (currentChunkText.length > CHUNK_SIZE_THRESHOLD && /^#{1,6}\s/.test(line))
+            (!inCodeBlock && currentChunkText.length > CHUNK_SIZE_THRESHOLD && /^#{1,6}\s/.test(line))
         ) {
             if (currentChunk.length > 0) {
                 chunks.push(currentChunk.join('\n'));
