@@ -156,8 +156,14 @@ function normalizeContent(s: string): string {
 
 /**
  * Merge multiple diffs for the same file into a single diff.
- * Applies diffs in createdAt order: each diff's hunks are applied to the running content.
  * Result: one diff with originalContent = first.originalContent, proposedContent = final content.
+ *
+ * Two modes:
+ *  - Parallel (all same base): hunks from each diff are applied to the shared original.
+ *    Non-overlapping hunks are applied in order with offset tracking.
+ *    Overlapping hunks are skipped (last non-conflicting change wins).
+ *  - Sequential: each diff is already expressed against the previous diff's proposedContent.
+ *    We simply chain proposedContent values — no hunk re-application needed.
  */
 export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
     if (diffs.length === 0) return null;
@@ -172,13 +178,26 @@ export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
     const allSameBase = sorted.every(d => normalizeContent(d.originalContent) === baseNorm);
 
     if (allSameBase) {
-        // Parallel edits against the same version: merge all hunks and apply in one pass
-        const allHunks: DiffHunk[] = [];
-        for (const d of sorted) {
-            allHunks.push(...d.hunks);
+        // Parallel edits against the same base version.
+        // Collect all hunks and remove those that overlap with already-applied regions to
+        // prevent the offset arithmetic from producing a corrupted (or empty) document when
+        // two diffs touch the same lines.
+        const allHunks: DiffHunk[] = sorted.flatMap(d => d.hunks);
+        const sortedHunks = [...allHunks].sort((a, b) => a.startLine - b.startLine);
+
+        const safeHunks: DiffHunk[] = [];
+        let lastAppliedEndLine = -1;
+
+        for (const hunk of sortedHunks) {
+            if (hunk.startLine > lastAppliedEndLine) {
+                safeHunks.push(hunk);
+                // Track the exclusive end of the old-line range this hunk covers
+                lastAppliedEndLine = hunk.startLine + hunk.oldLines.length - 1;
+            }
+            // Overlapping hunk: skip it (the earlier hunk from the same region takes priority)
         }
-        // applyHunks sorts by startLine and applies with offset; works for disjoint regions
-        const content = applyHunks(first.originalContent, allHunks);
+
+        const content = applyHunks(first.originalContent, safeHunks);
 
         return generateDiff(
             first.fileId,
@@ -188,17 +207,16 @@ export function mergeDiffsForFile(diffs: DocumentDiff[]): DocumentDiff | null {
             'Merged changes'
         );
     } else {
-        // Sequential: each diff's hunks are relative to its own originalContent.
-        // Apply in order; later diffs' hunks are applied to already-modified content (best effort).
-        let content = sorted[0].originalContent;
-        for (const d of sorted) {
-            content = applyHunks(content, d.hunks);
-        }
+        // Sequential diffs: each diff's originalContent equals the previous diff's proposedContent
+        // (because each tool call in an AI session uses contentOverrides built from accumulated diffs).
+        // The final document state is simply the last diff's proposedContent — no hunk
+        // re-application is needed and re-applying hunks to shifted content is error-prone.
+        const lastDiff = sorted[sorted.length - 1];
         return generateDiff(
             first.fileId,
             first.fileName,
             first.originalContent,
-            content,
+            lastDiff.proposedContent,
             'Merged changes'
         );
     }

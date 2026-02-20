@@ -1228,10 +1228,15 @@ export const useStore = create<AppState>()(
                                 linter: '✨ Linting',
                                 summarizer: '💬 Summarizing',
                             };
-                            const initialContentOverrides =
-                                state.currentView === 'file' && state.activeFileId
-                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
-                                    : undefined;
+                            // Only pass a content override when we actually have the file loaded
+                            // in memory. Passing '' for an unloaded file would make the AI see
+                            // an empty document and generate diffs that wipe the real content.
+                            const activeFileForOrch = state.currentView === 'file' && state.activeFileId
+                                ? state.files.find((f) => f.id === state.activeFileId)
+                                : undefined;
+                            const initialContentOverrides = activeFileForOrch !== undefined
+                                ? { [state.activeFileId!]: activeFileForOrch.content }
+                                : undefined;
 
                             const orchestrationResult = await runOrchestration(
                                 allMessages,
@@ -1261,10 +1266,15 @@ export const useStore = create<AppState>()(
                         } else {
                             const provider = modelToProvider(state.agentModel);
                             const apiKeyOverride = state.agentApiKeys[provider]?.trim() || undefined;
-                            const initialContentOverrides =
-                                state.currentView === 'file' && state.activeFileId
-                                    ? { [state.activeFileId]: state.files.find((f) => f.id === state.activeFileId)?.content ?? '' }
-                                    : undefined;
+                            // Only pass a content override when we actually have the file loaded
+                            // in memory. Passing '' for an unloaded file would make the AI see
+                            // an empty document and generate diffs that wipe the real content.
+                            const activeFileSingle = state.currentView === 'file' && state.activeFileId
+                                ? state.files.find((f) => f.id === state.activeFileId)
+                                : undefined;
+                            const initialContentOverrides = activeFileSingle !== undefined
+                                ? { [state.activeFileId!]: activeFileSingle.content }
+                                : undefined;
 
                             response = await sendMessageToAI(
                                 allMessages,
@@ -1381,33 +1391,40 @@ export const useStore = create<AppState>()(
                     const diffs = Object.values(merged);
                     if (diffs.length === 0) return;
                     try {
-                        const state = get();
+                        const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
                         for (const diff of diffs) {
-                            const currentFile = state.files.find((f) => f.id === diff.fileId);
+                            const currentFile = get().files.find((f) => f.id === diff.fileId);
                             const currentContent = currentFile?.content ?? '';
-                            const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-                            if (norm(diff.originalContent) !== norm(currentContent)) {
-                                console.warn(
-                                    '[Store] Content drift when accepting diff: diff.originalContent differs from current file content. Backup saved. fileId=',
-                                    diff.fileId
-                                );
-                            }
+
+                            // Save backup before overwriting, regardless of drift
                             if (currentFile?.content !== undefined) {
                                 saveBackupBeforeApply(diff.fileId, currentFile.content);
                             }
-                        }
-                        for (const diff of diffs) {
+
+                            // Detect content drift: the document was edited after the diff was
+                            // created.  In this case we apply the diff's proposedContent which is
+                            // based on the original snapshot — user edits made after the AI
+                            // session started will be overwritten.  The backup above preserves
+                            // those edits for manual recovery.
+                            if (norm(diff.originalContent) !== norm(currentContent)) {
+                                console.warn(
+                                    '[Store] Content drift detected on accept. ' +
+                                    'The diff was generated against an older snapshot. ' +
+                                    'A backup of the current content has been saved. fileId=',
+                                    diff.fileId
+                                );
+                            }
+
+                            // applyDiffToContent simply returns diff.proposedContent (the full
+                            // post-AI document stored in the diff).
                             const newContent = applyDiffToContent(diff.originalContent, diff);
                             await get().saveFile(diff.fileId, newContent);
+                            // saveFile already updates state.files via its own set() call,
+                            // so we do not need to touch files again in the final set() below.
                         }
                         set((s) => {
                             const updates: Partial<AppState> = {
                                 pendingDiffs: {},
-                                files: s.files.map((f) => {
-                                    const d = diffs.find((d) => d.fileId === f.id);
-                                    if (!d) return f;
-                                    return { ...f, content: applyDiffToContent(d.originalContent, d) };
-                                }),
                             };
                             if (s.activeChatId && s.chats[s.activeChatId]) {
                                 updates.chats = {
@@ -1454,26 +1471,29 @@ export const useStore = create<AppState>()(
                         const currentFile = state.files.find((f) => f.id === diff.fileId);
                         const currentContent = currentFile?.content ?? '';
                         const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-                        if (norm(diff.originalContent) !== norm(currentContent)) {
-                            console.warn(
-                                '[Store] Content drift when approving diff: diff.originalContent differs from current file content. Backup saved. fileId=',
-                                diff.fileId
-                            );
-                        }
+
+                        // Save backup before overwriting
                         if (currentFile?.content !== undefined) {
                             saveBackupBeforeApply(diff.fileId, currentFile.content);
                         }
+
+                        if (norm(diff.originalContent) !== norm(currentContent)) {
+                            console.warn(
+                                '[Store] Content drift detected on approve. ' +
+                                'A backup of the current content has been saved. fileId=',
+                                diff.fileId
+                            );
+                        }
+
                         const newContent = applyDiffToContent(diff.originalContent, diff);
                         await get().saveFile(diff.fileId, newContent);
+                        // saveFile already updates state.files; only update pendingDiffs here.
                         set((s) => {
                             const nextDiffs = {
                                 ...s.pendingDiffs,
                                 [diffId]: { ...diff, status: 'approved' as const },
                             };
                             const updates: Partial<AppState> = {
-                                files: s.files.map((f) =>
-                                    f.id === diff.fileId ? { ...f, content: newContent } : f
-                                ),
                                 pendingDiffs: nextDiffs,
                             };
                             if (s.activeChatId && s.chats[s.activeChatId]) {

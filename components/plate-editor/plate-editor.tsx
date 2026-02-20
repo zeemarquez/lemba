@@ -178,13 +178,34 @@ export function PlateEditor({ content, onChange }: PlateEditorProps) {
     };
   }, [debouncedSerialize]);
 
+  // Keep a ref for editorViewMode so the flush handler always sees the latest value
+  // without needing to re-register the event listener on every mode change.
+  const editorViewModeRef = useRef(editorViewMode);
+  useEffect(() => {
+    editorViewModeRef.current = editorViewMode;
+  }, [editorViewMode]);
+
   // Flush current editor content on demand (e.g., before AI runs)
   useEffect(() => {
     const handleFlush = () => {
+      // Always flush any pending debounced serialization first — it is safe even
+      // in source mode because debouncedSerialize only fires when Plate's onChange
+      // has been invoked (i.e. only while in WYSIWYG mode).
+      debouncedSerialize.flush();
+
+      // Do NOT attempt to serialize the Plate editor state if:
+      //  1. The initial content hasn't been loaded yet (async load still in progress):
+      //     editor.children is still DEFAULT_EDITOR_VALUE and would produce empty content,
+      //     which would overwrite the real document.
+      //  2. We are in source mode: the Plate editor is hidden and does NOT reflect the
+      //     latest content — the SourceEditor owns the truth in that mode. Serializing
+      //     Plate here would overwrite the user's source edits.
+      if (!initialLoadComplete.current) return;
+      if (editorViewModeRef.current === 'source') return;
+
       const currentEditor = editorRef.current;
       if (!currentEditor) return;
       try {
-        debouncedSerialize.flush();
         const value = currentEditor.children ?? DEFAULT_EDITOR_VALUE;
         const rawMd = currentEditor.api.markdown.serialize({ value });
         const md = postprocessMathDelimiters(rawMd);
