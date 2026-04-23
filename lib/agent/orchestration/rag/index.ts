@@ -231,6 +231,15 @@ export class RAGEngine {
     }
 
     /**
+     * Returns true when embeddings are available (i.e. an OpenAI key is
+     * configured). When false, RAG indexing and semantic queries are skipped
+     * silently instead of throwing.
+     */
+    isEmbeddingAvailable(): boolean {
+        return this.embeddingService.isAvailable();
+    }
+
+    /**
      * Get all indexed document IDs
      */
     getIndexedDocuments(): string[] {

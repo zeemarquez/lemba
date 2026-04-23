@@ -52,12 +52,14 @@ export class ResearcherAgent {
         // Build system prompt
         let systemPrompt = RESEARCHER_PROMPT;
 
+        const embeddingAvailable = this.ragEngine.isEmbeddingAvailable();
+
         // Add context about available documents
         if (context.mentionedFiles && context.mentionedFiles.length > 0) {
             systemPrompt += `\n\n## Available Documents for Research\n`;
             for (const fileId of context.mentionedFiles) {
                 const isIndexed = this.ragEngine.isDocumentIndexed(fileId);
-                systemPrompt += `- ${fileId} (RAG indexed: ${isIndexed ? 'yes' : 'needs indexing'})\n`;
+                systemPrompt += `- ${fileId} (RAG indexed: ${isIndexed ? 'yes' : embeddingAvailable ? 'needs indexing' : 'unavailable — use search_in_document instead'})\n`;
             }
         }
 
@@ -67,19 +69,24 @@ export class ResearcherAgent {
             systemPrompt += `- File: ${context.activeDocument.name}\n`;
             systemPrompt += `- Size: ${context.activeDocument.content.split('\n').length} lines\n`;
 
-            // For long documents, suggest using RAG
             const lineCount = context.activeDocument.content.split('\n').length;
             if (lineCount > 100) {
-                systemPrompt += `\n**Note**: This is a long document. Use RAG (rag_query, get_rag_context) for efficient searching.\n`;
+                if (embeddingAvailable) {
+                    systemPrompt += `\n**Note**: This is a long document. Use RAG (rag_query, get_rag_context) for efficient searching.\n`;
 
-                // Auto-index if not already indexed
-                if (!this.ragEngine.isDocumentIndexed(context.activeDocument.id)) {
-                    try {
-                        await this.ragEngine.indexDocument(context.activeDocument.id);
-                        systemPrompt += `Document has been indexed for RAG search.\n`;
-                    } catch (e) {
-                        console.error('Failed to auto-index document:', e);
+                    // Auto-index if not already indexed
+                    if (!this.ragEngine.isDocumentIndexed(context.activeDocument.id)) {
+                        try {
+                            await this.ragEngine.indexDocument(context.activeDocument.id);
+                            systemPrompt += `Document has been indexed for RAG search.\n`;
+                        } catch (e) {
+                            // Non-fatal: fall back to search_in_document
+                            systemPrompt += `RAG indexing unavailable. Use search_in_document for keyword searches.\n`;
+                        }
                     }
+                } else {
+                    // No OpenAI key for embeddings — steer the model toward text search
+                    systemPrompt += `\n**Note**: This is a long document. RAG (semantic search) is unavailable because no OpenAI embedding key is configured. Use search_in_document for keyword-based search within the document.\n`;
                 }
             } else {
                 // For short documents, include content preview

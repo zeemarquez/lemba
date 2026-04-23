@@ -82,6 +82,17 @@ export class EmbeddingService {
     }
 
     /**
+     * Returns true when an OpenAI key (own or trial) is available so callers
+     * can skip embedding work rather than triggering a throw.
+     */
+    isAvailable(): boolean {
+        if (this.options.apiKey) return true;
+        if (getMainOpenAIKey()) return true;
+        if (getTrialOpenAIKey()) return true;
+        return false;
+    }
+
+    /**
      * Get API key from options or environment (with trial key fallback)
      */
     private getApiKey(): string {

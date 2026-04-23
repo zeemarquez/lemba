@@ -21,6 +21,9 @@ import {
 } from './types';
 import { ToolRegistry, defaultToolRegistry } from './tools';
 import { RAGEngine, defaultRAGEngine } from './rag';
+import { EmbeddingService } from './rag/embeddings';
+import { VectorStore, defaultVectorStore } from './rag/vector-store';
+import { defaultChunker } from './rag/chunker';
 import { PlannerAgent } from './agents/planner';
 import { ResearcherAgent } from './agents/researcher';
 import { WriterAgent } from './agents/writer';
@@ -30,7 +33,7 @@ import { LinterAgent } from './agents/linter';
 import { SummarizerAgent } from './agents/summarizer';
 import { mergeDiffsForFile, withUpdatedProposedContent } from '../diff-utils';
 import { enforceHouseRules } from '../math-format';
-import { route, RouterDecision, decisionLabel } from './router';
+import { route, RouterDecision, decisionLabel, TargetLength } from './router';
 
 // ==================== Types ====================
 
@@ -81,12 +84,33 @@ export class OrchestratorAgent {
             ragEngine?: RAGEngine;
             provider?: LLMProvider;
             apiKey?: string;
+            /** Explicit OpenAI key for embeddings. When omitted, falls back to
+             *  the LLM apiKey (if provider === 'openai') then env vars. */
+            embeddingApiKey?: string;
         } = {}
     ) {
         this.toolRegistry = options.toolRegistry || defaultToolRegistry;
-        this.ragEngine = options.ragEngine || defaultRAGEngine;
         this.provider = options.provider ?? 'openai';
         this.apiKey = getApiKey(this.provider, options.apiKey);
+
+        // Build the RAG engine with the correct embedding key so that the
+        // user's settings-stored API key is actually used for embeddings.
+        // Priority: explicit embeddingApiKey > current apiKey (when OpenAI) > env vars.
+        if (options.ragEngine) {
+            this.ragEngine = options.ragEngine;
+        } else {
+            const embeddingKey =
+                options.embeddingApiKey?.trim() ||
+                (this.provider === 'openai' ? this.apiKey : undefined);
+            const embeddingService = new EmbeddingService(
+                embeddingKey ? { apiKey: embeddingKey } : {}
+            );
+            this.ragEngine = new RAGEngine({
+                chunker: defaultChunker,
+                embeddingService,
+                vectorStore: defaultVectorStore,
+            });
+        }
 
         // Initialize specialist agents
         this.plannerAgent = new PlannerAgent({
@@ -228,6 +252,7 @@ export class OrchestratorAgent {
                         options,
                         3,
                         routerDecision?.writerVariant,
+                        routerDecision?.targetLength,
                     );
 
                     step.status = result.status;
@@ -407,10 +432,16 @@ export class OrchestratorAgent {
         decision: RouterDecision,
     ): string {
         const scopeHint = `Scope: ${decision.scope}. Router intent: ${decision.intent}.`;
-        const base = `User request: "${userMessage}"\n${scopeHint}`;
+        const lengthHint = decision.targetLength
+            ? `\nLength target: ${decision.targetLength.label} (~${decision.targetLength.targetWords} words, minimum ${decision.targetLength.minWords} words${decision.targetLength.minSections ? `, at least ${decision.targetLength.minSections} sections` : ''}).`
+            : '';
+        const base = `User request: "${userMessage}"\n${scopeHint}${lengthHint}`;
 
         switch (agentType) {
             case 'planner':
+                if (decision.targetLength) {
+                    return `${base}\n\nProduce a detailed outline with at least ${decision.targetLength.minSections ?? 5} sections. Each section should include a sentence describing what content it should contain. The outline must guide the writer to produce ${decision.targetLength.targetWords}+ words of substantive content.`;
+                }
                 return `${base}\n\nProduce a short outline for this request. ${decision.scope === 'large' ? '' : 'Keep the plan very short (3 items or fewer).'}`;
             case 'researcher':
                 if (decision.intent === 'research_question') {
@@ -421,12 +452,12 @@ export class OrchestratorAgent {
                 const variantNote = decision.writerVariant === 'quick'
                     ? 'Make the smallest possible edit that satisfies the request. One or two tool calls, then summarize.'
                     : decision.writerVariant === 'create'
-                        ? 'Follow the plan sequentially. Synthesize research into original prose.'
-                        : 'Batch related edits into one response. Do not over-expand the change.';
+                        ? `Follow the plan sequentially. Synthesize research into original prose.${decision.targetLength ? ` You MUST write at least ${decision.targetLength.targetWords} words. Use multiple propose_insert calls, one per section. Do NOT stop until the target word count is reached.` : ''}`
+                        : `Batch related edits into one response. Do not over-expand the change.${decision.targetLength ? ` The user expects ${decision.targetLength.label} content — aim for ~${decision.targetLength.targetWords} words.` : ''}`;
                 return `${base}\n\n${variantNote}`;
             }
             case 'structure_review':
-                return `${base}\n\nFix structural issues in a single run: call get_document_structure, then issue all remove_section / update_section / move_section calls in one response. Use occurrenceIndex for duplicate headings.`;
+                return `${base}\n\nFix structural issues in a single run: call get_document_structure, then issue all remove_section / update_section / move_section calls in one response. Use occurrenceIndex for duplicate headings. Also check for CONTENT-LEVEL duplicates (paragraphs or sections that say the same thing in different words) and remove the less detailed one.`;
             case 'linter':
                 return `${base}\n\nRun lint_markdown and fix only the issues it reports. Do not rewrite prose.`;
             default:
@@ -469,6 +500,7 @@ export class OrchestratorAgent {
         onDiff: (diff: DocumentDiff) => void,
         options: OrchestrationOptions,
         writerVariant?: WriterVariant,
+        targetLength?: TargetLength,
     ): Promise<AgentResult> {
         const startedAt = Date.now();
 
@@ -495,6 +527,7 @@ export class OrchestratorAgent {
                 const writerResult = await this.writerAgent.run(instructions, context, {
                     ...agentOptions,
                     variant: writerVariant,
+                    targetLength,
                 });
                 output = writerResult.output;
                 diffs = writerResult.diffs;
@@ -538,6 +571,7 @@ export class OrchestratorAgent {
         options: OrchestrationOptions,
         maxRetries: number = 3,
         writerVariant?: WriterVariant,
+        targetLength?: TargetLength,
     ): Promise<AgentResult> {
         let lastError: Error | null = null;
 
@@ -549,7 +583,7 @@ export class OrchestratorAgent {
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
-                return await this.executeAgent(agentType, instructions, context, onDiff, options, writerVariant);
+                return await this.executeAgent(agentType, instructions, context, onDiff, options, writerVariant, targetLength);
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
                 const errorMsg = lastError.message;
@@ -735,6 +769,9 @@ export async function runOrchestration(
     const orchestrator = new OrchestratorAgent({
         provider,
         apiKey,
+        // Forward the resolved API key so EmbeddingService can use it
+        // directly rather than falling back to env-var lookups.
+        embeddingApiKey: provider === 'openai' ? apiKey : options.apiKey,
     });
 
     return orchestrator.run(lastUserMessage.fullContent || lastUserMessage.content, context, options);

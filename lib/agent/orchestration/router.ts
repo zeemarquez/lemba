@@ -54,6 +54,24 @@ export interface RouterDecision {
     confidence: number;
     /** Marks whether the keyword fallback was used instead of the LLM. */
     source: 'llm' | 'fallback';
+    /**
+     * Target output length for writer agents. Populated when the user
+     * explicitly asked for an "extensive" / "comprehensive" / "detailed"
+     * document, or for a long new section. Writers use this as a concrete
+     * target, not a ceiling.
+     */
+    targetLength?: TargetLength;
+}
+
+export interface TargetLength {
+    /** Lower bound - writers should not produce content shorter than this. */
+    minWords: number;
+    /** Aim - writer prompts target this word count. */
+    targetWords: number;
+    /** Optional structural guidance: aim for at least this many top-level sections. */
+    minSections?: number;
+    /** Human-readable descriptor for logs and prompts ("extensive", etc.). */
+    label: string;
 }
 
 export interface RouteOptions {
@@ -106,9 +124,12 @@ function pipelineFor(intent: RouterIntent, scope: EditScope, needsResearch: bool
             if (needsResearch) agents.push('researcher');
             agents.push('writer');
             if (scope === 'large') agents.push('linter');
+            // Large expansions get the 'create' variant with higher iteration
+            // caps and stronger length-target enforcement.
+            const variant = scope === 'large' ? 'create' : 'edit';
             return {
                 agents,
-                writerVariant: 'edit',
+                writerVariant: variant,
                 useSummarizer: agents.length > 1,
             };
         }
@@ -139,6 +160,58 @@ interface KeywordGuess {
     needsResearch: boolean;
     needsPlan: boolean;
     confidence: number;
+    targetLength?: TargetLength;
+}
+
+/**
+ * Detect explicit length signals in the user's message. When the user
+ * asks for an "extensive", "comprehensive", "in-depth", "detailed",
+ * "thorough", "long", or "complete" document, we compute a concrete word
+ * count target that the writer will use as a floor (not a ceiling).
+ *
+ * We also handle explicit numeric requests such as "around 2000 words" or
+ * "at least 10 pages" so writers don't undershoot on specific asks.
+ */
+function detectTargetLength(message: string): TargetLength | undefined {
+    const lower = message.toLowerCase();
+
+    const wordMatch = lower.match(/(\d{3,5})\s*(?:\+\s*)?words?/);
+    if (wordMatch) {
+        const n = parseInt(wordMatch[1], 10);
+        if (!Number.isNaN(n)) {
+            return {
+                minWords: Math.round(n * 0.85),
+                targetWords: n,
+                minSections: Math.max(3, Math.round(n / 400)),
+                label: `${n} words`,
+            };
+        }
+    }
+
+    const pageMatch = lower.match(/(\d{1,3})\s*(?:\+\s*)?pages?/);
+    if (pageMatch) {
+        const pages = parseInt(pageMatch[1], 10);
+        if (!Number.isNaN(pages)) {
+            const target = pages * 500;
+            return {
+                minWords: Math.round(target * 0.85),
+                targetWords: target,
+                minSections: Math.max(3, pages),
+                label: `${pages} pages`,
+            };
+        }
+    }
+
+    if (/(exhaustive|encyclopedic|encyclopaedic|book[- ]length|monograph)/.test(lower)) {
+        return { minWords: 3500, targetWords: 5000, minSections: 10, label: 'exhaustive' };
+    }
+    if (/(extensive|comprehensive|in[- ]depth|deep[- ]dive|thorough|complete guide|full(?:-|\s)length)/.test(lower)) {
+        return { minWords: 1800, targetWords: 2500, minSections: 6, label: 'extensive' };
+    }
+    if (/(detailed|long|lengthy|expanded|elaborate|rich)/.test(lower)) {
+        return { minWords: 900, targetWords: 1400, minSections: 4, label: 'detailed' };
+    }
+    return undefined;
 }
 
 /**
@@ -150,9 +223,10 @@ function keywordGuess(userMessage: string, document?: RouteOptions['document']):
     const msg = userMessage.trim();
     const lower = msg.toLowerCase();
     const wordCount = msg.split(/\s+/).filter(Boolean).length;
+    const targetLength = detectTargetLength(msg);
 
     const isQuestion = /\?\s*$/.test(msg) || /^(what|how|why|when|where|which|who)\b/i.test(msg);
-    if (isQuestion && !/(fix|change|edit|rewrite|update|move|remove|add)/i.test(msg)) {
+    if (isQuestion && !/(fix|change|edit|rewrite|update|move|remove|add|dedupe|deduplicate|duplicate)/i.test(msg)) {
         return {
             intent: 'research_question',
             scope: 'tiny',
@@ -160,6 +234,14 @@ function keywordGuess(userMessage: string, document?: RouteOptions['document']):
             needsPlan: false,
             confidence: 0.7,
         };
+    }
+
+    // Dedupe / duplicate-content cleanup is a restructure intent, even when
+    // the user phrases it as "remove duplicates" without the word section.
+    // We deliberately check this BEFORE the generic targeted/edit bucket.
+    const dedupe = /(dedup(licate|e)?|duplicate(d)?\b|duplicates\b|redundant|repeated (content|information|text))/i;
+    if (dedupe.test(lower)) {
+        return { intent: 'restructure', scope: 'medium', needsResearch: false, needsPlan: false, confidence: 0.75 };
     }
 
     const restructure = /(restructure|reorganize|reorder|duplicate section|section order|hierarchy|move section|consolidate sections|dedupe headings)/i;
@@ -172,9 +254,18 @@ function keywordGuess(userMessage: string, document?: RouteOptions['document']):
         return { intent: 'format_fix', scope: 'small', needsResearch: false, needsPlan: false, confidence: 0.7 };
     }
 
-    const create = /(create|draft|write) (a|an|the)?\s*(new\s+)?(document|article|guide|tutorial|chapter|essay|report|page)/i;
+    const create = /(create|draft|write|generate|produce|compose) (a|an|the)?\s*(new\s+|full\s+|complete\s+|extensive\s+|comprehensive\s+|detailed\s+|in[- ]depth\s+|long\s+|thorough\s+)?(document|article|guide|tutorial|chapter|essay|report|page|paper|overview|primer|introduction to|explanation of)/i;
     if (create.test(lower)) {
-        return { intent: 'create_document', scope: 'large', needsResearch: true, needsPlan: true, confidence: 0.65 };
+        // Explicit length signal always wins - large scope, high confidence.
+        const scope: EditScope = 'large';
+        return {
+            intent: 'create_document',
+            scope,
+            needsResearch: true,
+            needsPlan: true,
+            confidence: 0.75,
+            targetLength,
+        };
     }
 
     // Trivial: "fix typo", "rename X to Y", "change 'a' to 'b'", short request, no new-content verbs.
@@ -183,10 +274,17 @@ function keywordGuess(userMessage: string, document?: RouteOptions['document']):
         return { intent: 'trivial_edit', scope: 'tiny', needsResearch: false, needsPlan: false, confidence: 0.7 };
     }
 
-    const expand = /(expand|elaborate|add (a )?(section|paragraph|subsection|example)|extend|include more|write more)/i;
+    const expand = /(expand|elaborate|add (a )?(section|paragraph|subsection|example)|extend|include more|write more|make .* (longer|more detailed|more extensive|more comprehensive))/i;
     if (expand.test(lower)) {
-        const scope: EditScope = wordCount > 30 ? 'large' : 'medium';
-        return { intent: 'expand_content', scope, needsResearch: scope === 'large', needsPlan: scope === 'large', confidence: 0.6 };
+        const scope: EditScope = targetLength || wordCount > 30 ? 'large' : 'medium';
+        return {
+            intent: 'expand_content',
+            scope,
+            needsResearch: scope === 'large',
+            needsPlan: scope === 'large',
+            confidence: 0.6,
+            targetLength,
+        };
     }
 
     const targeted = /(edit|modify|rewrite|update|change|improve|revise|polish|tighten|shorten|simplify)/i;
@@ -223,14 +321,17 @@ Allowed values for "intent":
 - "expand_content":   add new paragraphs/sections/examples to an existing doc.
 - "create_document":  write a brand new document or a whole new long section from scratch.
 - "research_question":user wants information, not edits. No changes to the document.
-- "restructure":      reorder, dedupe, or re-hierarchize headings. No prose rewrites.
+- "restructure":      reorder sections, detect/remove duplicate content, consolidate overlapping sections, fix hierarchy. Use this for ANY deduplication request (e.g. "remove duplicates", "dedupe", "there is duplicate information").
 - "format_fix":       formatting/style/lint cleanup only.
 
 Rules:
 - The JSON key MUST be "intent" (NOT "pipeline", NOT "type", NOT "category").
 - Prefer the narrowest intent that can satisfy the request (trivial > targeted > expand > create).
+- Requests to "remove duplicates", "find duplicate content", "deduplicate", or "consolidate repeated information" are ALWAYS "restructure", never "targeted_edit".
+- When the user explicitly asks for an "extensive" / "comprehensive" / "in-depth" / "detailed" / "thorough" document, or requests a brand new document, you MUST set intent to "create_document" (or "expand_content" when adding to an existing doc) AND scope to "large".
 - "trivial_edit" and "format_fix" NEVER need research or plan.
 - "restructure" NEVER touches prose (no writer agent downstream).
+- Scope hints: tiny (single-line), small (one paragraph), medium (one section, <= 300 words), large (multi-section, > 500 words, or any "extensive"/"comprehensive" request).
 - Return ONLY valid JSON. No markdown, no comments, no prose outside the object.`;
 
 interface LLMRouterOutput {
@@ -357,13 +458,24 @@ export async function route(userMessage: string, options: RouteOptions): Promise
             return buildDecision(fallback, 'fallback');
         }
 
+        // Length detection is deterministic and cheap; always run it so the
+        // writer gets a concrete target even if the LLM didn't think about it.
+        const targetLength = detectTargetLength(userMessage) ?? fallback.targetLength;
+
+        // If user explicitly asked for an extensive/comprehensive doc, force
+        // large scope even when the LLM picked something smaller.
+        const effectiveScope: EditScope = targetLength && parsed.scope !== 'large'
+            ? 'large'
+            : parsed.scope;
+
         return buildDecision(
             {
                 intent: parsed.intent,
-                scope: parsed.scope,
-                needsResearch: parsed.needsResearch,
-                needsPlan: parsed.needsPlan,
+                scope: effectiveScope,
+                needsResearch: parsed.needsResearch || Boolean(targetLength && parsed.intent === 'create_document'),
+                needsPlan: parsed.needsPlan || Boolean(targetLength && (parsed.intent === 'create_document' || parsed.intent === 'expand_content')),
                 confidence: 0.9,
+                targetLength,
             },
             'llm',
             parsed.rationale,
@@ -387,6 +499,7 @@ function buildDecision(guess: KeywordGuess, source: 'llm' | 'fallback', rational
         rationale: rationale ?? defaultRationale(guess.intent, guess.scope),
         confidence: guess.confidence,
         source,
+        targetLength: guess.targetLength,
     };
 }
 

@@ -20,6 +20,7 @@ import {
     proposeAddSection,
     proposeRemoveSection,
     proposeMoveSection,
+    findDuplicateContent,
     InsertPosition
 } from '../../document-ops';
 import { browserStorage } from '../../../browser-storage';
@@ -541,6 +542,26 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
         }
     },
 
+    // Duplicate detection
+    find_duplicate_content: {
+        name: 'find_duplicate_content',
+        description: 'Detect near-duplicate sections in a document by comparing heading text and body content (Jaccard similarity). Returns pairs of sections that are duplicates or near-duplicates, with similarity scores. Use this BEFORE removing duplicates to know which sections overlap.',
+        parameters: {
+            type: 'object',
+            properties: {
+                fileId: {
+                    type: 'string',
+                    description: 'The file path/ID of the document'
+                },
+                threshold: {
+                    type: 'number',
+                    description: 'Similarity threshold (0-1). Default 0.35. Lower values find more distant duplicates.'
+                }
+            },
+            required: ['fileId']
+        }
+    },
+
     // Lint operations
     lint_markdown: {
         name: 'lint_markdown',
@@ -627,6 +648,23 @@ export async function executeTool(
                     contentOverride
                 );
                 return { success: true, data: headings };
+            }
+
+            case 'find_duplicate_content': {
+                const fileId = await resolveFile(args.fileId as string);
+                const contentOverride = options.contentOverrides?.[fileId];
+                const threshold = typeof args.threshold === 'number' ? args.threshold : 0.35;
+                const duplicates = await findDuplicateContent(fileId, contentOverride, threshold);
+                return {
+                    success: true,
+                    data: {
+                        duplicates,
+                        count: duplicates.length,
+                        message: duplicates.length === 0
+                            ? 'No duplicate or near-duplicate sections found.'
+                            : `Found ${duplicates.length} duplicate pair(s). Review the pairs and remove_section or update_section to consolidate them.`,
+                    },
+                };
             }
 
             case 'list_files': {
@@ -1139,7 +1177,7 @@ export class ToolRegistry {
             planner: ['get_document_metadata', 'find_headings', 'read_document_section', 'list_files'],
             researcher: ['rag_query', 'rag_index', 'get_rag_context', 'web_search', 'search_in_document', 'search_all_documents', 'read_document', 'list_files'],
             writer: ['propose_edit', 'propose_insert', 'propose_delete', 'propose_replace_section', 'update_section', 'add_section', 'remove_section', 'move_section', 'read_document', 'read_document_section', 'find_headings'],
-            structure_review: ['get_document_structure', 'read_document', 'read_document_section', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
+            structure_review: ['get_document_structure', 'find_duplicate_content', 'read_document', 'read_document_section', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
             linter: ['lint_markdown', 'propose_edit', 'update_section', 'add_section', 'remove_section', 'move_section', 'read_document', 'find_headings']
         };
 

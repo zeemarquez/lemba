@@ -23,6 +23,10 @@ export interface SectionNode {
     lineNumber: number;
     endLine: number;
     children: SectionNode[];
+    /** First ~120 characters of the section body (below the heading). */
+    contentPreview?: string;
+    /** Approximate word count of the section body (heading excluded). */
+    wordCount?: number;
 }
 
 // ==================== Read Operations ====================
@@ -504,12 +508,21 @@ export async function getDocumentStructure(fileId: string, contentOverride?: str
             endLine = headings[i + 1].lineNumber - 1;
         }
 
+        // Build a content preview from the body lines (skip the heading line itself).
+        const bodyStart = h.lineNumber; // lineNumber is 1-indexed for the heading; body starts on the next line.
+        const bodyLines = lines.slice(bodyStart, endLine); // endLine is already exclusive (next heading's lineNumber - 1)
+        const bodyText = bodyLines.join('\n').trim();
+        const contentPreview = bodyText.length > 120 ? bodyText.slice(0, 120) + '…' : bodyText;
+        const wordCount = bodyText.split(/\s+/).filter(Boolean).length;
+
         const node: SectionNode = {
             text: h.text,
             level: h.level,
             lineNumber: h.lineNumber,
             endLine,
-            children: []
+            children: [],
+            contentPreview: contentPreview || undefined,
+            wordCount,
         };
 
         while (stack.length > 0 && stack[stack.length - 1].level >= node.level) {
@@ -526,6 +539,100 @@ export async function getDocumentStructure(fileId: string, contentOverride?: str
     }
 
     return root;
+}
+
+// ==================== Duplicate Detection ====================
+
+export interface DuplicatePair {
+    sectionA: { heading: string; lineNumber: number; endLine: number };
+    sectionB: { heading: string; lineNumber: number; endLine: number };
+    /** Jaccard similarity [0, 1]. */
+    similarity: number;
+    /** One of: heading (same heading text), content (similar body text), both. */
+    kind: 'heading' | 'content' | 'both';
+}
+
+/**
+ * Find near-duplicate sections in a document. This uses a shingle-based
+ * Jaccard similarity to compare every pair of sections. Sections whose body
+ * text is very short (< 10 words) are excluded from content matching since
+ * they tend to produce false positives.
+ */
+export async function findDuplicateContent(
+    fileId: string,
+    contentOverride?: string,
+    threshold = 0.35,
+): Promise<DuplicatePair[]> {
+    const content = await readDocument(fileId, contentOverride);
+    const headings = findHeadingsInContent(content);
+    const lines = splitLines(content);
+    if (headings.length < 2) return [];
+
+    interface FlatSection {
+        heading: string;
+        lineNumber: number;
+        endLine: number;
+        body: string;
+        shingles: Set<string>;
+    }
+
+    const sections: FlatSection[] = [];
+    for (let i = 0; i < headings.length; i++) {
+        const h = headings[i];
+        const endLine = i < headings.length - 1 ? headings[i + 1].lineNumber - 1 : lines.length;
+        const body = lines.slice(h.lineNumber, endLine).join('\n').trim();
+        sections.push({
+            heading: h.text,
+            lineNumber: h.lineNumber,
+            endLine,
+            body,
+            shingles: buildShingles(body, 3),
+        });
+    }
+
+    const pairs: DuplicatePair[] = [];
+    for (let i = 0; i < sections.length; i++) {
+        for (let j = i + 1; j < sections.length; j++) {
+            const a = sections[i];
+            const b = sections[j];
+            const sameHeading = a.heading.toLowerCase().replace(/\s+/g, ' ').trim()
+                === b.heading.toLowerCase().replace(/\s+/g, ' ').trim();
+            const sim = (a.shingles.size >= 3 && b.shingles.size >= 3)
+                ? jaccardSimilarity(a.shingles, b.shingles)
+                : 0;
+            let kind: DuplicatePair['kind'] | null = null;
+            if (sameHeading && sim >= threshold) kind = 'both';
+            else if (sameHeading) kind = 'heading';
+            else if (sim >= threshold) kind = 'content';
+            if (kind) {
+                pairs.push({
+                    sectionA: { heading: a.heading, lineNumber: a.lineNumber, endLine: a.endLine },
+                    sectionB: { heading: b.heading, lineNumber: b.lineNumber, endLine: b.endLine },
+                    similarity: Math.round(sim * 100) / 100,
+                    kind,
+                });
+            }
+        }
+    }
+    return pairs;
+}
+
+function buildShingles(text: string, n: number): Set<string> {
+    const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
+    const set = new Set<string>();
+    for (let i = 0; i <= words.length - n; i++) {
+        set.add(words.slice(i, i + n).join(' '));
+    }
+    return set;
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+    let intersection = 0;
+    for (const s of a) {
+        if (b.has(s)) intersection++;
+    }
+    const union = a.size + b.size - intersection;
+    return union === 0 ? 0 : intersection / union;
 }
 
 /**

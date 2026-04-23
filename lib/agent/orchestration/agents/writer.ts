@@ -19,6 +19,7 @@ import { mergeDiffsForFile } from '../../diff-utils';
 import { AgentContext, DEFAULT_AGENT_CONFIGS } from '../types';
 import { ToolRegistry } from '../tools';
 import { WRITER_QUICK_PROMPT, WRITER_EDIT_PROMPT, WRITER_CREATE_PROMPT } from '../prompts';
+import type { TargetLength } from '../router';
 
 export type WriterVariant = 'quick' | 'edit' | 'create';
 
@@ -29,6 +30,8 @@ interface WriterOptions {
     onDiffCreated?: (diff: DocumentDiff) => void;
     /** Which writer profile to run. Defaults to 'edit'. */
     variant?: WriterVariant;
+    /** Concrete length target from the router. */
+    targetLength?: TargetLength;
 }
 
 interface WriterResult {
@@ -60,19 +63,18 @@ const VARIANTS: Record<WriterVariant, VariantConfig> = {
         includeFullDoc: false,
         fullDocMaxLines: 0,
         includeAuxContext: false,
-        // Quick edits never restructure sections; keep tools minimal.
         allowedTools: ['propose_edit', 'propose_insert', 'propose_replace_section', 'read_document_section', 'find_headings'],
     },
     edit: {
         prompt: WRITER_EDIT_PROMPT,
-        maxIterations: 3,
+        maxIterations: 4,
         includeFullDoc: true,
         fullDocMaxLines: 200,
         includeAuxContext: true,
     },
     create: {
         prompt: WRITER_CREATE_PROMPT,
-        maxIterations: 5,
+        maxIterations: 8,
         includeFullDoc: true,
         fullDocMaxLines: 400,
         includeAuxContext: true,
@@ -91,6 +93,14 @@ export class WriterAgent {
         this.apiKey = options.apiKey!;
     }
 
+    /** Rough word count from the in-memory content overrides for the active file. */
+    private estimateProposedWordCount(contentOverrides: Record<string, string>, fileId?: string): number {
+        if (!fileId) return 0;
+        const content = contentOverrides[fileId];
+        if (!content) return 0;
+        return content.split(/\s+/).filter(Boolean).length;
+    }
+
     async run(
         instructions: string,
         context: AgentContext,
@@ -98,15 +108,37 @@ export class WriterAgent {
     ): Promise<WriterResult> {
         const variant: WriterVariant = options.variant ?? 'edit';
         const variantConfig = VARIANTS[variant];
+        const targetLength = options.targetLength;
 
         const model = options.model || this.config.model;
         const temperature = options.temperature ?? variantConfig.temperature ?? this.config.temperature;
-        const maxTokens = options.maxTokens || this.config.maxTokens;
+
+        // When a concrete word target is specified, use higher maxTokens so
+        // the model doesn't hit an artificial ceiling mid-sentence. Rough
+        // conversion: 1 word ≈ 1.5 tokens. We double the estimate for safety.
+        const baseMaxTokens = options.maxTokens || this.config.maxTokens;
+        const maxTokens = targetLength
+            ? Math.max(baseMaxTokens, Math.min(16384, Math.round(targetLength.targetWords * 3)))
+            : baseMaxTokens;
 
         const collectedDiffs: DocumentDiff[] = [];
         const contentOverrides: Record<string, string> = { ...(context.contentOverrides ?? {}) };
 
         let systemPrompt = variantConfig.prompt;
+
+        // Inject a concrete length-target block when the router detected one.
+        if (targetLength) {
+            systemPrompt += `\n\n## Length Target (IMPORTANT)\n`;
+            systemPrompt += `The user asked for ${targetLength.label} content.\n`;
+            systemPrompt += `- **Minimum words:** ${targetLength.minWords}\n`;
+            systemPrompt += `- **Target words:** ${targetLength.targetWords}\n`;
+            if (targetLength.minSections) {
+                systemPrompt += `- **Minimum top-level sections:** ${targetLength.minSections}\n`;
+            }
+            systemPrompt += `\nYou MUST produce content that meets or exceeds these targets. Do NOT stop short.\n`;
+            systemPrompt += `If you cannot fit all content into a single tool call, make multiple propose_insert calls to build the document section by section.\n`;
+            systemPrompt += `After writing, count your words mentally and add another section if you are below the target.\n`;
+        }
 
         if (context.activeDocument) {
             const lineCount = context.activeDocument.content.split('\n').length;
@@ -185,7 +217,10 @@ export class WriterAgent {
 
         const defaultFileId = context.activeDocument?.id;
         let currentMessages: ChatCompletionMessage[] = [...messages];
-        let maxIterations = variantConfig.maxIterations;
+        // When we have a length target, give the writer extra iterations.
+        let maxIterations = targetLength
+            ? Math.max(variantConfig.maxIterations, 10)
+            : variantConfig.maxIterations;
 
         while (maxIterations > 0) {
             maxIterations--;
@@ -238,6 +273,15 @@ export class WriterAgent {
                     let toolContent = JSON.stringify(execResult.data ?? execResult.error);
                     if (isDuplicate) {
                         toolContent += `\n\nThis change was already recorded. Do not repeat. Reply with a brief summary now; do not call further tools.`;
+                    } else if (targetLength && collectedDiffs.length > 0) {
+                        // For length-targeted writes, compute approximate word count
+                        // of the proposed content so the model knows whether to keep going.
+                        const totalWords = this.estimateProposedWordCount(contentOverrides, context.activeDocument?.id);
+                        if (totalWords < targetLength.minWords) {
+                            toolContent += `\n\n[Word count check: ~${totalWords} words so far, target minimum is ${targetLength.minWords}. You MUST continue writing and add more sections/content until reaching at least ${targetLength.targetWords} words. Call propose_insert to add the next section.]`;
+                        } else {
+                            toolContent += `\n\n[Word count check: ~${totalWords} words — target of ${targetLength.targetWords} reached. You may finalize with a brief summary.]`;
+                        }
                     } else if (collectedDiffs.length > 0) {
                         toolContent += `\n\nYou have recorded ${collectedDiffs.length} edit(s). If the request is satisfied, reply with a brief summary and do not call further tools in this response.`;
                     }
@@ -249,6 +293,20 @@ export class WriterAgent {
                 }
                 continue;
             }
+
+            // If the model stopped calling tools but we haven't met the
+            // target length, nudge it to keep going.
+            if (targetLength && collectedDiffs.length > 0 && maxIterations > 0) {
+                const totalWords = this.estimateProposedWordCount(contentOverrides, context.activeDocument?.id);
+                if (totalWords < targetLength.minWords) {
+                    currentMessages.push({
+                        role: 'user',
+                        content: `[System: The current content is ~${totalWords} words, which is below the ${targetLength.targetWords}-word target. Continue writing by calling propose_insert to add more sections until the target is reached. Do not apologize or summarize yet — just add content.]`,
+                    });
+                    continue;
+                }
+            }
+
             return {
                 output: result.content || '',
                 diffs: collectedDiffs,

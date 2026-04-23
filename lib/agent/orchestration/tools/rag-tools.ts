@@ -47,6 +47,16 @@ export async function ragQuery(
     topK: number = 5,
     ragEngine: RAGEngine = defaultRAGEngine
 ): Promise<RAGQueryResponse> {
+    if (!ragEngine.isEmbeddingAvailable()) {
+        return {
+            query,
+            results: [],
+            totalResults: 0,
+            // Surface a clear hint so the agent falls back to search_in_document
+            error: 'RAG unavailable: no OpenAI embedding key configured. Use search_in_document for keyword search instead.',
+        } as RAGQueryResponse & { error: string };
+    }
+
     // Parse fileIds if provided as comma-separated string
     const fileIdArray = fileIds 
         ? fileIds.split(',').map(id => id.trim()).filter(Boolean)
@@ -80,6 +90,9 @@ export async function ragIndex(
     fileId: string,
     ragEngine: RAGEngine = defaultRAGEngine
 ): Promise<RAGIndexResponse> {
+    if (!ragEngine.isEmbeddingAvailable()) {
+        return { fileId, chunksCreated: 0, tokenCount: 0, success: false };
+    }
     try {
         const result = await ragEngine.indexDocument(fileId);
         return {
@@ -89,13 +102,7 @@ export async function ragIndex(
             success: true
         };
     } catch (error) {
-        console.error(`Failed to index document ${fileId}:`, error);
-        return {
-            fileId,
-            chunksCreated: 0,
-            tokenCount: 0,
-            success: false
-        };
+        return { fileId, chunksCreated: 0, tokenCount: 0, success: false };
     }
 }
 
@@ -108,6 +115,16 @@ export async function getRAGContext(
     maxChunks: number = 3,
     ragEngine: RAGEngine = defaultRAGEngine
 ): Promise<RAGContextResponse> {
+    if (!ragEngine.isEmbeddingAvailable()) {
+        return {
+            query,
+            fileId,
+            context: 'RAG unavailable: no OpenAI embedding key configured. Use search_in_document for keyword search instead.',
+            chunks: [],
+            totalTokens: 0,
+        };
+    }
+
     const result = await ragEngine.getRelevantContext(query, fileId, maxChunks);
 
     return {

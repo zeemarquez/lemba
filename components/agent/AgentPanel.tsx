@@ -227,16 +227,6 @@ export function AgentPanel() {
                             )}
                         </div>
                     )}
-                    {/* After completion, keep the route pill visible so the user knows which pipeline ran */}
-                    {!agentLoading && agentUseOrchestration && agentLastRouteLabel && agentMessages.length > 0 && (
-                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                            <span>Last run:</span>
-                            <span className="font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-                                {agentLastRouteLabel}
-                            </span>
-                        </div>
-                    )}
-
                     {/* Error message */}
                     {agentError && (
                         <div className="p-2 rounded-md bg-destructive/10 text-destructive text-xs">

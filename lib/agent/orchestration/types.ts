@@ -186,7 +186,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentType, Omit<AgentConfig, 'systemP
     planner: {
         type: 'planner',
         model: 'gpt-4o',
-        maxTokens: 2048,
+        maxTokens: 4096,
         temperature: 0.5,
         tools: ['get_document_metadata', 'find_headings', 'read_document_section'],
     },
@@ -200,16 +200,16 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentType, Omit<AgentConfig, 'systemP
     writer: {
         type: 'writer',
         model: 'gpt-4o',
-        maxTokens: 8192,
+        maxTokens: 12288,
         temperature: 0.7,
         tools: ['propose_edit', 'propose_insert', 'propose_delete', 'propose_replace_section', 'read_document', 'read_document_section'],
     },
     structure_review: {
         type: 'structure_review',
         model: 'gpt-4o',
-        maxTokens: 4096,
+        maxTokens: 8192,
         temperature: 0.2,
-        tools: ['get_document_structure', 'read_document', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
+        tools: ['get_document_structure', 'find_duplicate_content', 'read_document', 'find_headings', 'update_section', 'add_section', 'remove_section', 'move_section', 'propose_edit', 'propose_replace_section'],
     },
     linter: {
         type: 'linter',

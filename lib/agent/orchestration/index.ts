@@ -33,4 +33,4 @@ export { getAgentPrompt, ORCHESTRATOR_PROMPT, PLANNER_PROMPT, RESEARCHER_PROMPT,
 
 // Export router
 export { route, decisionLabel } from './router';
-export type { RouterIntent, RouterDecision, EditScope, RouteOptions } from './router';
+export type { RouterIntent, RouterDecision, EditScope, RouteOptions, TargetLength } from './router';
