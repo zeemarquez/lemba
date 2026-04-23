@@ -28,6 +28,22 @@ import { requireFilePath, requireFilePathWithDefault, resolveFilePath } from '..
 import { RAGEngine, defaultRAGEngine } from '../rag';
 import { webSearch, WebSearchResult } from './web-search';
 import { ragQuery, ragIndex, getRAGContext } from './rag-tools';
+import { enforceHouseRules } from '../../math-format';
+import { withUpdatedProposedContent } from '../../diff-utils';
+
+/**
+ * Run the deterministic house-rules normalizer on a freshly created diff.
+ * Every propose_* / section tool routes through this so the LLM cannot
+ * produce malformed block equations, numbered headings, or blocks without
+ * a blank line before them - regardless of which pipeline (Agent / Quick
+ * edit / Ask) is driving the request.
+ */
+function normalizeDiff(diff: DocumentDiff | null | undefined): DocumentDiff | null {
+    if (!diff) return null;
+    const normalized = enforceHouseRules(diff.proposedContent);
+    if (normalized === diff.proposedContent) return diff;
+    return withUpdatedProposedContent(diff, normalized);
+}
 
 // ==================== Tool Types ====================
 
@@ -684,13 +700,14 @@ export async function executeTool(
             case 'propose_edit': {
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
-                const diff = await proposeEdit(
+                const raw = await proposeEdit(
                     fileId,
                     args.oldText as string,
                     args.newText as string,
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Text not found in document' };
                 }
@@ -720,13 +737,14 @@ export async function executeTool(
                         return { success: false, error: 'Invalid position type' };
                 }
 
-                const diff = await proposeInsert(
+                const raw = await proposeInsert(
                     fileId,
                     insertPos,
                     args.content as string,
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Could not insert at specified position' };
                 }
@@ -736,13 +754,14 @@ export async function executeTool(
             case 'propose_delete': {
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
-                const diff = await proposeDelete(
+                const raw = await proposeDelete(
                     fileId,
                     args.startLine as number,
                     args.endLine as number,
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Invalid line range' };
                 }
@@ -752,13 +771,14 @@ export async function executeTool(
             case 'propose_replace_section': {
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
-                const diff = await proposeReplaceSection(
+                const raw = await proposeReplaceSection(
                     fileId,
                     args.sectionHeading as string,
                     args.newContent as string,
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Section heading not found' };
                 }
@@ -769,7 +789,7 @@ export async function executeTool(
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
                 const occurrenceIndex = (args.occurrenceIndex as number) ?? 1;
-                const diff = await proposeUpdateSection(
+                const raw = await proposeUpdateSection(
                     fileId,
                     args.sectionHeading as string,
                     args.newContent as string,
@@ -777,6 +797,7 @@ export async function executeTool(
                     occurrenceIndex,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Section not found' };
                 }
@@ -786,7 +807,7 @@ export async function executeTool(
             case 'add_section': {
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
-                const diff = await proposeAddSection(
+                const raw = await proposeAddSection(
                     fileId,
                     args.targetHeading as string,
                     args.relation as 'before' | 'after',
@@ -794,6 +815,7 @@ export async function executeTool(
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Target section not found' };
                 }
@@ -804,13 +826,14 @@ export async function executeTool(
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
                 const occurrenceIndex = (args.occurrenceIndex as number) ?? 1;
-                const diff = await proposeRemoveSection(
+                const raw = await proposeRemoveSection(
                     fileId,
                     args.sectionHeading as string,
                     args.description as string | undefined,
                     occurrenceIndex,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Section not found' };
                 }
@@ -820,7 +843,7 @@ export async function executeTool(
             case 'move_section': {
                 const fileId = await resolveFile(args.fileId as string);
                 const contentOverride = options.contentOverrides?.[fileId];
-                const diff = await proposeMoveSection(
+                const raw = await proposeMoveSection(
                     fileId,
                     args.sectionHeading as string,
                     args.targetHeading as string,
@@ -828,6 +851,7 @@ export async function executeTool(
                     args.description as string | undefined,
                     contentOverride
                 );
+                const diff = normalizeDiff(raw);
                 if (!diff) {
                     return { success: false, error: 'Section or target not found, or invalid move' };
                 }
@@ -892,14 +916,20 @@ async function lintMarkdown(fileId: string, contentOverride?: string): Promise<L
     // Track heading levels
     let lastHeadingLevel = 0;
     let consecutiveBlankLines = 0;
+    let inCodeFence = false;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNum = i + 1;
 
+        // Toggle code-fence state so we don't flag "issues" inside code.
+        if (/^\s*```/.test(line)) {
+            inCodeFence = !inCodeFence;
+        }
+
         // Check for headings
         const headingMatch = line.match(/^(#{1,6})\s*(.*)/);
-        if (headingMatch) {
+        if (headingMatch && !inCodeFence) {
             const level = headingMatch[1].length;
             const text = headingMatch[2].trim();
 
@@ -927,7 +957,74 @@ async function lintMarkdown(fileId: string, contentOverride?: string): Promise<L
                 });
             }
 
+            // Numbered heading: `## 1. Intro` / `## 1) Intro`
+            const numberedMatch = text.match(/^(\d+)\s*[.)-]\s+(.+)$/);
+            if (numberedMatch) {
+                issues.push({
+                    type: 'error',
+                    rule: 'no-numbered-heading',
+                    message: 'Headings must not start with a numeric prefix',
+                    line: lineNum,
+                    fix: {
+                        oldText: line,
+                        newText: `${headingMatch[1]} ${numberedMatch[2]}`,
+                    },
+                });
+            }
+
+            // Blank line required before heading (except at start of file)
+            if (i > 0 && lines[i - 1].trim() !== '') {
+                issues.push({
+                    type: 'warning',
+                    rule: 'blank-before-heading',
+                    message: 'Missing blank line before heading',
+                    line: lineNum,
+                });
+            }
+
             lastHeadingLevel = level;
+        }
+
+        // Block equations: `$$ ... $$` on one line. Must have blank line before
+        // and after, and cannot span multiple lines (writer agents sometimes
+        // produce `$$\n...\n$$` which breaks rendering).
+        if (!inCodeFence) {
+            const blockMathMatch = line.match(/^\s*\$\$\s*(.*?)\s*\$\$\s*$/);
+            const lonelyDollarMatch = !blockMathMatch && line.match(/^\s*\$\$\s*$/);
+            const latexBlockMatch = !blockMathMatch && !lonelyDollarMatch && line.match(/\\\[|\\\]/);
+
+            if (blockMathMatch) {
+                if (i > 0 && lines[i - 1].trim() !== '') {
+                    issues.push({
+                        type: 'error',
+                        rule: 'block-math-blank-before',
+                        message: 'Block equation must have a blank line before it',
+                        line: lineNum,
+                    });
+                }
+                if (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+                    issues.push({
+                        type: 'error',
+                        rule: 'block-math-blank-after',
+                        message: 'Block equation must have a blank line after it',
+                        line: lineNum,
+                    });
+                }
+            } else if (lonelyDollarMatch) {
+                issues.push({
+                    type: 'error',
+                    rule: 'block-math-multiline',
+                    message: 'Block equation must be on a single line (`$$ ... $$`)',
+                    line: lineNum,
+                });
+            } else if (latexBlockMatch) {
+                issues.push({
+                    type: 'error',
+                    rule: 'block-math-latex',
+                    message: 'Use `$$ ... $$` instead of `\\[ ... \\]` for block equations',
+                    line: lineNum,
+                });
+            }
         }
 
         // Check for blank lines

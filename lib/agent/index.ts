@@ -14,6 +14,11 @@ export type {
     DiffStatus,
     DiffHunk,
     DocumentDiff,
+    HunkStatus,
+    HunkKind,
+    WordChange,
+    WordChanges,
+    DiffConflict,
     SearchMatch,
     SearchResult,
     Heading,
@@ -43,10 +48,14 @@ export {
     formatDiffForDisplay,
     formatUnifiedDiff,
     calculateDiffStats,
+    computeLineWordDiff,
+    computeHunkWordChanges,
+    classifyHunk,
+    applyPartial,
 } from './diff-utils';
 
 // Math format normalizer (post-agent, code + regex only)
-export { normalizeMathInMarkdown } from './math-format';
+export { normalizeMathInMarkdown, enforceHouseRules } from './math-format';
 
 export type { FormattedLine, DiffStats } from './diff-utils';
 

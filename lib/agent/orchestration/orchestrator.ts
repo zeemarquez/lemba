@@ -10,31 +10,27 @@ import { getApiKey } from '../ai-service';
 import {
     AgentType,
     AgentContext,
-    AgentTask,
     AgentResult,
     Workflow,
     WorkflowStep,
-    IntentAnalysis,
-    UserIntent,
     TaskType,
     TaskStatus,
     OrchestrationEvent,
     OrchestrationEventHandler,
-    DEFAULT_AGENT_CONFIGS,
     generateId,
 } from './types';
-import { ToolRegistry, defaultToolRegistry, TOOL_DEFINITIONS } from './tools';
+import { ToolRegistry, defaultToolRegistry } from './tools';
 import { RAGEngine, defaultRAGEngine } from './rag';
 import { PlannerAgent } from './agents/planner';
 import { ResearcherAgent } from './agents/researcher';
 import { WriterAgent } from './agents/writer';
+import type { WriterVariant } from './agents/writer';
 import { StructureReviewAgent } from './agents/structure-review';
 import { LinterAgent } from './agents/linter';
 import { SummarizerAgent } from './agents/summarizer';
 import { mergeDiffsForFile, withUpdatedProposedContent } from '../diff-utils';
-import { normalizeMathInMarkdown } from '../math-format';
-
-import { ORCHESTRATOR_PROMPT } from './prompts';
+import { enforceHouseRules } from '../math-format';
+import { route, RouterDecision, decisionLabel } from './router';
 
 // ==================== Types ====================
 
@@ -57,6 +53,11 @@ export interface OrchestrationResult {
     diffs: DocumentDiff[];
     workflow?: Workflow;
     error?: string;
+    /**
+     * Router decision used to build the workflow. Exposed so the UI can
+     * show a pill like "Fast edit" / "Full workflow" and explain why.
+     */
+    routerDecision?: RouterDecision;
 }
 
 // ==================== Orchestrator Agent ====================
@@ -157,12 +158,36 @@ export class OrchestratorAgent {
             this.emitEvent({ type: 'diff_created', diff });
         };
 
+        let routerDecision: RouterDecision | undefined;
         try {
-            // Step 1: Analyze user intent
-            const intent = await this.analyzeIntent(userMessage, context);
+            // Step 1: Route the message to a pipeline.
+            routerDecision = await route(userMessage, {
+                provider: this.provider,
+                apiKey: this.apiKey,
+                document: context.activeDocument
+                    ? {
+                        lineCount: context.activeDocument.content.split('\n').length,
+                        wordCount: context.activeDocument.content.split(/\s+/).filter(Boolean).length,
+                        hasHeadings: /^#{1,6}\s/m.test(context.activeDocument.content),
+                    }
+                    : undefined,
+            });
+            agentLog.info('router decision', {
+                intent: routerDecision.intent,
+                scope: routerDecision.scope,
+                agents: routerDecision.requiredAgents,
+                source: routerDecision.source,
+            });
+            this.emitEvent({
+                type: 'route_decided',
+                intent: routerDecision.intent,
+                label: decisionLabel(routerDecision),
+                agents: routerDecision.requiredAgents,
+                source: routerDecision.source,
+            });
 
-            // Step 2: Create workflow based on intent
-            const workflow = this.createWorkflow(userMessage, intent, context);
+            // Step 2: Build a workflow from the router's agent list.
+            const workflow = this.createWorkflow(userMessage, routerDecision, context);
             this.emitEvent({ type: 'workflow_started', workflow });
 
             // Step 3: Execute workflow steps
@@ -173,7 +198,7 @@ export class OrchestratorAgent {
                 const step = workflow.steps[i];
                 workflow.currentStepIndex = i;
                 step.status = 'in_progress';
-                this.emitEvent({ type: 'step_started', step });
+                this.emitEvent({ type: 'step_started', step, index: i, total: workflow.steps.length });
                 agentLog.step(`step ${i + 1}/${workflow.steps.length}: ${step.agentType}`, { taskType: step.taskType });
 
                 // Skip if read-only and step would make edits
@@ -193,17 +218,16 @@ export class OrchestratorAgent {
                 }
 
                 try {
-                    // Build context for this step
                     const stepContext = this.buildStepContext(context, results, workflow, contentOverrides);
 
-                    // Execute the appropriate agent with retry logic
                     const result = await this.executeAgentWithRetry(
                         step.agentType,
                         step.instructions,
                         stepContext,
                         onDiff,
                         options,
-                        3 // max retries
+                        3,
+                        routerDecision?.writerVariant,
                     );
 
                     step.status = result.status;
@@ -248,24 +272,43 @@ export class OrchestratorAgent {
                 }
             }
 
-            // Post-process: ensure markdown math formatting rules on all proposed content (code + regex, no AI)
+            // Post-process: enforce the deterministic house rules (block
+            // equations, numbered headings, blank-line-before-block, etc.)
+            // on every proposed diff. The propose_* tools already normalize
+            // on creation, but merging / partial tool results can leave the
+            // final proposedContent slightly out of shape.
             for (let i = 0; i < collectedDiffs.length; i++) {
                 const d = collectedDiffs[i];
-                const normalized = normalizeMathInMarkdown(d.proposedContent);
+                const normalized = enforceHouseRules(d.proposedContent);
                 if (normalized !== d.proposedContent) {
                     collectedDiffs[i] = withUpdatedProposedContent(d, normalized);
                     updateContentOverride(d.fileId);
                 }
             }
 
-            // Step 5: Build concise chat message (no raw plan/linter output)
+            // Step 5: Build the chat message.
             workflow.status = 'success';
             let finalContent: string;
-            if (intent.primaryIntent === 'question') {
+
+            if (routerDecision.intent === 'research_question') {
                 const researchResult = results.find(r => r.agentType === 'researcher');
                 finalContent = researchResult?.output ?? "I couldn't find an answer. Please try rephrasing.";
+            } else if (!routerDecision.useSummarizer) {
+                // Fast path: use the single agent's final message directly.
+                // This saves one LLM round on simple edits.
+                const writerResult = results.find(r => r.agentType === 'writer');
+                const structureResult = results.find(r => r.agentType === 'structure_review');
+                const linterResult = results.find(r => r.agentType === 'linter');
+                finalContent =
+                    writerResult?.output?.trim() ||
+                    structureResult?.output?.trim() ||
+                    linterResult?.output?.trim() ||
+                    this.getFallbackResponse(collectedDiffs, results);
+                if (!finalContent) {
+                    finalContent = this.getFallbackResponse(collectedDiffs, results);
+                }
             } else {
-                const summaryInput = this.buildSummaryForChat(results, intent, userMessage, collectedDiffs);
+                const summaryInput = this.buildSummaryForChat(results, routerDecision, userMessage, collectedDiffs);
                 try {
                     finalContent = await this.summarizerAgent.run(summaryInput, {
                         model: options.model,
@@ -295,6 +338,7 @@ export class OrchestratorAgent {
                 content: finalContent,
                 diffs: collectedDiffs,
                 workflow,
+                routerDecision,
             };
 
         } catch (error) {
@@ -305,153 +349,42 @@ export class OrchestratorAgent {
                 content: `I encountered an error while processing your request: ${errorMsg}`,
                 diffs: collectedDiffs,
                 error: errorMsg,
+                routerDecision,
             };
         }
     }
 
     /**
-     * Analyze user intent from the message.
-     * When no keyword matches, treat as content/edit request if user has a document open
-     * so the workflow always runs planner + writer instead of no-op.
+     * Build a workflow from the router's decision. Each required agent
+     * becomes a step; `dependsOn` wires them sequentially so the orchestrator
+     * runs them in order and can short-circuit on failure.
      */
-    private async analyzeIntent(
+    private createWorkflow(
         userMessage: string,
-        context: AgentContext
-    ): Promise<IntentAnalysis> {
-        // Simple keyword-based intent classification
-        // In a production system, this could use an LLM call
-        const message = userMessage.toLowerCase();
-
-        let primaryIntent: UserIntent = 'unknown';
-        let requiredAgents: AgentType[] = ['orchestrator'];
-
-        // Determine intent based on keywords and patterns
-        if (message.includes('create') || message.includes('write') || message.includes('draft')) {
-            if (message.includes('document') || message.includes('new file')) {
-                primaryIntent = 'create_document';
-                requiredAgents = ['planner', 'researcher', 'writer', 'linter'];
-            } else {
-                primaryIntent = 'expand_content';
-                requiredAgents = ['researcher', 'planner', 'writer', 'linter'];
-            }
-        } else if (message.includes('edit') || message.includes('modify') || message.includes('change') || message.includes('update')) {
-            primaryIntent = 'edit_section';
-            requiredAgents = ['researcher', 'writer', 'linter'];
-        } else if (
-            message.includes('expand') || message.includes('add more') || message.includes('elaborate') ||
-            message.includes('add ') || message.includes('insert ') || message.includes('include ')
-        ) {
-            primaryIntent = 'expand_content';
-            requiredAgents = ['researcher', 'planner', 'writer', 'linter'];
-        } else if (message.includes('summarize') || message.includes('summary') || message.includes('condense')) {
-            primaryIntent = 'summarize';
-            requiredAgents = ['researcher', 'writer'];
-        } else if (message.includes('research') || message.includes('find') || message.includes('search')) {
-            primaryIntent = 'research';
-            requiredAgents = ['researcher'];
-        } else if (message.includes('reorganize') || message.includes('restructure') || message.includes('reorder')) {
-            primaryIntent = 'reorganize';
-            requiredAgents = ['planner', 'writer', 'structure_review', 'linter'];
-        } else if (
-            message.includes('structure') || message.includes('sections') || message.includes('duplicate') ||
-            message.includes('section order') || message.includes('hierarchy') || message.includes('review document') ||
-            message.includes('fix structure') || message.includes('similar sections')
-        ) {
-            primaryIntent = 'review';
-            requiredAgents = ['structure_review', 'linter'];
-        } else if (message.includes('fix') || message.includes('error') || message.includes('broken')) {
-            primaryIntent = 'fix_errors';
-            requiredAgents = ['linter'];
-        } else if (message.includes('format') || message.includes('style') || message.includes('clean up')) {
-            primaryIntent = 'format';
-            requiredAgents = ['linter', 'writer'];
-        } else if (message.includes('review') || message.includes('check') || message.includes('analyze')) {
-            primaryIntent = 'review';
-            requiredAgents = ['researcher', 'structure_review', 'linter'];
-        } else if (message.includes('?') || message.includes('what') || message.includes('how') || message.includes('why')) {
-            primaryIntent = 'question';
-            requiredAgents = ['researcher'];
-        }
-
-        // When writer is used and the request suggests significant structure changes, add structure_review after writer
-        const structureKeywords = /section|heading|reorder|move section|new section|add section|structure/i;
-        if (
-            requiredAgents.includes('writer') &&
-            (primaryIntent === 'edit_section' || primaryIntent === 'expand_content' || primaryIntent === 'create_document') &&
-            structureKeywords.test(userMessage)
-        ) {
-            const writerIdx = requiredAgents.indexOf('writer');
-            if (writerIdx >= 0 && !requiredAgents.includes('structure_review')) {
-                requiredAgents = [...requiredAgents.slice(0, writerIdx + 1), 'structure_review', ...requiredAgents.slice(writerIdx + 1)];
-            }
-        }
-
-        // Unknown intent but user has a document open: assume they want to modify it (plan + write + lint)
-        if (primaryIntent === 'unknown' && context.activeDocument) {
-            primaryIntent = 'expand_content';
-            requiredAgents = ['planner', 'writer', 'linter'];
-        }
-
-        // Check if document is long (needs RAG)
-        if (context.activeDocument) {
-            const lineCount = context.activeDocument.content.split('\n').length;
-            if (lineCount > 100 && !requiredAgents.includes('researcher')) {
-                // Add researcher for RAG context on long documents
-                requiredAgents.unshift('researcher');
-            }
-        }
-
-        return {
-            primaryIntent,
-            confidence: 0.8, // Placeholder confidence
-            requiredAgents,
-            targetSections: this.extractTargetSections(userMessage),
-            suggestedWorkflow: this.createWorkflowSteps(requiredAgents, userMessage, primaryIntent),
-        };
-    }
-
-    /**
-     * Extract target sections from user message
-     */
-    private extractTargetSections(message: string): string[] {
-        const sections: string[] = [];
-
-        // Look for quoted section names
-        const quotedMatches = message.match(/"([^"]+)"/g);
-        if (quotedMatches) {
-            sections.push(...quotedMatches.map(m => m.replace(/"/g, '')));
-        }
-
-        // Look for "section" keyword
-        const sectionMatch = message.match(/(?:section|chapter|part)\s+(?:on|about|called|named)?\s*["']?(\w[\w\s]+)["']?/i);
-        if (sectionMatch) {
-            sections.push(sectionMatch[1].trim());
-        }
-
-        return sections;
-    }
-
-    /**
-     * Create workflow steps for required agents
-     */
-    private createWorkflowSteps(
-        agents: AgentType[],
-        userMessage: string,
-        intent: UserIntent
-    ): WorkflowStep[] {
-        return agents.map((agentType, index) => ({
+        decision: RouterDecision,
+        context: AgentContext,
+    ): Workflow {
+        const steps: WorkflowStep[] = decision.requiredAgents.map((agentType, index) => ({
             id: generateId(),
             agentType,
             taskType: this.getTaskTypeForAgent(agentType),
-            instructions: this.generateInstructions(agentType, userMessage, intent),
-            dependsOn: index > 0 ? [agents[index - 1]] : undefined,
+            instructions: this.generateInstructions(agentType, userMessage, decision),
+            dependsOn: index > 0 ? [decision.requiredAgents[index - 1]] : undefined,
             status: 'pending' as TaskStatus,
         }));
+
+        return {
+            id: generateId(),
+            userRequest: userMessage,
+            steps,
+            currentStepIndex: 0,
+            status: 'pending',
+            context: { ...context },
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
     }
 
-    /**
-     * Get task type for agent
-     */
     private getTaskTypeForAgent(agentType: AgentType): TaskType {
         switch (agentType) {
             case 'planner': return 'plan';
@@ -464,52 +397,41 @@ export class OrchestratorAgent {
     }
 
     /**
-     * Generate instructions for an agent based on intent
+     * Instructions are shorter than before since the per-agent system
+     * prompts now carry all the markdown house rules. We just tell each
+     * agent what the user wants and a scope hint.
      */
     private generateInstructions(
         agentType: AgentType,
         userMessage: string,
-        intent: UserIntent
+        decision: RouterDecision,
     ): string {
-        const baseContext = `User request: "${userMessage}"`;
+        const scopeHint = `Scope: ${decision.scope}. Router intent: ${decision.intent}.`;
+        const base = `User request: "${userMessage}"\n${scopeHint}`;
 
         switch (agentType) {
             case 'planner':
-                return `${baseContext}\n\nCreate a structured plan for this request. Break down the task into clear, actionable steps.`;
+                return `${base}\n\nProduce a short outline for this request. ${decision.scope === 'large' ? '' : 'Keep the plan very short (3 items or fewer).'}`;
             case 'researcher':
-                if (intent === 'question') {
-                    return `${baseContext}\n\nFind information to answer this question. Use RAG to search documents and web search if needed.`;
+                if (decision.intent === 'research_question') {
+                    return `${base}\n\nAnswer this question using RAG and web search. Do not propose edits.`;
                 }
-                return `${baseContext}\n\nGather relevant information for this task. Use RAG for document context and web search for external information.`;
-            case 'writer':
-                return `${baseContext}\n\nWrite or edit content based on the plan and research provided. Implement the plan in one round of edits if possible. Within this response, after applying all planned changes for this request, reply with a brief summary and do not call further tools in this same response. (Each new user message is a new request and may trigger a new workflow with tool use.) Follow markdown best practices: no numbering on headings; block equations $$ ... $$ on one line with spaces; inline equations $...$; alert blocks > [!NOTE] etc. with > on each content line. Use one sentence per line in prose and blank lines before and after block equations, and before headings, code blocks, alert blocks, and tables.`;
+                return `${base}\n\nGather just enough context for the writer to make the change. Keep findings short.`;
+            case 'writer': {
+                const variantNote = decision.writerVariant === 'quick'
+                    ? 'Make the smallest possible edit that satisfies the request. One or two tool calls, then summarize.'
+                    : decision.writerVariant === 'create'
+                        ? 'Follow the plan sequentially. Synthesize research into original prose.'
+                        : 'Batch related edits into one response. Do not over-expand the change.';
+                return `${base}\n\n${variantNote}`;
+            }
             case 'structure_review':
-                return `${baseContext}\n\nFix the entire document structure in this single run. Call get_document_structure first, then identify every duplicate section and every structural issue. Call remove_section (or update_section, move_section) for EACH duplicate and EACH issue before finishing. Do not stop after a few edits—fix everything in one go. Use occurrenceIndex when the same heading appears multiple times (e.g. occurrenceIndex 2 to remove the second occurrence).`;
+                return `${base}\n\nFix structural issues in a single run: call get_document_structure, then issue all remove_section / update_section / move_section calls in one response. Use occurrenceIndex for duplicate headings.`;
             case 'linter':
-                return `${baseContext}\n\nCheck the document for errors and style issues. Propose fixes for any problems found.`;
+                return `${base}\n\nRun lint_markdown and fix only the issues it reports. Do not rewrite prose.`;
             default:
-                return baseContext;
+                return base;
         }
-    }
-
-    /**
-     * Create a workflow from intent analysis
-     */
-    private createWorkflow(
-        userMessage: string,
-        intent: IntentAnalysis,
-        context: AgentContext
-    ): Workflow {
-        return {
-            id: generateId(),
-            userRequest: userMessage,
-            steps: intent.suggestedWorkflow,
-            currentStepIndex: 0,
-            status: 'pending',
-            context: { ...context },
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
     }
 
     /**
@@ -540,15 +462,13 @@ export class OrchestratorAgent {
         return nextContext;
     }
 
-    /**
-     * Execute a specific agent
-     */
     private async executeAgent(
         agentType: AgentType,
         instructions: string,
         context: AgentContext,
         onDiff: (diff: DocumentDiff) => void,
-        options: OrchestrationOptions
+        options: OrchestrationOptions,
+        writerVariant?: WriterVariant,
     ): Promise<AgentResult> {
         const startedAt = Date.now();
 
@@ -572,7 +492,10 @@ export class OrchestratorAgent {
                 break;
 
             case 'writer': {
-                const writerResult = await this.writerAgent.run(instructions, context, agentOptions);
+                const writerResult = await this.writerAgent.run(instructions, context, {
+                    ...agentOptions,
+                    variant: writerVariant,
+                });
                 output = writerResult.output;
                 diffs = writerResult.diffs;
                 break;
@@ -607,34 +530,29 @@ export class OrchestratorAgent {
         };
     }
 
-    /**
-     * Execute agent with retry logic for network failures
-     */
     private async executeAgentWithRetry(
         agentType: AgentType,
         instructions: string,
         context: AgentContext,
         onDiff: (diff: DocumentDiff) => void,
         options: OrchestrationOptions,
-        maxRetries: number = 3
+        maxRetries: number = 3,
+        writerVariant?: WriterVariant,
     ): Promise<AgentResult> {
         let lastError: Error | null = null;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 if (attempt > 0) {
-                    // Exponential backoff: 1s, 2s, 4s
                     const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                     agentLog.info(`Retrying ${agentType} (attempt ${attempt + 1}/${maxRetries + 1}) after ${delay}ms`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
-                return await this.executeAgent(agentType, instructions, context, onDiff, options);
+                return await this.executeAgent(agentType, instructions, context, onDiff, options, writerVariant);
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
                 const errorMsg = lastError.message;
-
-                // Check if it's a retryable error
                 const isRetryable = this.isRetryableError(errorMsg);
 
                 if (!isRetryable || attempt === maxRetries) {
@@ -646,7 +564,6 @@ export class OrchestratorAgent {
             }
         }
 
-        // Should never reach here, but TypeScript needs it
         throw lastError || new Error(`${agentType} failed after retries`);
     }
 
@@ -680,7 +597,7 @@ export class OrchestratorAgent {
      */
     private buildSummaryForChat(
         results: AgentResult[],
-        intent: IntentAnalysis,
+        decision: RouterDecision,
         userMessage: string,
         collectedDiffs: DocumentDiff[]
     ): string {

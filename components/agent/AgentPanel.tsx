@@ -21,6 +21,14 @@ import { ChatsDialog } from "./ChatsDialog";
 
 const PROVIDER_MODELS: Record<LLMProvider, { value: string; label: string }[]> = {
     openai: [
+        { value: 'gpt-5.4', label: 'GPT-5.4' },
+        { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
+        { value: 'gpt-5.4-nano', label: 'GPT-5.4 nano' },
+        { value: 'gpt-4.1', label: 'GPT-4.1' },
+        { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
+        { value: 'gpt-4.1-nano', label: 'GPT-4.1 nano' },
+        { value: 'o3', label: 'o3' },
+        { value: 'o4-mini', label: 'o4-mini' },
         { value: 'gpt-4o', label: 'GPT-4o' },
         { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
         { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
@@ -48,6 +56,8 @@ export function AgentPanel() {
         rejectAllPending,
         agentLoading,
         agentCurrentStep,
+        agentStepProgress,
+        agentLastRouteLabel,
         agentError,
         agentApiKeys,
         agentProviderKeysValid,
@@ -188,15 +198,42 @@ export function AgentPanel() {
 
                     {/* Loading indicator */}
                     {agentLoading && (
-                        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                            <span className="animate-pulse">
-                                {agentCurrentStep ?? 'Thinking…'}
-                            </span>
-                            <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                        <div className="flex flex-col gap-1.5 text-muted-foreground text-sm">
+                            <div className="flex items-center gap-2">
+                                {agentUseOrchestration && agentLastRouteLabel && (
+                                    <span
+                                        className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20"
+                                        title="Router decision"
+                                    >
+                                        {agentLastRouteLabel}
+                                    </span>
+                                )}
+                                <span className="animate-pulse truncate">
+                                    {agentCurrentStep ?? 'Thinking…'}
+                                </span>
+                                <div className="flex space-x-1 shrink-0">
+                                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                                </div>
                             </div>
+                            {agentStepProgress && agentStepProgress.total > 1 && (
+                                <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                                    <div
+                                        className="h-full bg-primary/70 transition-all"
+                                        style={{ width: `${(agentStepProgress.current / agentStepProgress.total) * 100}%` }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {/* After completion, keep the route pill visible so the user knows which pipeline ran */}
+                    {!agentLoading && agentUseOrchestration && agentLastRouteLabel && agentMessages.length > 0 && (
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <span>Last run:</span>
+                            <span className="font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                                {agentLastRouteLabel}
+                            </span>
                         </div>
                     )}
 

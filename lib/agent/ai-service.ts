@@ -441,41 +441,51 @@ const TOOLS = [
 
 // ==================== System Prompt ====================
 
-const SYSTEM_PROMPT = `You are an AI assistant integrated into a modern markdown editor. You help users organize, write, and refine their documents.
+/**
+ * System prompt for Quick edit mode (single-agent, no orchestration).
+ *
+ * Quick edit is meant to feel like Cursor's inline edit: user asks,
+ * assistant writes the smallest possible edit and exits. No planning,
+ * no linting, no research, no section restructuring, no summarizer.
+ * Keep this prompt short on purpose - long prompts encourage the model
+ * to make more tool calls than necessary.
+ */
+const SYSTEM_PROMPT = `You are a **Quick Edit** markdown assistant.
 
-## Core Philosophy
-You operate like a smart editor or "Canvas" assistant. Instead of just appending text, you understand the **structure** of the document (headings, sections, hierarchy). When requested to change something, you should:
-1. **Analyze Structure**: Use \`get_document_structure\` first to understand the outline.
-2. **Target Sections**: Use structureal tools like \`update_section\`, \`add_section\`, \`move_section\` whenever possible, rather than raw line edits.
-3. **Prevent Duplication**: By targeting specific sections by name, you ensure you replace old versions instead of appending new ones.
+## Your job
+Apply the user's edit to their active document and stop. Make the smallest diff that satisfies the request. Do not rewrite prose the user didn't ask you to touch.
 
-## Your Capabilities
-You have access to tools that allow you to:
-1. **Read & Analyze**: \`read_document\`, \`get_document_structure\` (Get tree view of sections), \`search_in_document\`.
-2. **Structural Editing** (Preferred):
-   - \`update_section\`: Rewrite a specific section.
-   - \`add_section\`: Insert a new section relative to another.
-   - \`remove_section\`: Delete a section.
-   - \`move_section\`: Reorder sections.
-3. **Fine-grained Editing**:
-   - \`propose_edit\`: Find & replace text (use sparingly for typos).
-   - \`propose_insert\`: Insert at line number (use only if structural tools don't fit).
+## Tools (use the minimum needed)
+- \`propose_edit\`: replace specific text (oldText must match the document exactly).
+- \`propose_insert\`: insert at \`start\` | \`end\` | \`line\` | \`afterHeading\`.
+- \`propose_replace_section\`: replace a whole section by its heading (prefer \`propose_edit\` when exact text is known).
+- \`read_document_section\`, \`find_headings\`: inspect only when necessary.
 
-## Important Guidelines
-1. **Always read structure**: Before making significant changes, call \`get_document_structure\` to see the current headings.
-2. **Avoid Raw Line Numbers**: Line numbers change. Headings are more stable anchors. Use section tools.
-3. **Rewriting Sections**: When asked to "rewrite introduction", use \`update_section(..., "Introduction", "## Introduction\nNew content...")\`. Include the heading in the new content!
-4. **No Duplication**: If adding a "Conclusion", check if one exists. If yes, use \`update_section\`. If no, use \`add_section\`.
+## Rules
+1. **One to two tool calls, then summarize.** Do not loop.
+2. Preserve the user's voice and formatting.
+3. Match \`oldText\` exactly, including whitespace.
+4. Every propose_* call needs a short one-line description.
+5. **No numbered headings** (e.g. write \`## Introduction\`, not \`## 1. Introduction\`).
+6. Block equations: \`$$ ... $$\` on one line with a blank line before and after. Inline: \`$...$\`.
+7. Alert blocks: \`> [!NOTE]\`, \`> [!WARNING]\`, etc., with \`>\` on every content line.
+8. One sentence per line in prose.
 
-## Markdown Formatting
-- **Headings**: Use \`## Title\` format. Do not use numbered lists for headings (e.g. no \`## 1. Title\`) unless the user explicitly asks for it.
-- **Math**: \`$$ ... $$\` for blocks, \`$...$\` for inline. Block equations (\`$$...$$\`) must have an empty line before and after.
-- **Alerts**: \`> [!NOTE]\` syntax.
+## Response
+A single short sentence. No bullet lists, no plan, no preamble.`;
 
-## Response Format
-- **Format your final reply** with bullet points summarizing changes.
-- **Bold** key actions (e.g. **Updated Introduction**, **Added Conclusion**).
-- Be concise.`;
+/**
+ * Tools available in Quick edit mode. Intentionally smaller than the
+ * full single-agent tool set: no section-structural tools, no full-doc
+ * reads, no cross-file search. Quick edit is meant to be scoped.
+ */
+const QUICK_EDIT_TOOL_NAMES = new Set([
+    'propose_edit',
+    'propose_insert',
+    'propose_replace_section',
+    'read_document_section',
+    'find_headings',
+]);
 
 // ==================== Tool Execution ====================
 
@@ -728,6 +738,54 @@ function getTrialOpenAIKey(): string {
         return isBrowserTrialAvailable() ? TRIAL_PROXY_KEY : '';
     }
     return (process.env.TRIAL_OPENAI_API_KEY ?? '').trim();
+}
+
+/**
+ * OpenAI's "reasoning" model family (o1/o3/o4/gpt-5+) rejects the classic
+ * `max_tokens` parameter and only accepts `max_completion_tokens`. These
+ * models also do not accept a custom `temperature` (must be default).
+ *
+ * Returning true here flips the request body to the newer shape so the
+ * writer/linter/etc. agents keep working when the user selects one of
+ * these models (or when a trial proxy picks one on our behalf).
+ */
+function isOpenAIReasoningModel(model: string): boolean {
+    const m = model.toLowerCase();
+    // o1, o1-mini, o1-preview, o3, o3-mini, o4-mini, ...
+    if (/^o\d+(-|$)/.test(m)) return true;
+    // gpt-5, gpt-5-mini, gpt-5-turbo, ...
+    if (/^gpt-5/.test(m)) return true;
+    return false;
+}
+
+/**
+ * Build the JSON body for an OpenAI-compatible chat/completions call.
+ * Centralizes the `max_tokens` vs `max_completion_tokens` distinction so
+ * callers don't have to know about reasoning-model quirks.
+ */
+function buildOpenAIChatBody(params: {
+    model: string;
+    messages: unknown;
+    tools?: unknown;
+    toolChoice?: unknown;
+    temperature: number;
+    maxTokens: number;
+}): Record<string, unknown> {
+    const isReasoning = isOpenAIReasoningModel(params.model);
+    const body: Record<string, unknown> = {
+        model: params.model,
+        messages: params.messages,
+    };
+    if (params.tools !== undefined) body.tools = params.tools;
+    if (params.toolChoice !== undefined) body.tool_choice = params.toolChoice;
+    if (isReasoning) {
+        body.max_completion_tokens = params.maxTokens;
+        // Reasoning models only support default temperature; omit the field.
+    } else {
+        body.temperature = params.temperature;
+        body.max_tokens = params.maxTokens;
+    }
+    return body;
 }
 
 /**
@@ -992,14 +1050,14 @@ export async function chatCompletionOneRound(options: ChatCompletionOneRoundOpti
                 const response = await fetch(requestUrl, {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({
+                    body: JSON.stringify(buildOpenAIChatBody({
                         model: effectiveModel,
                         messages,
                         tools: tools.length ? tools : undefined,
-                        tool_choice: tools.length ? 'auto' : undefined,
+                        toolChoice: tools.length ? 'auto' : undefined,
                         temperature,
-                        max_tokens: maxTokens,
-                    }),
+                        maxTokens,
+                    })),
                 });
                 if (!response.ok) {
                     const err = await response.text();
@@ -1172,7 +1230,7 @@ export async function chatCompletion(options: {
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify({ model: effectiveModel, messages, temperature, max_tokens: maxTokens }),
+                    body: JSON.stringify(buildOpenAIChatBody({ model: effectiveModel, messages, temperature, maxTokens })),
                 });
                 if (!response.ok) {
                     const err = await response.text();
@@ -1271,19 +1329,28 @@ export async function sendMessageToAI(
 
     await assertTrialLimit(provider, apiKey);
     const readOnly = options?.readOnly ?? false;
-    const temperature = options?.temperature ?? 0.7;
+    // Quick edit mode is our default one-shot editing path (non-orchestrated, non-read-only).
+    // Lower temperature than the old 0.7 so small edits stay close to the user's voice.
+    const temperature = options?.temperature ?? (readOnly ? 0.4 : 0.2);
     const maxTokens = options?.maxTokens ?? 4096;
     const onDiff = options?.onDiffCreated ?? onDiffCreated;
 
     agentLog.info('sendMessageToAI (single-agent)', { provider, model, readOnly, messageCount: messages.length, mentionedFiles: mentionedFiles.length });
 
-    // In read-only mode, only expose read tools
+    // Tool allowlist: Ask (readOnly) gets read tools only. Quick edit gets
+    // a tight editing set so the model cannot wander into full structural
+    // rewrites or cross-file searches - that's what Agent mode is for.
     const tools = readOnly
         ? TOOLS.filter((t) => READ_ONLY_TOOL_NAMES.has(t.function.name))
-        : TOOLS;
+        : TOOLS.filter((t) => QUICK_EDIT_TOOL_NAMES.has(t.function.name));
 
     const systemPrompt = readOnly
-        ? SYSTEM_PROMPT + '\n\n**Read-only mode is enabled.** You must NOT use any tools that propose or apply edits to documents. Only read, search, and list. If the user asks to edit, explain that edit mode is disabled.'
+        ? `You are a **read-only** markdown assistant. Answer the user's question about their documents using read/search tools. You cannot edit. If the user asks to edit, explain that edit mode is disabled.
+
+## Rules
+- Use \`read_document\`, \`read_document_section\`, \`search_in_document\`, \`search_all_documents\`, \`find_headings\`, \`get_document_structure\`, \`get_document_metadata\`, \`list_files\` only.
+- Quote exact document text when relevant.
+- Be concise.`
         : SYSTEM_PROMPT;
 
     // Build context from mentioned files; prefer in-memory content (initialContentOverrides) over IndexedDB
@@ -1340,7 +1407,9 @@ export async function sendMessageToAI(
     // Make API call with tools (provider-specific)
     const collectedDiffs: DocumentDiff[] = [];
     const contentOverrides: Record<string, string> = { ...(options?.initialContentOverrides ?? {}) };
-    let maxIterations = 10; // Prevent infinite loops
+    // Quick edit should finish in 1-3 turns (optional read + propose_* + final message).
+    // Ask mode can afford more rounds for read-heavy questions.
+    let maxIterations = readOnly ? 8 : 4;
 
     const openaiCompatibleUrl = provider === 'google'
         ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
@@ -1364,14 +1433,14 @@ export async function sendMessageToAI(
             const response = await fetch(requestUrl, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({
+                body: JSON.stringify(buildOpenAIChatBody({
                     model,
                     messages: chatMessages,
                     tools,
-                    tool_choice: tools.length > 0 ? 'auto' : undefined,
+                    toolChoice: tools.length > 0 ? 'auto' : undefined,
                     temperature,
-                    max_tokens: maxTokens
-                })
+                    maxTokens,
+                })),
             });
 
             if (!response.ok) {

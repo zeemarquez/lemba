@@ -43,11 +43,66 @@ export interface AgentMessage {
 export type DiffType = 'replace' | 'insert' | 'delete';
 export type DiffStatus = 'pending' | 'approved' | 'rejected';
 
+/** Per-hunk status used by per-hunk accept/reject in the UI. */
+export type HunkStatus = 'pending' | 'accepted' | 'rejected';
+
+/**
+ * Semantic classification of a hunk. Assigned by `classifyHunk` in
+ * diff-utils so the UI can show a small icon and prioritize review.
+ */
+export type HunkKind =
+    | 'typo'          // Single-line, small word-level change.
+    | 'prose_edit'    // Multi-line prose rewrite inside a paragraph.
+    | 'section_edit'  // Change that touches a heading or introduces/removes sections.
+    | 'insert_block'  // Pure insert: oldLines empty, newLines non-empty.
+    | 'delete_block'  // Pure delete: newLines empty, oldLines non-empty.
+    | 'format';       // Whitespace-only / line-break-only change.
+
+/**
+ * Word-level differences inside a hunk. Line indexes are 0-based within
+ * the hunk's own `oldLines` / `newLines` arrays (NOT document lines).
+ * Ranges use character offsets, end-exclusive.
+ */
+export interface WordChange {
+    /** Index in `hunk.oldLines`. */
+    line: number;
+    /** Character offset where the change starts. */
+    start: number;
+    /** Character offset where the change ends (exclusive). */
+    end: number;
+}
+
+export interface WordChanges {
+    deletions: WordChange[];   // Ranges inside oldLines
+    additions: WordChange[];   // Ranges inside newLines
+}
+
 export interface DiffHunk {
     startLine: number;      // 1-indexed line number where change starts
     endLine: number;        // 1-indexed line number where change ends
     oldLines: string[];     // Original lines being replaced/deleted
     newLines: string[];     // New lines being inserted/replacing
+    /** Optional intra-line word-level changes for nicer rendering. */
+    wordChanges?: WordChanges;
+    /** Optional semantic classification (see HunkKind). */
+    kind?: HunkKind;
+    /** Per-hunk status for granular accept/reject. Absent = pending. */
+    status?: HunkStatus;
+}
+
+/**
+ * Describes a region of the document where two agents proposed conflicting
+ * edits. The merge resolves the conflict by keeping the last writer's
+ * output, and records the overwritten content here so the UI can warn.
+ */
+export interface DiffConflict {
+    /** 1-indexed line range (in the original document) that conflicted. */
+    startLine: number;
+    endLine: number;
+    /** The edit that "won" (was kept). */
+    kept: string[];
+    /** The edit that was dropped in favor of `kept`. */
+    dropped: string[];
 }
 
 export interface DocumentDiff {
@@ -61,6 +116,8 @@ export interface DocumentDiff {
     status: DiffStatus;           // Current status
     createdAt: number;            // Timestamp
     description?: string;         // Human-readable description of the change
+    /** Conflicts detected during merge (optional, merged diffs only). */
+    conflicts?: DiffConflict[];
 }
 
 // ==================== Search Types ====================

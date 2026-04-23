@@ -1330,8 +1330,20 @@ export async function compileTypstToPdf({ source }: CompileArgs): Promise<Uint8A
     console.log(`[Typst] [Client] Compiling source (${source.length} chars)`);
 
     try {
-        // Reset shadow files for fresh compilation
-        typstCompiler.resetShadow();
+        // Reset shadow files for fresh compilation.
+        // Guard against the WASM binding having gone stale (can happen after a
+        // failed compilation on some browser/WASM versions).
+        try {
+            typstCompiler.resetShadow();
+        } catch (resetErr) {
+            console.warn('[Typst] [Client] resetShadow failed inside compile — reinitializing:', resetErr);
+            typstCompiler = null;
+            isInitialized = false;
+            initPromise = null;
+            await initializeCompiler();
+            if (!typstCompiler) throw new Error('Typst compiler reinitialization failed');
+            typstCompiler.resetShadow(); // retry after fresh init
+        }
 
         // Process data URLs in the source and add images to shadow filesystem
         const processedSource = processDataUrlsToShadow(source, typstCompiler);
@@ -1381,11 +1393,24 @@ export async function compileTypstToPdf({ source }: CompileArgs): Promise<Uint8A
 }
 
 /**
- * Reset the compiler state
+ * Reset the compiler state.
+ * If the WASM binding has become unavailable (e.g. after a failed
+ * compilation), we tear down the compiler and reinitialize it so the
+ * next compilation starts fresh instead of repeatedly failing with
+ * "Cannot read properties of undefined (reading 'reset_shadow')".
  */
 export async function resetCompiler(): Promise<void> {
     if (typstCompiler) {
-        typstCompiler.resetShadow();
+        try {
+            typstCompiler.resetShadow();
+        } catch (err) {
+            // The WASM binding is gone (reset_shadow undefined). Tear down
+            // and let the next call to initializeCompiler() reinitialize.
+            console.warn('[Typst] [Client] resetShadow failed — reinitializing compiler:', err);
+            typstCompiler = null;
+            isInitialized = false;
+            initPromise = null;
+        }
     }
     console.log('[Typst] [Client] Compiler ready for new compilation');
 }

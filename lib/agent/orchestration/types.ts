@@ -230,8 +230,9 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentType, Omit<AgentConfig, 'systemP
 // ==================== Event Types ====================
 
 export type OrchestrationEvent =
+    | { type: 'route_decided'; intent: string; label: string; agents: string[]; source: 'llm' | 'fallback' }
     | { type: 'workflow_started'; workflow: Workflow }
-    | { type: 'step_started'; step: WorkflowStep }
+    | { type: 'step_started'; step: WorkflowStep; index: number; total: number }
     | { type: 'step_completed'; step: WorkflowStep; result: AgentResult }
     | { type: 'step_failed'; step: WorkflowStep; error: string }
     | { type: 'workflow_completed'; workflow: Workflow; finalResult: AgentResult }

@@ -1,6 +1,14 @@
 /**
  * Writer Agent
- * Creates and modifies markdown content professionally
+ * Creates and modifies markdown content professionally.
+ *
+ * The writer runs in one of three variants selected by the router via the
+ * orchestrator:
+ *   - `quick`:  small targeted edits, minimal system prompt, no full-doc
+ *               dump, 2-iteration cap, low temperature, tight tool scope.
+ *   - `edit`:   default for section-level edits. Includes plan/research
+ *               context when present, 3 iterations.
+ *   - `create`: long-form creation. Up to 5 iterations, full context.
  */
 
 import type { LLMProvider } from '../../ai-service';
@@ -8,21 +16,68 @@ import { chatCompletionOneRound, buildVisionUserContent } from '../../ai-service
 import type { ChatCompletionMessage } from '../../ai-service';
 import { DocumentDiff } from '../../types';
 import { mergeDiffsForFile } from '../../diff-utils';
-import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
-import { ToolRegistry, ToolResult } from '../tools';
-import { WRITER_PROMPT } from '../prompts';
+import { AgentContext, DEFAULT_AGENT_CONFIGS } from '../types';
+import { ToolRegistry } from '../tools';
+import { WRITER_QUICK_PROMPT, WRITER_EDIT_PROMPT, WRITER_CREATE_PROMPT } from '../prompts';
+
+export type WriterVariant = 'quick' | 'edit' | 'create';
 
 interface WriterOptions {
     model?: string;
     temperature?: number;
     maxTokens?: number;
     onDiffCreated?: (diff: DocumentDiff) => void;
+    /** Which writer profile to run. Defaults to 'edit'. */
+    variant?: WriterVariant;
 }
 
 interface WriterResult {
     output: string;
     diffs: DocumentDiff[];
 }
+
+interface VariantConfig {
+    prompt: string;
+    /** Iteration cap for the tool-call loop. */
+    maxIterations: number;
+    /** Override for temperature; undefined = use default. */
+    temperature?: number;
+    /** Include full document dump when short? */
+    includeFullDoc: boolean;
+    /** Threshold (in lines) under which we inline the document. */
+    fullDocMaxLines: number;
+    /** Include plan/research/rag blocks in the prompt. */
+    includeAuxContext: boolean;
+    /** Allowed tool names for this variant. Empty array = all writer tools. */
+    allowedTools?: string[];
+}
+
+const VARIANTS: Record<WriterVariant, VariantConfig> = {
+    quick: {
+        prompt: WRITER_QUICK_PROMPT,
+        maxIterations: 2,
+        temperature: 0.2,
+        includeFullDoc: false,
+        fullDocMaxLines: 0,
+        includeAuxContext: false,
+        // Quick edits never restructure sections; keep tools minimal.
+        allowedTools: ['propose_edit', 'propose_insert', 'propose_replace_section', 'read_document_section', 'find_headings'],
+    },
+    edit: {
+        prompt: WRITER_EDIT_PROMPT,
+        maxIterations: 3,
+        includeFullDoc: true,
+        fullDocMaxLines: 200,
+        includeAuxContext: true,
+    },
+    create: {
+        prompt: WRITER_CREATE_PROMPT,
+        maxIterations: 5,
+        includeFullDoc: true,
+        fullDocMaxLines: 400,
+        includeAuxContext: true,
+    },
+};
 
 export class WriterAgent {
     private toolRegistry: ToolRegistry;
@@ -36,86 +91,76 @@ export class WriterAgent {
         this.apiKey = options.apiKey!;
     }
 
-    /**
-     * Run the writer agent
-     */
     async run(
         instructions: string,
         context: AgentContext,
         options: WriterOptions = {}
     ): Promise<WriterResult> {
+        const variant: WriterVariant = options.variant ?? 'edit';
+        const variantConfig = VARIANTS[variant];
+
         const model = options.model || this.config.model;
-        const temperature = options.temperature ?? this.config.temperature;
+        const temperature = options.temperature ?? variantConfig.temperature ?? this.config.temperature;
         const maxTokens = options.maxTokens || this.config.maxTokens;
 
         const collectedDiffs: DocumentDiff[] = [];
         const contentOverrides: Record<string, string> = { ...(context.contentOverrides ?? {}) };
 
-        // Build system prompt
-        let systemPrompt = WRITER_PROMPT;
+        let systemPrompt = variantConfig.prompt;
 
-        // Add document context
         if (context.activeDocument) {
-            systemPrompt += `\n\n## Target Document (REQUIRED)\n`;
-            systemPrompt += `- **File ID (use this EXACT value in every propose_* and read_* tool call):** \`${context.activeDocument.id}\`\n`;
+            const lineCount = context.activeDocument.content.split('\n').length;
+            systemPrompt += `\n\n## Target Document\n`;
+            systemPrompt += `- File ID: \`${context.activeDocument.id}\`\n`;
             systemPrompt += `- Name: ${context.activeDocument.name}\n`;
-            systemPrompt += `- Lines: ${context.activeDocument.content.split('\n').length}\n`;
-            systemPrompt += `\n**CRITICAL:** You must use ONLY the File ID above for every tool call. Never invent or use a different path or filename (e.g. do not use "general_relativity.md" or similar). The user is editing this single open file.\n`;
+            systemPrompt += `- Lines: ${lineCount}\n`;
 
-            // Add structure info
-            if (context.activeDocument.metadata?.headings) {
-                systemPrompt += `\n### Document Structure:\n`;
+            if (context.activeDocument.metadata?.headings && variant !== 'quick') {
+                systemPrompt += `\n### Document Structure\n`;
                 context.activeDocument.metadata.headings.forEach(h => {
                     systemPrompt += `- ${h.text} (H${h.level}, line ${h.line})\n`;
                 });
             }
 
-            // For shorter documents, include full content
-            const lineCount = context.activeDocument.content.split('\n').length;
-            if (lineCount <= 200) {
-                systemPrompt += `\n### Current Content:\n`;
+            if (variantConfig.includeFullDoc && lineCount <= variantConfig.fullDocMaxLines) {
+                systemPrompt += `\n### Current Content\n`;
                 systemPrompt += '```markdown\n' + context.activeDocument.content + '\n```\n';
-            } else {
+            } else if (variant !== 'quick') {
                 systemPrompt += `\n**Note**: Document is large. Use read_document_section to read specific parts before editing.\n`;
             }
         }
 
-        // Build messages
         const messages: ChatCompletionMessage[] = [
             { role: 'system', content: systemPrompt },
         ];
 
-        // Add plan outline if available
-        if (context.planOutline) {
-            messages.push({
-                role: 'user',
-                content: `## Plan to Follow\n\n${context.planOutline}`,
-            });
+        if (variantConfig.includeAuxContext) {
+            if (context.planOutline) {
+                messages.push({
+                    role: 'user',
+                    content: `## Plan to Follow\n\n${context.planOutline}`,
+                });
+            }
+            if (context.researchFindings) {
+                messages.push({
+                    role: 'user',
+                    content: `## Research to Incorporate\n\n${context.researchFindings}`,
+                });
+            }
+            if (context.ragContext && context.ragContext.length > 0) {
+                let ragContent = '## Relevant Document Context (from RAG)\n\n';
+                context.ragContext.forEach((chunk, i) => {
+                    ragContent += `### Context ${i + 1}`;
+                    if (chunk.heading) {
+                        ragContent += ` - ${chunk.heading}`;
+                    }
+                    ragContent += ` (lines ${chunk.startLine}-${chunk.endLine})\n`;
+                    ragContent += '```\n' + chunk.content + '\n```\n\n';
+                });
+                messages.push({ role: 'user', content: ragContent });
+            }
         }
 
-        // Add research findings if available
-        if (context.researchFindings) {
-            messages.push({
-                role: 'user',
-                content: `## Research to Incorporate\n\n${context.researchFindings}`,
-            });
-        }
-
-        // Add RAG context if available
-        if (context.ragContext && context.ragContext.length > 0) {
-            let ragContent = '## Relevant Document Context (from RAG)\n\n';
-            context.ragContext.forEach((chunk, i) => {
-                ragContent += `### Context ${i + 1}`;
-                if (chunk.heading) {
-                    ragContent += ` - ${chunk.heading}`;
-                }
-                ragContent += ` (lines ${chunk.startLine}-${chunk.endLine})\n`;
-                ragContent += '```\n' + chunk.content + '\n```\n\n';
-            });
-            messages.push({ role: 'user', content: ragContent });
-        }
-
-        // Add instructions (reinforce target file; with optional image attachments for vision)
         let finalInstructions = instructions;
         if (context.activeDocument) {
             finalInstructions += `\n\n**Target file for all edits:** Use fileId \`${context.activeDocument.id}\` in every propose_* and read_* tool call.`;
@@ -125,8 +170,11 @@ export class WriterAgent {
             content: buildVisionUserContent(finalInstructions, context.imageAttachments),
         });
 
-        // Get available tools
-        const tools = this.toolRegistry.getToolsForAgent('writer').map(tool => ({
+        const allAgentTools = this.toolRegistry.getToolsForAgent('writer');
+        const filteredTools = variantConfig.allowedTools && variantConfig.allowedTools.length > 0
+            ? allAgentTools.filter(t => variantConfig.allowedTools!.includes(t.name))
+            : allAgentTools;
+        const tools = filteredTools.map(tool => ({
             type: 'function' as const,
             function: {
                 name: tool.name,
@@ -137,7 +185,7 @@ export class WriterAgent {
 
         const defaultFileId = context.activeDocument?.id;
         let currentMessages: ChatCompletionMessage[] = [...messages];
-        let maxIterations = 5;
+        let maxIterations = variantConfig.maxIterations;
 
         while (maxIterations > 0) {
             maxIterations--;
@@ -171,8 +219,6 @@ export class WriterAgent {
                     });
                     let isDuplicate = false;
                     if (execResult.diff) {
-                        // Only treat as duplicate when it's the exact same edit (same proposed result).
-                        // Do not use description alone: multiple different edits can share the same description.
                         isDuplicate = collectedDiffs.some(
                             d =>
                                 d.fileId === execResult.diff!.fileId &&
@@ -191,9 +237,9 @@ export class WriterAgent {
                     }
                     let toolContent = JSON.stringify(execResult.data ?? execResult.error);
                     if (isDuplicate) {
-                        toolContent += `\n\nThis change was already recorded. Do not repeat. In this response, reply with a brief summary and do not call further tools in this same response.`;
+                        toolContent += `\n\nThis change was already recorded. Do not repeat. Reply with a brief summary now; do not call further tools.`;
                     } else if (collectedDiffs.length > 0) {
-                        toolContent += `\n\nYou have recorded ${collectedDiffs.length} edit(s). If the plan is fully implemented for this request, reply with a brief summary and do not call further tools in this same response.`;
+                        toolContent += `\n\nYou have recorded ${collectedDiffs.length} edit(s). If the request is satisfied, reply with a brief summary and do not call further tools in this response.`;
                     }
                     currentMessages.push({
                         role: 'tool',
