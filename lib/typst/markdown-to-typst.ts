@@ -1040,9 +1040,13 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
 
             return `#image("${escapeTypstString(href)}"${extraArgs})\n\n`;
         case 'katex':
-        case 'blockKatex':
+        case 'blockKatex': {
             // Block/display math: use spaces around content for Typst display mode
-            return `$ ${convertLatexToTypst(token.text)} $\n\n`;
+            const blockMathContent = convertLatexToTypst(token.text);
+            // Skip empty equations — Typst "$ $" (display math with no content) causes "expected expression"
+            if (!blockMathContent.trim()) return '';
+            return `$ ${blockMathContent} $\n\n`;
+        }
         default:
             return '';
     }
@@ -1322,16 +1326,21 @@ function parseInline(tokens: any[], options: MarkdownToTypstOptions): string {
                 }
                 output += `#image("${escapeTypstString(href)}"${w ? `, width: ${w}` : ''})`;
                 break;
-            case 'inlineKatex':
+            case 'inlineKatex': {
                 // Check displayMode: true means block/display math ($$...$$), false means inline ($...$)
-                if (token.displayMode) {
-                    // Display mode math: use spaces for Typst block display
-                    output += `$ ${convertLatexToTypst(token.text)} $`;
-                } else {
-                    // Inline math: no spaces for Typst inline mode
-                    output += `$${convertLatexToTypst(token.text)}$`;
+                const inlineMathContent = convertLatexToTypst(token.text);
+                // Skip empty equations — Typst "$ $" (display math with no content) causes "expected expression"
+                if (inlineMathContent.trim()) {
+                    if (token.displayMode) {
+                        // Display mode math: use spaces for Typst block display
+                        output += `$ ${inlineMathContent} $`;
+                    } else {
+                        // Inline math: no spaces for Typst inline mode
+                        output += `$${inlineMathContent}$`;
+                    }
                 }
                 break;
+            }
             case 'escape':
                 output += processTextWithPlaceholders(token.text, options);
                 break;
