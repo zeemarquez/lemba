@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect } from "react";
 import { useStore } from "@/lib/store";
-import { DocumentDiff, formatDiffForDisplay } from "@/lib/agent";
+import { DocumentDiff, FormattedLine, formatDiffForDisplay } from "@/lib/agent";
 import { cn } from "@/lib/utils";
 import { WysiwygDiffOverlay } from "./WysiwygDiffOverlay";
 
@@ -22,7 +22,6 @@ export function InlineDiffOverlay({ fileId }: InlineDiffOverlayProps) {
         return null;
     }
 
-    // Source mode: raw markdown diff. Editing mode: WYSIWYG preview of same diff.
     if (editorViewMode !== 'source') {
         return <WysiwygDiffOverlay diff={mergedDiff} />;
     }
@@ -34,12 +33,19 @@ interface SourceDiffViewProps {
     diff: DocumentDiff;
 }
 
-/** Full document with diffs highlighted. Accept/Reject only in chat. */
+/**
+ * Full document with diffs highlighted. Accept/Reject happens in the chat
+ * panel; this overlay is read-only. When the diff carries word-level
+ * annotations (`wordRanges`), we highlight only those character ranges so a
+ * single-word rename is not a sea of red/green.
+ */
 function SourceDiffView({ diff }: SourceDiffViewProps) {
-    const formattedLines = formatDiffForDisplay(diff.originalContent, diff.proposedContent, 0, true);
+    const formattedLines = useMemo(
+        () => formatDiffForDisplay(diff.originalContent, diff.proposedContent, 0, true),
+        [diff.originalContent, diff.proposedContent],
+    );
     const lastChangeRef = useRef<HTMLDivElement | null>(null);
 
-    // Index of the last addition/deletion (scroll here when diff is shown)
     const lastChangedIndex = useMemo(() => {
         let last = -1;
         formattedLines.forEach((line, i) => {
@@ -72,12 +78,7 @@ function SourceDiffView({ diff }: SourceDiffViewProps) {
 }
 
 interface InlineDiffLineProps {
-    line: {
-        type: "context" | "addition" | "deletion" | "unchanged";
-        content: string;
-        oldLineNumber?: number;
-        newLineNumber?: number;
-    };
+    line: FormattedLine;
 }
 
 const InlineDiffLine = React.forwardRef<HTMLDivElement, InlineDiffLineProps>(function InlineDiffLine({ line }, ref) {
@@ -89,26 +90,36 @@ const InlineDiffLine = React.forwardRef<HTMLDivElement, InlineDiffLineProps>(fun
         );
     }
 
+    const hasWordRanges = (line.wordRanges?.length ?? 0) > 0;
+
     const lineStyles = {
         context: "bg-muted/5",
         unchanged: "bg-muted/5",
-        addition: "bg-green-500/15 dark:bg-green-500/10",
-        deletion: "bg-red-500/15 dark:bg-red-500/10",
-    };
+        // When we have word-level ranges, tone down the full-line background
+        // so the highlighted tokens stand out instead of drowning in color.
+        addition: hasWordRanges
+            ? "bg-green-500/5 dark:bg-green-500/5"
+            : "bg-green-500/15 dark:bg-green-500/10",
+        deletion: hasWordRanges
+            ? "bg-red-500/5 dark:bg-red-500/5"
+            : "bg-red-500/15 dark:bg-red-500/10",
+    } as const;
 
     const textStyles = {
         context: "text-muted-foreground",
         unchanged: "",
         addition: "text-green-800 dark:text-green-300",
-        deletion: "text-red-800 dark:text-red-300 line-through",
-    };
+        deletion: hasWordRanges
+            ? "text-red-800 dark:text-red-300"
+            : "text-red-800 dark:text-red-300 line-through",
+    } as const;
 
     const borderStyles = {
         context: "",
         unchanged: "",
         addition: "border-l-2 border-green-500",
         deletion: "border-l-2 border-red-500",
-    };
+    } as const;
 
     const lineNumber = line.type === "deletion" ? line.oldLineNumber : line.newLineNumber;
 
@@ -118,7 +129,7 @@ const InlineDiffLine = React.forwardRef<HTMLDivElement, InlineDiffLineProps>(fun
             className={cn(
                 "flex min-h-[1.75rem]",
                 lineStyles[line.type],
-                borderStyles[line.type]
+                borderStyles[line.type],
             )}
         >
             <div className="w-14 pr-3 text-right text-muted-foreground/40 select-none shrink-0 text-xs leading-7 bg-muted/30">
@@ -135,11 +146,51 @@ const InlineDiffLine = React.forwardRef<HTMLDivElement, InlineDiffLineProps>(fun
             <div
                 className={cn(
                     "flex-1 whitespace-pre-wrap break-words leading-7 pr-4",
-                    textStyles[line.type]
+                    textStyles[line.type],
                 )}
             >
-                {line.content || " "}
+                <InlineLineContent line={line} />
             </div>
         </div>
     );
 });
+
+function InlineLineContent({ line }: { line: FormattedLine }) {
+    const content = line.content || " ";
+    const ranges = line.wordRanges ?? [];
+    if (ranges.length === 0) {
+        return <>{content}</>;
+    }
+
+    const sorted = [...ranges].sort((a, b) => a.start - b.start);
+    const segments: React.ReactNode[] = [];
+    let cursor = 0;
+    for (let i = 0; i < sorted.length; i++) {
+        const r = sorted[i];
+        const start = Math.max(r.start, cursor);
+        const end = Math.min(r.end, content.length);
+        if (start > cursor) {
+            segments.push(<span key={`u-${i}`}>{content.slice(cursor, start)}</span>);
+        }
+        if (end > start) {
+            segments.push(
+                <mark
+                    key={`h-${i}`}
+                    className={cn(
+                        "rounded px-0.5",
+                        line.type === "deletion"
+                            ? "bg-red-500/30 text-red-900 dark:text-red-200 line-through"
+                            : "bg-green-500/30 text-green-900 dark:text-green-200",
+                    )}
+                >
+                    {content.slice(start, end)}
+                </mark>,
+            );
+        }
+        cursor = end;
+    }
+    if (cursor < content.length) {
+        segments.push(<span key="tail">{content.slice(cursor)}</span>);
+    }
+    return <>{segments}</>;
+}

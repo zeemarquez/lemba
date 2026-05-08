@@ -2,29 +2,73 @@
 
 import { browserStorage } from '@/lib/browser-storage';
 
+function buildTwemojiFallbackUrls(url: string): string[] {
+    const matches = url.match(/^(https:\/\/cdn\.jsdelivr\.net\/gh\/twitter\/twemoji@14\.0\.2\/assets\/svg\/)([0-9a-f-]+)(\.svg)$/i);
+    if (!matches) {
+        return [url];
+    }
+
+    const [, prefix, codePointPart, suffix] = matches;
+    const baseCodePoints = codePointPart
+        .split('-')
+        .map(cp => cp.toLowerCase())
+        .filter(Boolean);
+
+    if (baseCodePoints.length === 0) {
+        return [url];
+    }
+
+    const variants = new Set<string>();
+    variants.add(baseCodePoints.join('-'));
+
+    // Twemoji coverage is inconsistent for text-vs-emoji presentation variants.
+    // Try adding FE0F for single-symbol emojis and stripping FE0F from sequences.
+    if (baseCodePoints.length === 1 && baseCodePoints[0] !== 'fe0f') {
+        variants.add(`${baseCodePoints[0]}-fe0f`);
+    }
+
+    if (baseCodePoints.includes('fe0f')) {
+        const withoutFe0f = baseCodePoints.filter(cp => cp !== 'fe0f');
+        if (withoutFe0f.length > 0) {
+            variants.add(withoutFe0f.join('-'));
+        }
+    }
+
+    return Array.from(variants).map(variant => `${prefix}${variant}${suffix}`);
+}
+
 /**
  * Fetch an image from URL and return as base64 data URL
  */
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
     try {
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        const candidates = buildTwemojiFallbackUrls(url);
+
+        for (let i = 0; i < candidates.length; i++) {
+            const candidateUrl = candidates[i];
+            const response = await fetch(candidateUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+
+            if (!response.ok) {
+                // Keep fallback attempts quiet; only log final miss below.
+                if (i < candidates.length - 1) continue;
+                console.error(`Failed to download ${url}: ${response.status} ${response.statusText}`);
+                return null;
             }
-        });
-        
-        if (!response.ok) {
-            console.error(`Failed to download ${url}: ${response.status} ${response.statusText}`);
-            return null;
+
+            const blob = await response.blob();
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
         }
-        
-        const blob = await response.blob();
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+
+        return null;
     } catch (e) {
         console.error(`[Typst] [ImageManager] Failed to fetch ${url}:`, e);
         return null;

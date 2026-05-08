@@ -56,11 +56,20 @@ export class StructureReviewAgent {
         let systemPrompt = STRUCTURE_REVIEW_PROMPT;
 
         if (activeDocument) {
+            const lineCount = activeDocument.content.split('\n').length;
             systemPrompt += `\n\n## Document to Review (REQUIRED)\n`;
             systemPrompt += `- **File ID (use this EXACT value in every tool call):** \`${activeDocument.id}\`\n`;
             systemPrompt += `- Name: ${activeDocument.name}\n`;
-            systemPrompt += `- Lines: ${activeDocument.content.split('\n').length}\n`;
+            systemPrompt += `- Lines: ${lineCount}\n`;
             systemPrompt += `\n**CRITICAL:** Use ONLY the File ID above. Never invent or use a different path or filename.\n`;
+
+            // Include the full document content so the agent can detect
+            // content-level (not just heading-level) duplicates without extra
+            // tool round-trips. Only for documents that fit comfortably.
+            if (lineCount <= 500) {
+                systemPrompt += `\n### Full Document Content\n`;
+                systemPrompt += '```markdown\n' + activeDocument.content + '\n```\n';
+            }
         }
 
         const messages: ChatCompletionMessage[] = [

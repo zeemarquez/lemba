@@ -271,6 +271,38 @@ function processTextWithPlaceholders(text: string, options: MarkdownToTypstOptio
 const EMOJI_QUICK_TEST = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{1FA00}-\u{1FAFF}]|[\u{1F1E6}-\u{1F1FF}]|[\u{1F200}-\u{1F2FF}]|[\u2764\u2763\u2665\u2666\u2660\u2663\u270C\u270B\u270A\u270D\u2728\u2B50\u2B55\u274C\u274E\u2753\u2757\u203C\u2049\u00A9\u00AE\u2122]/u;
 
 /**
+ * BMP codepoints that are Emoji_Presentation by default — they have a Twemoji
+ * SVG and should be rendered as images even without a FE0F variation selector.
+ * Characters NOT in this set but matched by isEmojiCodePoint's range checks
+ * (e.g. ✓ U+2713) are plain typographic symbols and must have FE0F to be
+ * treated as emoji.
+ */
+const EXPLICIT_BMP_EMOJIS = new Set([
+    // Hearts / suits
+    0x2764, 0x2763, 0x2665, 0x2666, 0x2660, 0x2663,
+    // Hand gestures
+    0x270A, 0x270B, 0x270C, 0x270D,
+    // Dingbats with Twemoji coverage
+    0x2702, 0x2705, 0x2708, 0x2709, 0x270F, 0x2712, 0x2714, 0x2716,
+    0x271D, 0x2721, 0x2728, 0x2733, 0x2734, 0x2744, 0x2747,
+    0x274C, 0x274E, 0x2753, 0x2754, 0x2755, 0x2757,
+    0x2763, 0x2795, 0x2796, 0x2797, 0x27A1, 0x27B0, 0x27BF,
+    // Stars / circles
+    0x2B50, 0x2B55,
+    // Misc symbols with Twemoji coverage
+    0x2600, 0x2601, 0x260E, 0x2614, 0x2615, 0x261D,
+    0x2620, 0x2622, 0x2623, 0x2626, 0x262A, 0x262E, 0x262F,
+    0x2638, 0x2639, 0x263A, 0x267B, 0x267F, 0x2693,
+    0x26A1, 0x26AA, 0x26AB, 0x26BD, 0x26BE, 0x26C4, 0x26C5,
+    0x26CE, 0x26D4, 0x26EA, 0x26F2, 0x26F3, 0x26F5, 0x26FA, 0x26FD,
+    0x2702, 0x2934, 0x2935, 0x2B05, 0x2B06, 0x2B07, 0x2B1B, 0x2B1C,
+    // Punctuation-adjacent
+    0x203C, 0x2049,
+    // Intellectual property
+    0x00A9, 0x00AE, 0x2122,
+]);
+
+/**
  * Detects if a codepoint is part of an emoji
  * Uses Unicode ranges for emojis
  */
@@ -294,29 +326,8 @@ function isEmojiCodePoint(codePoint: number): boolean {
         (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) ||
         // Enclosed Alphanumeric Supplement (some emojis like Ⓜ️)
         (codePoint >= 0x1F200 && codePoint <= 0x1F2FF) ||
-        // Common emoji-like symbols
-        codePoint === 0x2764 || // ❤
-        codePoint === 0x2763 || // ❣
-        codePoint === 0x2665 || // ♥
-        codePoint === 0x2666 || // ♦
-        codePoint === 0x2660 || // ♠
-        codePoint === 0x2663 || // ♣
-        codePoint === 0x270C || // ✌
-        codePoint === 0x270B || // ✋
-        codePoint === 0x270A || // ✊
-        codePoint === 0x270D || // ✍
-        codePoint === 0x2728 || // ✨
-        codePoint === 0x2B50 || // ⭐
-        codePoint === 0x2B55 || // ⭕
-        codePoint === 0x274C || // ❌
-        codePoint === 0x274E || // ❎
-        codePoint === 0x2753 || // ❓
-        codePoint === 0x2757 || // ❗
-        codePoint === 0x203C || // ‼
-        codePoint === 0x2049 || // ⁉
-        codePoint === 0x00A9 || // ©
-        codePoint === 0x00AE || // ®
-        codePoint === 0x2122    // ™
+        // Explicitly listed BMP symbols with Twemoji coverage
+        EXPLICIT_BMP_EMOJIS.has(codePoint)
     );
 }
 
@@ -366,7 +377,16 @@ function processTextWithEmojis(text: string): string {
         const char = chars[i];
         const codePoint = char.codePointAt(0);
 
-        if (codePoint && isEmojiCodePoint(codePoint)) {
+        // For BMP codepoints that are only matched by broad range checks (not in
+        // EXPLICIT_BMP_EMOJIS), require an FE0F variation selector to follow.
+        // This prevents plain typographic symbols like ✓ (U+2713) from being
+        // treated as emojis — they don't exist in the Twemoji SVG set.
+        const isBmpRangeOnly = codePoint !== undefined &&
+            codePoint < 0x10000 &&
+            !EXPLICIT_BMP_EMOJIS.has(codePoint);
+        const nextIsFe0f = chars[i + 1]?.codePointAt(0) === 0xFE0F;
+
+        if (codePoint && isEmojiCodePoint(codePoint) && (!isBmpRangeOnly || nextIsFe0f)) {
             // Save current segment if any
             if (currentSegment) {
                 segments.push(escapeTypst(currentSegment));
@@ -1040,9 +1060,13 @@ function processToken(token: any, options: MarkdownToTypstOptions = {}): string 
 
             return `#image("${escapeTypstString(href)}"${extraArgs})\n\n`;
         case 'katex':
-        case 'blockKatex':
+        case 'blockKatex': {
             // Block/display math: use spaces around content for Typst display mode
-            return `$ ${convertLatexToTypst(token.text)} $\n\n`;
+            const blockMathContent = convertLatexToTypst(token.text);
+            // Skip empty equations — Typst "$ $" (display math with no content) causes "expected expression"
+            if (!blockMathContent.trim()) return '';
+            return `$ ${blockMathContent} $\n\n`;
+        }
         default:
             return '';
     }
@@ -1322,16 +1346,21 @@ function parseInline(tokens: any[], options: MarkdownToTypstOptions): string {
                 }
                 output += `#image("${escapeTypstString(href)}"${w ? `, width: ${w}` : ''})`;
                 break;
-            case 'inlineKatex':
+            case 'inlineKatex': {
                 // Check displayMode: true means block/display math ($$...$$), false means inline ($...$)
-                if (token.displayMode) {
-                    // Display mode math: use spaces for Typst block display
-                    output += `$ ${convertLatexToTypst(token.text)} $`;
-                } else {
-                    // Inline math: no spaces for Typst inline mode
-                    output += `$${convertLatexToTypst(token.text)}$`;
+                const inlineMathContent = convertLatexToTypst(token.text);
+                // Skip empty equations — Typst "$ $" (display math with no content) causes "expected expression"
+                if (inlineMathContent.trim()) {
+                    if (token.displayMode) {
+                        // Display mode math: use spaces for Typst block display
+                        output += `$ ${inlineMathContent} $`;
+                    } else {
+                        // Inline math: no spaces for Typst inline mode
+                        output += `$${inlineMathContent}$`;
+                    }
                 }
                 break;
+            }
             case 'escape':
                 output += processTextWithPlaceholders(token.text, options);
                 break;

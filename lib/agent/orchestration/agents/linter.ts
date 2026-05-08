@@ -7,7 +7,8 @@ import type { LLMProvider } from '../../ai-service';
 import { chatCompletionOneRound, buildVisionUserContent } from '../../ai-service';
 import type { ChatCompletionMessage } from '../../ai-service';
 import { DocumentDiff } from '../../types';
-import { mergeDiffsForFile } from '../../diff-utils';
+import { mergeDiffsForFile, withUpdatedProposedContent, generateDiff } from '../../diff-utils';
+import { enforceHouseRules } from '../../math-format';
 import { AgentContext, DEFAULT_AGENT_CONFIGS, generateId } from '../types';
 import { ToolRegistry, ToolResult } from '../tools';
 import { LINTER_PROMPT } from '../prompts';
@@ -181,6 +182,29 @@ export class LinterAgent {
                 }
                 continue;
             }
+            // Final deterministic pass: whatever the LLM did or didn't fix,
+            // force the content to satisfy the deterministic house rules
+            // (block equations, numbered headings, blank-line-before-block, ...).
+            // The LLM is only responsible for prose-level fixes; formatting
+            // is enforced in code to keep the linter trustworthy.
+            if (autoFix && activeDocument) {
+                const currentContent = contentOverrides[activeDocument.id] ?? activeDocument.content;
+                const normalized = enforceHouseRules(currentContent);
+                if (normalized !== currentContent) {
+                    const fileName = activeDocument.name;
+                    const cleanupDiff = generateDiff(
+                        activeDocument.id,
+                        fileName,
+                        currentContent,
+                        normalized,
+                        'Enforce markdown house rules'
+                    );
+                    collectedDiffs.push(cleanupDiff);
+                    contentOverrides[activeDocument.id] = normalized;
+                    if (options.onDiffCreated) options.onDiffCreated(cleanupDiff);
+                }
+            }
+
             return {
                 output: result.content || '',
                 diffs: collectedDiffs,

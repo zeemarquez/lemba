@@ -1029,12 +1029,20 @@ export function postprocessMathDelimiters(markdown: string): string {
     '$1[!$2]'
   );
 
+  // Remove empty block equations: $$\n$$ (produced by remark-math when serializing an
+  // empty math node). Without this, marked treats "$$\n$$" as a paragraph with inline
+  // content "$$ $$", which the katex tokenizer matches as empty display math — Typst
+  // then errors with "expected expression" on the resulting "$ $".
+  result = result.replace(/\$\$\n\$\$/g, '');
+
   // Convert multi-line block math to single-line format
   // Match: $$ newline content newline $$
   return result.replace(
     /\$\$\n([\s\S]*?)\n\$\$/g,
     (match, content) => {
       const trimmed = content.trim();
+      // Remove empty equations (e.g. $$\n\n$$ where content is only whitespace)
+      if (!trimmed) return '';
       // Keep multi-line if content has multiple lines
       if (trimmed.includes('\n')) return match;
       return `$$${trimmed}$$`;

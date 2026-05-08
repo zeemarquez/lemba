@@ -29,4 +29,8 @@ export type { WebSearchResult, WebSearchResponse } from './tools/web-search';
 export { ragQuery, ragIndex, getRAGContext, formatRAGResults, formatRAGContext, getRAGStats } from './tools/rag-tools';
 
 // Export prompts
-export { getAgentPrompt, ORCHESTRATOR_PROMPT, PLANNER_PROMPT, RESEARCHER_PROMPT, WRITER_PROMPT, STRUCTURE_REVIEW_PROMPT, LINTER_PROMPT, SUMMARIZER_PROMPT } from './prompts';
+export { getAgentPrompt, ORCHESTRATOR_PROMPT, PLANNER_PROMPT, RESEARCHER_PROMPT, WRITER_PROMPT, WRITER_QUICK_PROMPT, WRITER_EDIT_PROMPT, WRITER_CREATE_PROMPT, STRUCTURE_REVIEW_PROMPT, LINTER_PROMPT, SUMMARIZER_PROMPT, HOUSE_RULES, FILE_ID_RULES, SAFE_EDIT_RULES } from './prompts';
+
+// Export router
+export { route, decisionLabel } from './router';
+export type { RouterIntent, RouterDecision, EditScope, RouteOptions, TargetLength } from './router';

@@ -12,6 +12,7 @@ import { useEditorReadOnly } from 'platejs/react';
 
 
 import { AlignToolbarButton } from './align-toolbar-button';
+import { CleanHeadingsToolbarButton } from './clean-headings-toolbar-button';
 import { CommentToolbarButton } from './comment-toolbar-button';
 import { FontColorToolbarButton } from './font-color-toolbar-button';
 import { FontSizeToolbarButton } from './font-size-toolbar-button';
@@ -69,6 +70,7 @@ export function FixedToolbarButtons() {
       <div className="grow" />
 
       <ToolbarGroup>
+        <CleanHeadingsToolbarButton />
         <CommentToolbarButton />
         <ModeToolbarButton />
       </ToolbarGroup>

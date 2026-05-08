@@ -4,7 +4,7 @@ import { browserStorage } from './browser-storage';
 import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
-import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL } from './agent';
+import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL, generateDiff, applyPartial } from './agent';
 import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
 import { saveBackupBeforeApply } from './content-backup';
@@ -45,6 +45,14 @@ export interface AppState {
     agentLoading: boolean;
     /** Current orchestration step label (e.g. "Researching") when agentLoading and using orchestration */
     agentCurrentStep: string | null;
+    /** Step progress (current/total) for the active orchestration workflow */
+    agentStepProgress: { current: number; total: number } | null;
+    /**
+     * Short label describing the router decision for the most recent Agent-mode
+     * request (e.g. "Fast edit", "Full workflow"). Persists after the workflow
+     * completes so the pill stays visible until the next request clears it.
+     */
+    agentLastRouteLabel: string | null;
     agentError: string | null;
     agentProvider: LLMProvider;
     agentModel: string;
@@ -126,6 +134,10 @@ export interface AppState {
     rejectAllPending: () => void;
     approveDiff: (diffId: string) => Promise<void>;
     rejectDiff: (diffId: string) => void;
+    /** Accept a single hunk from a merged pending diff; replaces the diff with one that no longer contains that hunk. */
+    acceptHunk: (fileId: string, hunkIndex: number) => Promise<void>;
+    /** Reject a single hunk from a merged pending diff without applying it. */
+    rejectHunk: (fileId: string, hunkIndex: number) => void;
     setAgentMentionedFiles: (files: string[]) => void;
     setAgentLoading: (loading: boolean) => void;
     setAgentError: (error: string | null) => void;
@@ -431,6 +443,8 @@ export const useStore = create<AppState>()(
                 agentMentionedFiles: [],
                 agentLoading: false,
                 agentCurrentStep: null,
+                agentStepProgress: null,
+                agentLastRouteLabel: null,
                 agentError: null,
                 agentProvider: 'openai',
                 agentModel: 'gpt-4o',
@@ -1166,6 +1180,8 @@ export const useStore = create<AppState>()(
                             agentMentionedFiles: filesForContext,
                             agentLoading: true,
                             agentCurrentStep: null,
+                            agentStepProgress: null,
+                            agentLastRouteLabel: null,
                             agentError: null,
                             ragDocuments: [],
                         };
@@ -1221,12 +1237,12 @@ export const useStore = create<AppState>()(
                             const provider = modelToProvider(state.agentModel);
                             const apiKey = state.agentApiKeys[provider]?.trim() || undefined;
                             const stepLabels: Record<string, string> = {
-                                researcher: '🔍 Researching',
-                                planner: '📋 Planning',
-                                writer: '✍️ Writing',
-                                structure_review: '📐 Reviewing structure',
-                                linter: '✨ Linting',
-                                summarizer: '💬 Summarizing',
+                                researcher: 'Researching',
+                                planner: 'Planning',
+                                writer: 'Writing',
+                                structure_review: 'Reviewing structure',
+                                linter: 'Linting',
+                                summarizer: 'Summarizing',
                             };
                             // Only pass a content override when we actually have the file loaded
                             // in memory. Passing '' for an unloaded file would make the AI see
@@ -1251,10 +1267,16 @@ export const useStore = create<AppState>()(
                                     onDiffCreated,
                                     initialContentOverrides,
                                     onEvent: (event) => {
-                                        if (event.type === 'step_started') {
-                                            set({ agentCurrentStep: stepLabels[event.step.agentType] ?? event.step.agentType });
+                                        if (event.type === 'route_decided') {
+                                            set({ agentLastRouteLabel: event.label });
+                                        } else if (event.type === 'step_started') {
+                                            const label = stepLabels[event.step.agentType] ?? event.step.agentType;
+                                            set({
+                                                agentCurrentStep: `Step ${event.index + 1}/${event.total}: ${label}`,
+                                                agentStepProgress: { current: event.index + 1, total: event.total },
+                                            });
                                         } else if (event.type === 'workflow_completed' || event.type === 'workflow_failed') {
-                                            set({ agentCurrentStep: null });
+                                            set({ agentCurrentStep: null, agentStepProgress: null });
                                         }
                                     },
                                 }
@@ -1328,6 +1350,7 @@ export const useStore = create<AppState>()(
                         set({
                             agentLoading: false,
                             agentCurrentStep: null,
+                            agentStepProgress: null,
                             agentError: error instanceof Error ? error.message : 'Failed to get AI response',
                         });
                     }
@@ -1392,46 +1415,85 @@ export const useStore = create<AppState>()(
                     if (diffs.length === 0) return;
                     try {
                         const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                        // Files whose diffs could not be cleanly applied because the user
+                        // edited them after the AI proposed changes. These stay pending
+                        // (as a re-anchored diff against the current content) so the user
+                        // can review in-context instead of silently losing their work.
+                        const conflictedFileIds = new Set<string>();
+                        const residualDiffs: DocumentDiff[] = [];
+
                         for (const diff of diffs) {
                             const currentFile = get().files.find((f) => f.id === diff.fileId);
                             const currentContent = currentFile?.content ?? '';
 
-                            // Save backup before overwriting, regardless of drift
                             if (currentFile?.content !== undefined) {
                                 saveBackupBeforeApply(diff.fileId, currentFile.content);
                             }
 
-                            // Detect content drift: the document was edited after the diff was
-                            // created.  In this case we apply the diff's proposedContent which is
-                            // based on the original snapshot — user edits made after the AI
-                            // session started will be overwritten.  The backup above preserves
-                            // those edits for manual recovery.
-                            if (norm(diff.originalContent) !== norm(currentContent)) {
+                            if (norm(diff.originalContent) === norm(currentContent)) {
+                                // No drift: apply the proposed content.
+                                const newContent = applyDiffToContent(diff.originalContent, diff);
+                                await get().saveFile(diff.fileId, newContent);
+                            } else {
+                                // Drift: re-diff the proposed content against the CURRENT file
+                                // content. If the result is effectively a no-op, apply it.
+                                // Otherwise keep it pending so the user reviews in-context.
                                 console.warn(
-                                    '[Store] Content drift detected on accept. ' +
-                                    'The diff was generated against an older snapshot. ' +
-                                    'A backup of the current content has been saved. fileId=',
+                                    '[Store] Content drift detected on acceptAll; re-diffing against current content. fileId=',
                                     diff.fileId
                                 );
+                                const rebased = generateDiff(
+                                    diff.fileId,
+                                    diff.fileName,
+                                    currentContent,
+                                    diff.proposedContent,
+                                    diff.description ? `${diff.description} (rebased)` : 'Rebased against your edits',
+                                );
+                                if (rebased.hunks.length === 0) {
+                                    // Document already matches the proposal; nothing to write.
+                                    continue;
+                                }
+                                // Heuristic: when the rebased diff is small relative to the
+                                // original diff, the user's edits didn't conflict and we can
+                                // apply it. When the rebase is big, leave it pending.
+                                const origChanges = diff.hunks.reduce(
+                                    (n, h) => n + h.oldLines.length + h.newLines.length,
+                                    0
+                                );
+                                const rebasedChanges = rebased.hunks.reduce(
+                                    (n, h) => n + h.oldLines.length + h.newLines.length,
+                                    0
+                                );
+                                if (rebasedChanges <= Math.max(origChanges, 1)) {
+                                    await get().saveFile(diff.fileId, diff.proposedContent);
+                                } else {
+                                    conflictedFileIds.add(diff.fileId);
+                                    residualDiffs.push(rebased);
+                                }
                             }
-
-                            // applyDiffToContent simply returns diff.proposedContent (the full
-                            // post-AI document stored in the diff).
-                            const newContent = applyDiffToContent(diff.originalContent, diff);
-                            await get().saveFile(diff.fileId, newContent);
-                            // saveFile already updates state.files via its own set() call,
-                            // so we do not need to touch files again in the final set() below.
                         }
+
                         set((s) => {
-                            const updates: Partial<AppState> = {
-                                pendingDiffs: {},
-                            };
+                            // Drop all pending diffs for files that we cleanly applied or
+                            // had no conflict; keep (replaced by residual) for conflicted ones.
+                            const nextDiffs: Record<string, DocumentDiff> = {};
+                            for (const residual of residualDiffs) {
+                                nextDiffs[residual.id] = residual;
+                            }
+                            // If there were other pending diffs for non-conflicted files,
+                            // they have been applied and should be removed; this is the
+                            // current behavior (replace with empty except for conflicts).
+                            const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                            if (conflictedFileIds.size > 0) {
+                                updates.agentError =
+                                    `Your edits conflicted with ${conflictedFileIds.size} AI change${conflictedFileIds.size === 1 ? '' : 's'}. Review the pending changes to decide.`;
+                            }
                             if (s.activeChatId && s.chats[s.activeChatId]) {
                                 updates.chats = {
                                     ...s.chats,
                                     [s.activeChatId]: {
                                         ...s.chats[s.activeChatId],
-                                        pendingDiffs: {},
+                                        pendingDiffs: nextDiffs,
                                         updatedAt: Date.now(),
                                     },
                                 };
@@ -1533,6 +1595,136 @@ export const useStore = create<AppState>()(
                         }
                         return updates;
                     }),
+
+                /**
+                 * Accept a single hunk from the merged pending diff for a file.
+                 *
+                 * The underlying store holds N raw diffs per file (one per AI
+                 * tool call). The UI works with the merged view. To accept a
+                 * single hunk we:
+                 *   1. Compute the merged diff for the file.
+                 *   2. Apply only that hunk to the current file content.
+                 *   3. Replace all pending diffs for the file with a single
+                 *      residual diff whose originalContent is the newly
+                 *      written file content and proposedContent equals the
+                 *      merged proposedContent (so the remaining hunks stay
+                 *      pending).
+                 */
+                acceptHunk: async (fileId: string, hunkIndex: number) => {
+                    const state = get();
+                    const pendingForFile = Object.values(state.pendingDiffs).filter(
+                        (d) => d.fileId === fileId && d.status === 'pending'
+                    );
+                    if (pendingForFile.length === 0) return;
+                    const merged = mergeDiffsForFile(pendingForFile);
+                    if (!merged || !merged.hunks[hunkIndex]) return;
+
+                    try {
+                        const currentFile = state.files.find((f) => f.id === fileId);
+                        const currentContent = currentFile?.content ?? '';
+                        if (currentFile?.content !== undefined) {
+                            saveBackupBeforeApply(fileId, currentFile.content);
+                        }
+
+                        // Apply only the accepted hunk, starting from the merged diff's
+                        // original snapshot. The residual diff keeps the remaining hunks.
+                        const acceptedContent = applyPartial(merged, [hunkIndex]);
+                        await get().saveFile(fileId, acceptedContent);
+
+                        set((s) => {
+                            const nextDiffs: Record<string, DocumentDiff> = {};
+                            for (const [id, d] of Object.entries(s.pendingDiffs)) {
+                                if (d.fileId !== fileId) nextDiffs[id] = d;
+                            }
+                            const stillPending = merged.hunks.length > 1;
+                            if (stillPending) {
+                                // Residual diff = "what remains between the file we just saved
+                                // and the full merged proposal". generateDiff recomputes hunks
+                                // for us, so subsequent accepts stay drift-free.
+                                const residual = generateDiff(
+                                    fileId,
+                                    merged.fileName,
+                                    acceptedContent,
+                                    merged.proposedContent,
+                                    merged.description,
+                                );
+                                nextDiffs[residual.id] = residual;
+                            }
+                            const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                            if (s.activeChatId && s.chats[s.activeChatId]) {
+                                updates.chats = {
+                                    ...s.chats,
+                                    [s.activeChatId]: {
+                                        ...s.chats[s.activeChatId],
+                                        pendingDiffs: nextDiffs,
+                                        updatedAt: Date.now(),
+                                    },
+                                };
+                            }
+                            return updates;
+                        });
+
+                        // Sanity: warn when the current file content diverged from the merged
+                        // original (the user edited while AI was running). The backup above
+                        // lets them recover.
+                        const norm = (s: string) => (s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                        if (norm(merged.originalContent) !== norm(currentContent)) {
+                            console.warn(
+                                '[Store] Content drift detected on acceptHunk. Backup saved. fileId=',
+                                fileId
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Failed to accept hunk:', error);
+                        set({ agentError: 'Failed to apply hunk' });
+                    }
+                },
+
+                rejectHunk: (fileId: string, hunkIndex: number) => {
+                    const state = get();
+                    const pendingForFile = Object.values(state.pendingDiffs).filter(
+                        (d) => d.fileId === fileId && d.status === 'pending'
+                    );
+                    if (pendingForFile.length === 0) return;
+                    const merged = mergeDiffsForFile(pendingForFile);
+                    if (!merged || !merged.hunks[hunkIndex]) return;
+
+                    const remainingHunks = merged.hunks.filter((_, i) => i !== hunkIndex);
+
+                    set((s) => {
+                        const nextDiffs: Record<string, DocumentDiff> = {};
+                        for (const [id, d] of Object.entries(s.pendingDiffs)) {
+                            if (d.fileId !== fileId) nextDiffs[id] = d;
+                        }
+                        if (remainingHunks.length > 0) {
+                            // Build a new residual diff with only the remaining hunks.
+                            const residualProposed = applyPartial(
+                                { ...merged, hunks: remainingHunks },
+                                remainingHunks.map((_, i) => i)
+                            );
+                            const residual = generateDiff(
+                                fileId,
+                                merged.fileName,
+                                merged.originalContent,
+                                residualProposed,
+                                merged.description,
+                            );
+                            nextDiffs[residual.id] = residual;
+                        }
+                        const updates: Partial<AppState> = { pendingDiffs: nextDiffs };
+                        if (s.activeChatId && s.chats[s.activeChatId]) {
+                            updates.chats = {
+                                ...s.chats,
+                                [s.activeChatId]: {
+                                    ...s.chats[s.activeChatId],
+                                    pendingDiffs: nextDiffs,
+                                    updatedAt: Date.now(),
+                                },
+                            };
+                        }
+                        return updates;
+                    });
+                },
 
                 setAgentMentionedFiles: (files) => set({ agentMentionedFiles: files }),
                 setAgentLoading: (loading) => set({ agentLoading: loading }),
