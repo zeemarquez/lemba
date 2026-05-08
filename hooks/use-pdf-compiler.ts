@@ -70,7 +70,7 @@ export interface TemplateSettings {
     h6?: HeadingSettings;
     header?: { enabled?: boolean; content?: string; startPage?: number; margins?: { bottom: string; left: string; right: string } };
     footer?: { enabled?: boolean; content?: string; startPage?: number; margins?: { top: string; left: string; right: string } };
-    frontPage?: { enabled?: boolean; content?: string; emptyPagesAfter?: number };
+    frontPage?: { enabled?: boolean; content?: string; emptyPagesAfter?: number; uploadEnabled?: boolean; uploadedImage?: string };
     tables?: {
         preventPageBreak?: boolean;
         equalWidthColumns?: boolean;
