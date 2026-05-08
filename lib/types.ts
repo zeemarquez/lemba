@@ -120,6 +120,8 @@ export interface Template {
             enabled: boolean;
             content: string;
             emptyPagesAfter?: number;
+            uploadEnabled?: boolean;
+            uploadedImage?: string;
         };
         codeBlockTheme?: string;
         codeBlocks?: {

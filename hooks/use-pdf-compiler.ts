@@ -290,9 +290,14 @@ async function buildTypstSource(options: CompileOptions): Promise<string> {
         footerContent = await contentToTypst(footerWithImages, { title, scaleImages: true, insideContext: true, pageNumberOffset, variables, alerts: settings?.alerts, resolvedLucideSvgs });
     }
 
-    if (settings?.frontPage?.enabled && settings?.frontPage?.content) {
-        const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
-        frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts, resolvedLucideSvgs });
+    if (settings?.frontPage?.enabled) {
+        if (settings.frontPage.uploadEnabled && settings.frontPage.uploadedImage) {
+            const imgSrc = settings.frontPage.uploadedImage;
+            frontPageContent = `#page(margin: 0pt, fill: white)[#image("${imgSrc}", width: 100%, height: 100%, fit: "cover")]`;
+        } else if (settings.frontPage.content) {
+            const frontPageWithImages = await convertIndexedDbImagesToBase64(settings.frontPage.content);
+            frontPageContent = await contentToTypst(frontPageWithImages, { title, scaleImages: false, insideContext: false, tables: settings?.tables, pageNumberOffset, variables, figures: settings?.figures, alerts: settings?.alerts, resolvedLucideSvgs });
+        }
     }
 
     // Generate Preamble
@@ -422,7 +427,10 @@ ${outlineEmptyPagesTypst}
     }
 
     if (frontPageContent) {
-        bodyContent = `${frontPageContent}\n#pagebreak()\n${frontPageEmptyPagesTypst}${outlineContent}`;
+        // When using image upload mode, #page(...)[] already forces its own page break;
+        // no explicit #pagebreak() is needed to avoid an unwanted blank page.
+        const frontPageSeparator = settings?.frontPage?.uploadEnabled ? '\n' : '\n#pagebreak()\n';
+        bodyContent = `${frontPageContent}${frontPageSeparator}${frontPageEmptyPagesTypst}${outlineContent}`;
     } else if (outlineContent) {
         bodyContent = `${outlineContent}`;
     }

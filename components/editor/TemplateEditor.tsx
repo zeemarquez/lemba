@@ -1677,17 +1677,98 @@ export function TemplateEditor() {
 
                             {settings.frontPage?.enabled && (
                                 <>
-                                    <p className="text-sm text-muted-foreground">
-                                        The front page will be inserted as the first page of your document, before the main content.
-                                    </p>
+                                    {/* Upload Front Page Toggle */}
+                                    <div className="flex items-center gap-6 pt-2 border-t border-border">
+                                        <label className="text-base font-semibold text-foreground">Upload front page</label>
+                                        <button
+                                            onClick={() => updateSetting('frontPage.uploadEnabled', !settings.frontPage?.uploadEnabled)}
+                                            className={cn(
+                                                "w-14 h-8 rounded-full transition-all duration-300 relative",
+                                                settings.frontPage?.uploadEnabled ? "bg-primary" : "bg-muted-foreground/30"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "w-6 h-6 rounded-full bg-background shadow-sm absolute top-1 transition-all duration-300",
+                                                settings.frontPage?.uploadEnabled ? "left-7" : "left-1"
+                                            )} />
+                                        </button>
+                                    </div>
 
-                                    {/* Plate Editor for Front Page Content */}
-                                    <HeaderFooterPlateEditor
-                                        content={settings.frontPage?.content || ''}
-                                        onChange={(value) => updateSetting('frontPage.content', value)}
-                                        placeholder="Design your front page..."
-                                        variant="large"
-                                    />
+                                    {settings.frontPage?.uploadEnabled ? (
+                                        /* Image upload mode */
+                                        <div className="space-y-4">
+                                            <p className="text-sm text-muted-foreground">
+                                                Upload an image (PNG or JPG) to use as the front page. It will be scaled to fill the entire page.
+                                            </p>
+                                            <div className="flex flex-col gap-3">
+                                                <label
+                                                    htmlFor="front-page-upload"
+                                                    className={cn(
+                                                        "flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-2xl cursor-pointer transition-colors",
+                                                        settings.frontPage?.uploadedImage
+                                                            ? "border-primary/50 bg-primary/5"
+                                                            : "border-border hover:border-primary/50 hover:bg-muted/50"
+                                                    )}
+                                                >
+                                                    {settings.frontPage?.uploadedImage ? (
+                                                        <div className="flex flex-col items-center gap-2">
+                                                            <img
+                                                                src={settings.frontPage.uploadedImage}
+                                                                alt="Front page preview"
+                                                                className="max-h-28 max-w-full object-contain rounded-lg shadow-sm"
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                                            <span className="text-sm font-medium">Click to upload image</span>
+                                                            <span className="text-xs">PNG or JPG</span>
+                                                        </div>
+                                                    )}
+                                                    <input
+                                                        id="front-page-upload"
+                                                        type="file"
+                                                        accept="image/png,image/jpeg"
+                                                        className="hidden"
+                                                        onChange={(e) => {
+                                                            const file = e.target.files?.[0];
+                                                            if (!file) return;
+                                                            const reader = new FileReader();
+                                                            reader.onload = (ev) => {
+                                                                const dataUrl = ev.target?.result as string;
+                                                                if (dataUrl) updateSetting('frontPage.uploadedImage', dataUrl);
+                                                            };
+                                                            reader.readAsDataURL(file);
+                                                            e.target.value = '';
+                                                        }}
+                                                    />
+                                                </label>
+                                                {settings.frontPage?.uploadedImage && (
+                                                    <button
+                                                        onClick={() => updateSetting('frontPage.uploadedImage', undefined)}
+                                                        className="text-xs text-muted-foreground hover:text-destructive transition-colors self-start"
+                                                    >
+                                                        Remove image
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Rich text editor mode */
+                                        <>
+                                            <p className="text-sm text-muted-foreground">
+                                                The front page will be inserted as the first page of your document, before the main content.
+                                            </p>
+
+                                            {/* Plate Editor for Front Page Content */}
+                                            <HeaderFooterPlateEditor
+                                                content={settings.frontPage?.content || ''}
+                                                onChange={(value) => updateSetting('frontPage.content', value)}
+                                                placeholder="Design your front page..."
+                                                variant="large"
+                                            />
+                                        </>
+                                    )}
 
                                     {/* Empty Pages After */}
                                     <div className="flex items-center gap-4 pt-4 border-t border-border">
