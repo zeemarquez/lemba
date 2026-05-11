@@ -10,11 +10,20 @@ import {
 } from '@platejs/table/react';
 import { PopoverAnchor } from '@radix-ui/react-popover';
 import {
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
+  AlignVerticalDistributeCenterIcon,
+  AlignVerticalJustifyEndIcon,
+  AlignVerticalJustifyStartIcon,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
   CombineIcon,
+  EraserIcon,
+  Grid2X2Icon,
+  PaintBucketIcon,
   SquareCode,
   SquareSplitHorizontalIcon,
   Trash2Icon,
@@ -48,14 +57,36 @@ import {
 } from '@/components/plate-editor/plugins/html-table-plugin';
 import * as React from 'react';
 
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/plate-ui/dropdown-menu';
 import { Popover, PopoverContent } from '@/components/plate-ui/popover';
 import { cn } from '@/lib/utils';
 import { blockSelectionVariants } from './block-selection';
 import {
+  ColorDropdownMenuItems,
+  DEFAULT_COLORS,
+} from './font-color-toolbar-button';
+import {
+  BorderAllIcon,
+  BorderBottomIcon,
+  BorderLeftIcon,
+  BorderNoneIcon,
+  BorderRightIcon,
+  BorderTopIcon,
+} from './table-icons';
+import {
   Toolbar,
   ToolbarButton,
   ToolbarGroup,
+  ToolbarMenuGroup,
 } from './toolbar';
+
 function ConvertMarkdownTableToHtmlButton() {
   const editor = useEditorRef();
   const element = useElement<TTableElement>();
@@ -142,6 +173,239 @@ export const TableElement = withHOC(
   }
 );
 
+const MARKDOWN_CELL_TYPES = [KEYS.td, KEYS.th];
+
+function findMarkdownCell(editor: any) {
+  if (!editor.selection) return null;
+  return editor.api.node({
+    match: { type: MARKDOWN_CELL_TYPES },
+    at: editor.selection,
+  } as any) as [TTableCellElement, number[]] | undefined;
+}
+
+function getDefaultCellBorders() {
+  return {
+    top: { size: 1 },
+    right: { size: 1 },
+    bottom: { size: 1 },
+    left: { size: 1 },
+  };
+}
+
+function MarkdownCellColorDropdownMenu() {
+  const [open, setOpen] = React.useState(false);
+  const editor = useEditorRef();
+
+  const apply = React.useCallback(
+    (color: string | null) => {
+      setOpen(false);
+      const entry = findMarkdownCell(editor);
+      if (!entry) return;
+      editor.tf.setNodes({ background: color }, { at: entry[1] });
+    },
+    [editor]
+  );
+
+  return (
+    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <ToolbarButton tooltip="Background color">
+          <PaintBucketIcon />
+        </ToolbarButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <ToolbarMenuGroup label="Colors">
+          <ColorDropdownMenuItems
+            className="px-2"
+            colors={DEFAULT_COLORS}
+            updateColor={(c) => apply(c)}
+          />
+        </ToolbarMenuGroup>
+        <DropdownMenuGroup>
+          <DropdownMenuItem className="p-2" onClick={() => apply(null)}>
+            <EraserIcon />
+            <span>Clear</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function MarkdownCellBordersDropdownMenu() {
+  const editor = useEditorRef();
+
+  const borders = useEditorSelector((ed) => {
+    if (!ed.selection) return getDefaultCellBorders();
+    const entry = findMarkdownCell(ed);
+    if (!entry) return getDefaultCellBorders();
+    return (entry[0] as any).borders || getDefaultCellBorders();
+  }, []);
+
+  const toggle = React.useCallback(
+    (side: 'top' | 'right' | 'bottom' | 'left') => {
+      const entry = findMarkdownCell(editor);
+      if (!entry) return;
+      const current = (entry[0] as any).borders || getDefaultCellBorders();
+      const newBorders = {
+        ...current,
+        [side]: { size: current[side]?.size ? 0 : 1 },
+      };
+      editor.tf.setNodes({ borders: newBorders }, { at: entry[1] });
+    },
+    [editor]
+  );
+
+  const setAll = React.useCallback(
+    (size: number) => {
+      const entry = findMarkdownCell(editor);
+      if (!entry) return;
+      const b = { top: { size }, right: { size }, bottom: { size }, left: { size } };
+      editor.tf.setNodes({ borders: b }, { at: entry[1] });
+    },
+    [editor]
+  );
+
+  const hasAll =
+    borders.top?.size && borders.right?.size && borders.bottom?.size && borders.left?.size;
+  const hasNone =
+    !borders.top?.size && !borders.right?.size && !borders.bottom?.size && !borders.left?.size;
+
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <ToolbarButton tooltip="Cell borders">
+          <Grid2X2Icon />
+        </ToolbarButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="min-w-[220px]"
+        side="right"
+        sideOffset={0}
+        onCloseAutoFocus={(e) => { e.preventDefault(); editor.tf.focus(); }}
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuCheckboxItem
+            checked={!!borders.top?.size}
+            onCheckedChange={() => toggle('top')}
+          >
+            <BorderTopIcon /> <div>Top Border</div>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={!!borders.right?.size}
+            onCheckedChange={() => toggle('right')}
+          >
+            <BorderRightIcon /> <div>Right Border</div>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={!!borders.bottom?.size}
+            onCheckedChange={() => toggle('bottom')}
+          >
+            <BorderBottomIcon /> <div>Bottom Border</div>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={!!borders.left?.size}
+            onCheckedChange={() => toggle('left')}
+          >
+            <BorderLeftIcon /> <div>Left Border</div>
+          </DropdownMenuCheckboxItem>
+        </DropdownMenuGroup>
+        <DropdownMenuGroup>
+          <DropdownMenuCheckboxItem
+            checked={!!hasNone}
+            onCheckedChange={() => setAll(0)}
+          >
+            <BorderNoneIcon /> <div>No Border</div>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={!!hasAll}
+            onCheckedChange={() => setAll(1)}
+          >
+            <BorderAllIcon /> <div>All Borders</div>
+          </DropdownMenuCheckboxItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function MarkdownCellVerticalAlignDropdownMenu() {
+  const [open, setOpen] = React.useState(false);
+  const editor = useEditorRef();
+
+  const set = React.useCallback(
+    (vAlign: 'top' | 'middle' | 'bottom') => {
+      setOpen(false);
+      const entry = findMarkdownCell(editor);
+      if (!entry) return;
+      editor.tf.setNodes({ verticalAlign: vAlign }, { at: entry[1] });
+    },
+    [editor]
+  );
+
+  return (
+    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <ToolbarButton tooltip="Vertical align">
+          <AlignVerticalDistributeCenterIcon />
+        </ToolbarButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuGroup>
+          <DropdownMenuItem className="p-2" onClick={() => set('top')}>
+            <AlignVerticalJustifyStartIcon /> <span>Align Top</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => set('middle')}>
+            <AlignVerticalDistributeCenterIcon /> <span>Align Middle</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => set('bottom')}>
+            <AlignVerticalJustifyEndIcon /> <span>Align Bottom</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function MarkdownCellHorizontalAlignDropdownMenu() {
+  const [open, setOpen] = React.useState(false);
+  const editor = useEditorRef();
+
+  const set = React.useCallback(
+    (hAlign: 'left' | 'center' | 'right') => {
+      setOpen(false);
+      const entry = findMarkdownCell(editor);
+      if (!entry) return;
+      editor.tf.setNodes({ align: hAlign }, { at: entry[1] });
+    },
+    [editor]
+  );
+
+  return (
+    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <ToolbarButton tooltip="Horizontal align">
+          <AlignCenterIcon />
+        </ToolbarButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuGroup>
+          <DropdownMenuItem className="p-2" onClick={() => set('left')}>
+            <AlignLeftIcon /> <span>Align Left</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => set('center')}>
+            <AlignCenterIcon /> <span>Align Center</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="p-2" onClick={() => set('right')}>
+            <AlignRightIcon /> <span>Align Right</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function TableFloatingToolbar({
   children,
   ...props
@@ -174,6 +438,15 @@ function TableFloatingToolbar({
           className="scrollbar-hide flex w-auto max-w-[80vw] flex-row overflow-x-auto rounded-md border bg-popover p-1 shadow-md print:hidden"
           contentEditable={false}
         >
+          {collapsedInside && (
+            <ToolbarGroup>
+              <MarkdownCellColorDropdownMenu />
+              <MarkdownCellBordersDropdownMenu />
+              <MarkdownCellVerticalAlignDropdownMenu />
+              <MarkdownCellHorizontalAlignDropdownMenu />
+            </ToolbarGroup>
+          )}
+
           <ToolbarGroup>
             {canMerge && (
               <ToolbarButton
@@ -298,6 +571,9 @@ export function TableCellElement({
   isHeader?: boolean;
 }) {
   const element = props.element;
+  const borders = (element as any).borders || getDefaultCellBorders();
+  const verticalAlign = (element as any).verticalAlign as string | undefined;
+  const align = (element as any).align as string | undefined;
 
   return (
     <PlateElement
@@ -309,7 +585,10 @@ export function TableCellElement({
         isHeader && 'text-left *:m-0',
         'before:inset-0 before:size-full',
         "before:absolute before:box-border before:select-none before:content-['']",
-        'before:border-t before:border-r before:border-b before:border-l before:border-border'
+        borders.top?.size && 'before:border-t before:border-t-border',
+        borders.right?.size && 'before:border-r before:border-r-border',
+        borders.bottom?.size && 'before:border-b before:border-b-border',
+        borders.left?.size && 'before:border-l before:border-l-border',
       )}
       style={
         {
@@ -320,7 +599,17 @@ export function TableCellElement({
         } as React.CSSProperties
       }
     >
-      <div className="relative z-20 box-border h-full px-3 py-2 flex flex-col">
+      <div
+        className={cn(
+          'relative z-20 box-border h-full px-3 py-2 flex flex-col',
+          verticalAlign === 'middle' && 'justify-center',
+          verticalAlign === 'bottom' && 'justify-end',
+          (!verticalAlign || verticalAlign === 'top') && 'justify-start',
+          align === 'center' && 'text-center',
+          align === 'right' && 'text-right',
+          (!align || align === 'left') && 'text-left',
+        )}
+      >
         {props.children}
       </div>
     </PlateElement>
