@@ -2,7 +2,7 @@ import { Marked } from 'marked';
 import markedKatex from "marked-katex-extension";
 import { texToTypst } from 'tex-to-typst';
 import { escapeSvgForTypst, colorToHex, DEFAULT_ALERT_ICONS } from './lucide-svg';
-import { stripFrontmatter } from '@/lib/frontmatter';
+import { stripFrontmatter } from '../frontmatter';
 
 export interface MarkdownToTypstOptions {
     tables?: {
