@@ -589,7 +589,11 @@ function HtmlCellVerticalAlignDropdownMenu({
       setOpen(false);
       const entry = findNode(editor, HTML_TABLE_CELL_TYPES);
       if (!entry) return;
-      editor.tf.setNodes({ verticalAlign: vAlign }, { at: entry[1] });
+      if (vAlign === 'top') {
+        editor.tf.unsetNodes(['verticalAlign'], { at: entry[1] });
+      } else {
+        editor.tf.setNodes({ verticalAlign: vAlign }, { at: entry[1] });
+      }
     },
     [editor]
   );
@@ -635,7 +639,11 @@ function HtmlCellHorizontalAlignDropdownMenu({
       setOpen(false);
       const entry = findNode(editor, HTML_TABLE_CELL_TYPES);
       if (!entry) return;
-      editor.tf.setNodes({ align: hAlign }, { at: entry[1] });
+      if (hAlign === 'left') {
+        editor.tf.unsetNodes(['align'], { at: entry[1] });
+      } else {
+        editor.tf.setNodes({ align: hAlign }, { at: entry[1] });
+      }
     },
     [editor]
   );
@@ -725,9 +733,9 @@ export function HtmlTableCellElement({
       <div
         className={cn(
           'relative z-20 box-border h-full px-3 py-2 flex flex-col',
+          (!verticalAlign || verticalAlign === 'top') && 'justify-start',
           verticalAlign === 'middle' && 'justify-center',
           verticalAlign === 'bottom' && 'justify-end',
-          (!verticalAlign || verticalAlign === 'top') && 'justify-start',
           align === 'center' && 'text-center',
           align === 'right' && 'text-right',
           (!align || align === 'left') && 'text-left'

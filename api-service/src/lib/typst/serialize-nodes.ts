@@ -1,5 +1,5 @@
 import type { Descendant, TElement, TText } from 'platejs';
-import { fixTypstUnit } from './client-compiler';
+import { fixTypstUnit } from './typst-units';
 import { escapeSvgForTypst, colorToHex, DEFAULT_ALERT_ICONS } from './lucide-svg';
 
 interface SerializeContext {

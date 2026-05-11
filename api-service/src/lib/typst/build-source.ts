@@ -2,12 +2,14 @@
  * Builds the full Typst source for a document, matching the behaviour of
  * `hooks/use-pdf-compiler.ts#buildTypstSource` from the main app.
  *
- * In the main app the markdown editor can also store Plate document JSON
- * and convert it via `serialize-nodes`. The API only accepts raw markdown,
- * so we always go through the `markdownToTypst` path.
+ * Template regions (`header`, `footer`, `frontPage`, outline title) are stored
+ * as JSON strings of Plate nodes. Like the app, we detect JSON arrays and run
+ * `serializeNodesToTypst`; otherwise the string is treated as Markdown and
+ * passed to `markdownToTypst`.
  */
 
 import { markdownToTypst } from './markdown-to-typst';
+import { serializeNodesToTypst } from './serialize-nodes';
 import { resolveLucideIconsFromAlerts } from './lucide-svg';
 import {
     generatePreamble,
@@ -16,6 +18,7 @@ import {
 } from './compiler';
 import { processTypstImages } from './images';
 import { parseVariablesFromFrontmatter } from '../frontmatter';
+import type { Descendant } from 'platejs';
 
 // Same shape as `TemplateSettings` in hooks/use-pdf-compiler.ts.
 // Kept as `any` here to mirror the looseness of the source code and to
@@ -39,14 +42,34 @@ async function contentToTypst(content: string, context: {
     title?: string;
     scaleImages?: boolean;
     insideContext?: boolean;
-    tables?: { preventPageBreak?: boolean; equalWidthColumns?: boolean; alignment?: 'left' | 'center' | 'right' };
+    tables?: TemplateSettings['tables'];
     pageNumberOffset?: number;
     variables?: Record<string, string>;
-    figures?: { captionEnabled?: boolean; captionFormat?: string };
+    figures?: TemplateSettings['figures'];
     alerts?: any;
     resolvedLucideSvgs?: Record<string, string>;
 }): Promise<string> {
     if (!content) return '';
+
+    try {
+        const parsed = JSON.parse(content) as unknown;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            return serializeNodesToTypst(parsed as Descendant[], {
+                title: context.title,
+                scaleImages: context.scaleImages,
+                insideContext: context.insideContext,
+                tables: context.tables,
+                pageNumberOffset: context.pageNumberOffset,
+                variables: context.variables,
+                figures: context.figures,
+                alerts: context.alerts,
+                resolvedLucideSvgs: context.resolvedLucideSvgs,
+            });
+        }
+    } catch {
+        // Not JSON, assume markdown string
+    }
+
     return markdownToTypst(content, {
         figures: context.figures,
         alerts: context.alerts,
