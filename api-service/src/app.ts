@@ -5,6 +5,8 @@
 
 import express, { type Request, type Response, type NextFunction } from 'express';
 import convertRouter from './routes/convert';
+import docsRouter from './routes/docs';
+import { openApiDocument } from './openapi/spec';
 import { apiKeyAuth } from './middleware/auth';
 
 const MAX_BODY_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
@@ -24,6 +26,14 @@ export function createApp(): express.Express {
     app.get('/health', (_req, res) => {
         res.status(200).json({ status: 'ok', service: 'modern-markdown-editor-api', version: '0.1.0' });
     });
+
+    app.get('/openapi.json', (_req, res) => {
+        res.status(200).json(openApiDocument);
+    });
+
+    if (process.env.DOCS_ENABLED !== 'false') {
+        app.use('/docs', docsRouter);
+    }
 
     app.use('/v1', apiKeyAuth, convertRouter);
 

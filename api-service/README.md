@@ -26,6 +26,7 @@ files by copy. The desktop app keeps working unchanged.
   uploads.
 - **Two output modes.** Raw `application/pdf` bytes (default) or
   base64-wrapped JSON (`output: "base64"`).
+- **Interactive API docs.** [Swagger UI](https://swagger.io/tools/swagger-ui/) at **`/docs`**, OpenAPI 3 JSON at **`/openapi.json`** (disable with `DOCS_ENABLED=false`).
 
 ---
 
@@ -45,6 +46,9 @@ The server listens on `http://localhost:4000` by default. Verify it is up:
 curl http://localhost:4000/health
 ```
 
+Open **interactive docs** in the browser: [http://localhost:4000/docs](http://localhost:4000/docs).  
+Machine-readable spec: `GET /openapi.json`.
+
 ```json
 { "status": "ok", "service": "modern-markdown-editor-api", "version": "0.1.0" }
 ```
@@ -58,53 +62,58 @@ curl http://localhost:4000/health
 ## Deploy on Render (recommended)
 
 This service is a long-lived **Express** app. [Render](https://render.com)
-Web Services match that model well: no serverless function timeout, fewer
-cold-start surprises than a WASM-heavy serverless setup, and a
-straightforward **`npm run start:prod`** entry.
+**Web Services** (created from the dashboard) match that model. The
+steps below use a normal Web Service only — **no Blueprint** (`render.yaml`)
+is required, including on workspaces where Blueprints are not available.
 
-### Option A — Blueprint (infrastructure as code)
+### Create a Web Service (dashboard only)
 
-The monorepo root contains **`render.yaml`**, which defines one **Node**
-web service with **`rootDir: api-service`**.
-
-1. In the [Render Dashboard](https://dashboard.render.com), **New →
-   Blueprint**.
-2. Connect this Git repository.
-3. When prompted, apply **`render.yaml`**. Render will ask you to set
-   **`API_KEY`** (and any other `sync: false` secrets) before the first
-   deploy.
-4. After deploy, open the service URL and run:
+1. In the [Render Dashboard](https://dashboard.render.com), click **New →
+   Web Service** and connect this Git repository.
+2. **Name:** e.g. `modern-markdown-editor-api` (any unique name).
+3. **Root Directory:** enter **`api-service`** so Render builds and runs
+   only this folder (not the Next.js app at the repo root).
+4. **Runtime:** **Node** (pick **Node 20** or newer if the UI offers a
+   version selector).
+5. **Build Command:**
 
    ```bash
-   curl https://<your-service>.onrender.com/health
+   npm install --include=dev && npm run build
    ```
 
-The blueprint uses **`npm install --include=dev && npm run build`** so
-`typescript` (a devDependency) is present for `tsc`; the running service
-only needs `node dist/index.js`.
+   `typescript` is a **devDependency**; `--include=dev` ensures `tsc` is
+   installed during the build. The running process only executes
+   `node dist/index.js`.
 
-### Option B — Manual Web Service
+6. **Start Command:**
 
-1. **New → Web Service** → connect the same repo.
-2. **Root Directory:** `api-service`.
-3. **Runtime:** Node.
-4. **Build Command:** `npm install --include=dev && npm run build`
-5. **Start Command:** `npm run start:prod`
-6. **Instance type:** pick a plan that fits PDF + Typst CPU and RAM
-   (starter is often enough to begin; scale up if compiles are slow or
-   OOM).
-7. **Health check path:** `/health` (Render uses this for rollouts).
+   ```bash
+   npm run start:prod
+   ```
+
+7. **Health check path:** `/health` (used for deploys and instance health).
+8. **Instance type:** choose the free or paid tier that fits your workload
+   (PDF + Typst can use noticeable CPU/RAM on large documents).
+
+Click **Create Web Service** and wait for the first deploy.
+
+### Smoke-test
+
+```bash
+curl https://<your-service-name>.onrender.com/health
+```
 
 ### Environment variables (Render → Environment)
 
-Set the same variables you would use locally (see **Configuration (.env)**
-below). Important ones:
+In the service → **Environment**, add the same keys you use locally (see
+**Configuration (.env)** below). Suggested:
 
 | Key | Notes |
 | --- | --- |
 | `API_KEY` | Strongly recommended in production. |
-| `MAX_UPLOAD_SIZE_MB` | Default `25` in the blueprint; raise if needed. |
+| `MAX_UPLOAD_SIZE_MB` | e.g. `25`; increase if you send large JSON bodies. |
 | `FONT_FETCH_TIMEOUT_MS` / `IMAGE_FETCH_TIMEOUT_MS` | Optional. |
+| `DOCS_ENABLED` | Set `false` to disable **`/docs`** only. |
 
 **`PORT`** is set automatically by Render; do not override it unless you
 know what you are doing. **`HOST`** defaults to `0.0.0.0` in the app, which
@@ -163,6 +172,7 @@ section below):
 | `MAX_UPLOAD_SIZE_MB` | `25` | Body / JSON size cap |
 | `FONT_FETCH_TIMEOUT_MS` | `15000` | |
 | `IMAGE_FETCH_TIMEOUT_MS` | `15000` | |
+| `DOCS_ENABLED` | _(omit)_ | Set `false` to hide `/docs` on Vercel too |
 
 Vercel sets `VERCEL=1` automatically; you do not need to set it.
 
@@ -206,6 +216,18 @@ Point your editor or backend integrations at this base URL instead of
 | `API_KEY`                 | _(empty)_   | If set, callers must send `Authorization: Bearer <key>` or `x-api-key` |
 | `FONT_FETCH_TIMEOUT_MS`   | `15000`     | Timeout when downloading remote fonts                         |
 | `IMAGE_FETCH_TIMEOUT_MS`  | `15000`     | Timeout when downloading remote images                        |
+| `DOCS_ENABLED`            | _(unset)_   | Set to `false` to disable **`/docs`** ( **`/openapi.json`** stays enabled) |
+
+---
+
+## OpenAPI & Swagger UI
+
+| URL | Description |
+| --- | --- |
+| **`GET /docs`** | Interactive Swagger UI (Try it out). Does **not** require `API_KEY`; use **Authorize** if your server enforces one. |
+| **`GET /openapi.json`** | OpenAPI 3.0 document for codegen and tooling. Always served. |
+
+Set **`DOCS_ENABLED=false`** to hide the UI (e.g. production hardening). The JSON spec remains at `/openapi.json`.
 
 ---
 
@@ -379,16 +401,19 @@ Documents can embed:
 ## Architecture
 
 ```
-render.yaml                     # At repository root — Render Blueprint (rootDir: api-service)
 api-service/
 ├── api/
 │   └── index.ts                # Vercel serverless entry (re-exports Express app)
 ├── vercel.json                 # Vercel only: rewrites → /api + function limits
 ├── src/
+│   ├── openapi/
+│   │   └── spec.ts             # OpenAPI 3 document (also served at /openapi.json)
 │   ├── app.ts                  # Express app (shared: local + Vercel)
 │   ├── index.ts                # Local only: app.listen(PORT)
 │   ├── middleware/auth.ts      # Optional API-key check
-│   ├── routes/convert.ts       # POST /v1/convert + /v1/convert/multipart
+│   ├── routes/
+│   │   ├── convert.ts          # POST /v1/convert + /v1/convert/multipart
+│   │   └── docs.ts             # GET /docs — Swagger UI
 │   └── lib/
 │       ├── converter.ts        # High-level conversion API
 │       ├── frontmatter.ts      # gray-matter helpers (copied from app)
