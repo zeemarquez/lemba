@@ -760,6 +760,34 @@ function generateCodeBlockStyles(options: TypstOptions): string {
 }`;
 }
 
+/**
+ * Map a template `fontFamily` token (already cleaned + lowercased) to the
+ * Typst-internal face name for a registered custom font.
+ *
+ * Supports: exact upload key; keys prefixed like `Montserrat-VariableFont_wght`
+ * when the template asks for `Montserrat`; internal names such as
+ * `Montserrat Thin` where the first word matches the template family.
+ */
+function resolveRegisteredCustomFontInternal(cleanedFontLower: string): string | undefined {
+    const entries = Array.from(registeredCustomFontFamilies.entries());
+    for (const [userFontName, internalName] of entries) {
+        if (userFontName.toLowerCase() === cleanedFontLower) return internalName;
+    }
+    for (const [userFontName, internalName] of entries) {
+        const u = userFontName.toLowerCase();
+        if (u.startsWith(`${cleanedFontLower}-`) || u.startsWith(`${cleanedFontLower}_`)) {
+            return internalName;
+        }
+    }
+    for (const [, internalName] of entries) {
+        const il = internalName.toLowerCase();
+        if (il === cleanedFontLower) return internalName;
+        const firstToken = il.split(/\s+/)[0];
+        if (firstToken === cleanedFontLower) return internalName;
+    }
+    return undefined;
+}
+
 export function generatePreamble(options: TypstOptions): string {
     const {
         margins,
@@ -938,15 +966,8 @@ export function generatePreamble(options: TypstOptions): string {
     console.log(`[Typst] [generatePreamble] Input fontFamily: "${fontFamily}", cleaned: "${cleanedFont}"`);
     console.log(`[Typst] [generatePreamble] Registered custom fonts:`, Array.from(registeredCustomFontFamilies.entries()));
 
-    // Check if this is a registered custom font first (case-insensitive check)
-    // registeredCustomFontFamilies maps user-provided name -> internal font name
-    let customFontInternalName: string | undefined;
-    for (const [userFontName, internalName] of registeredCustomFontFamilies.entries()) {
-        if (userFontName.toLowerCase() === cleanedFontLower) {
-            customFontInternalName = internalName;
-            break;
-        }
-    }
+    // Check if this is a registered custom font (exact key, filename prefix, or internal name)
+    const customFontInternalName = resolveRegisteredCustomFontInternal(cleanedFontLower);
 
     if (customFontInternalName) {
         // Use the internal font name that Typst will recognize

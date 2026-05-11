@@ -1,0 +1,149 @@
+{
+  "id": "Templates/Esferize.mdt",
+  "name": "Esferize",
+  "css": "\n            @page { \n                size: portrait;\n                margin: 0;\n            }\n            *, *::before, *::after {\n                box-sizing: border-box;\n            }\n            body { \n                font-family: 'Montserrat', sans-serif;\n                font-size: 12px;\n                color: #000000;\n                background-color: #ffffff; \n                margin: 0;\n                padding: 0;\n            }\n            .page-container {\n                width: 100%;\n                min-height: 100vh;\n                display: flex;\n                flex-direction: column;\n                padding-top: 35mm;\n                padding-right: 20mm;\n                padding-bottom: 20mm;\n                padding-left: 20mm;\n                box-sizing: border-box;\n                \n            }\n            .prose { \n                font-family: 'Montserrat', sans-serif; \n                font-size: 12px; \n                color: #000000;\n                max-width: 100%;\n                line-height: 1.6;\n                flex: 1;\n            }\n            \n            .prose h1 { \n                font-size: 26px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 700 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .prose h2 { \n                font-size: 24px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 600 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .prose h3 { \n                font-size: 22px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 600 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .prose h4 { \n                font-size: 20px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 600 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .prose h5 { \n                font-size: 18px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 600 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .prose h6 { \n                font-size: 16px !important; \n                color: #000000 !important; \n                text-align: left !important;\n                border-bottom: none !important;\n                text-transform: none !important;\n                font-weight: 600 !important;\n                font-style: normal !important;\n                text-decoration: none !important;\n                padding-left: 0 !important;\n                margin-top: 1.5em !important;\n                margin-bottom: 0.5em !important;\n            }\n            \n            \n            .page-header, .page-footer {\n                flex-shrink: 0;\n                width: 100%;\n            }\n            .page-header {\n                padding-right: 0mm;\n                padding-bottom: 8mm;\n                padding-left: 0mm;\n            }\n            .page-footer {\n                padding-top: 5mm;\n                padding-right: 0mm;\n                padding-left: 0mm;\n            }\n            .page-header p, .page-footer p {\n                margin: 0;\n            }\n            .page-header h1, .page-header h2, .page-header h3,\n            .page-footer h1, .page-footer h2, .page-footer h3 {\n                margin: 0;\n            }\n            .page-header table, .page-footer table {\n                border-collapse: collapse;\n                width: 100%;\n            }\n            .page-header th, .page-footer th,\n            .page-header td, .page-footer td {\n                padding: 8px;\n                text-align: left;\n            }\n            .page-header th, .page-footer th {\n                background-color: #f4f4f4;\n            }\n            .page-number-placeholder::after {\n                content: counter(page, decimal);\n            }\n            .page-number-placeholder[data-format=\"lower-roman\"]::after { content: counter(page, lower-roman); }\n            .page-number-placeholder[data-format=\"upper-roman\"]::after { content: counter(page, upper-roman); }\n            .page-number-placeholder[data-format=\"lower-alpha\"]::after { content: counter(page, lower-alpha); }\n            .page-number-placeholder[data-format=\"upper-alpha\"]::after { content: counter(page, upper-alpha); }\n            \n            .prose p { \n                margin: 1em 0;\n                text-align: left;\n                text-indent: 0;\n                line-height: 1.65;\n            }\n            .prose code {\n                background: #f4f4f4;\n                padding: 0.2em 0.4em;\n                border-radius: 3px;\n                font-family: 'JetBrains Mono', monospace;\n                font-size: 0.9em;\n            }\n            .prose pre {\n                background: #f4f4f4;\n                padding: 1em;\n                border-radius: 5px;\n                overflow-x: auto;\n            }\n            .prose pre code {\n                background: none;\n                padding: 0;\n            }\n            .prose blockquote {\n                border-left: 4px solid #ddd;\n                margin: 1em 0;\n                padding-left: 1em;\n                color: #666;\n            }\n            .prose ul, .prose ol {\n                margin: 1em 0;\n                padding-left: 2em;\n            }\n            .prose li { margin: 0.5em 0; }\n            .prose hr {\n                border: none;\n                border-top: 1px solid #ddd;\n                margin: 2em 0;\n            }\n            .prose a {\n                color: #0066cc;\n                text-decoration: none;\n            }\n        ",
+  "settings": {
+    "fontFamily": "'Montserrat', sans-serif",
+    "fontSize": "12px",
+    "textColor": "#000000",
+    "backgroundColor": "#ffffff",
+    "pageLayout": "vertical",
+    "pageSize": {
+      "preset": "a4"
+    },
+    "margins": {
+      "top": "35mm",
+      "bottom": "20mm",
+      "left": "20mm",
+      "right": "20mm"
+    },
+    "h1": {
+      "fontSize": "26px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "700",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "h2": {
+      "fontSize": "24px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "600",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "h3": {
+      "fontSize": "22px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "600",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "h4": {
+      "fontSize": "20px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "600",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "h5": {
+      "fontSize": "18px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "600",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "h6": {
+      "fontSize": "16px",
+      "color": "#000000",
+      "textAlign": "left",
+      "borderBottom": false,
+      "textTransform": "none",
+      "fontWeight": "600",
+      "textDecoration": "none",
+      "numbering": {
+        "enabled": false,
+        "style": "decimal",
+        "separator": ".",
+        "prefix": "",
+        "suffix": "."
+      }
+    },
+    "header": {
+      "enabled": true,
+      "content": "[{\"type\":\"p\",\"children\":[{\"text\":\"\"}],\"id\":\"j8jAd7wWlK\"},{\"children\":[{\"children\":[{\"children\":[{\"children\":[{\"text\":\"Informe de evalucación tecnica\",\"bold\":true,\"fontSize\":\"14px\"}],\"type\":\"p\",\"id\":\"_KlzLNzz6T\"}],\"type\":\"td\",\"id\":\"NAAXpxIb9m\",\"borders\":{\"top\":{\"size\":0},\"right\":{\"size\":0},\"bottom\":{\"size\":0},\"left\":{\"size\":0}}},{\"children\":[{\"children\":[{\"text\":\"                                \"}],\"type\":\"p\",\"id\":\"Dx6E4OyqiX\"}],\"type\":\"td\",\"colSpan\":1,\"rowSpan\":1,\"id\":\"QW7ZRoowq-\"},{\"children\":[{\"children\":[{\"text\":\"\"}],\"type\":\"p\",\"id\":\"CHScaYw20k\"},{\"children\":[{\"text\":\"\"}],\"type\":\"img\",\"url\":\"https://www.esferize.com/wp-content/uploads/2024/05/esferize-get-connect-to-the-future.png\",\"id\":\"fig-1\",\"width\":491,\"align\":\"right\"}],\"type\":\"td\",\"id\":\"to8NS2bAMP\",\"verticalAlign\":\"top\"}],\"type\":\"tr\",\"id\":\"SiMrwHMFdf\"}],\"type\":\"table\",\"id\":\"suOdYMFjso\"},{\"children\":[{\"text\":\"\"}],\"type\":\"p\",\"id\":\"KR-avZbY2a\"}]",
+      "margins": {
+        "bottom": "8mm",
+        "left": "0mm",
+        "right": "0mm"
+      }
+    },
+    "footer": {
+      "enabled": true,
+      "content": "[{\"type\":\"p\",\"children\":[{\"text\":\"\"}],\"id\":\"HUH7nU0xnA\"},{\"children\":[{\"children\":[{\"children\":[{\"children\":[{\"text\":\"\"}],\"type\":\"p\",\"id\":\"ryvx1FvV-A\"},{\"children\":[{\"text\":\"\"}],\"type\":\"img\",\"url\":\"https://www.esferize.com/wp-content/uploads/2024/05/esferize-get-connect-to-the-future.png\",\"id\":\"fig-1\",\"width\":130,\"align\":\"left\"}],\"type\":\"td\",\"id\":\"VDWhyYQ4my\",\"borders\":{\"top\":{\"size\":0},\"right\":{\"size\":0},\"bottom\":{\"size\":0},\"left\":{\"size\":0}}},{\"children\":[{\"type\":\"p\",\"id\":\"i0hWGpzde5\",\"children\":[{\"text\":\"esferize.com\",\"italic\":true}],\"align\":\"center\"}],\"type\":\"td\",\"colSpan\":1,\"rowSpan\":1,\"id\":\"RTdaCW1EUY\"},{\"children\":[{\"children\":[{\"text\":\"\"},{\"type\":\"placeholder\",\"children\":[{\"text\":\"\"}],\"placeholderType\":\"page\",\"format\":\"decimal\",\"id\":\"7fr3fclGhn\"},{\"text\":\"\"}],\"type\":\"p\",\"id\":\"nlzvuK-eO1\",\"align\":\"right\"}],\"type\":\"td\",\"id\":\"7SjOQkVxSQ\"}],\"type\":\"tr\",\"id\":\"zzOOUiPGmH\"}],\"type\":\"table\",\"id\":\"7UyGBOk75Z\"},{\"type\":\"p\",\"id\":\"LzPyEZPDzm\",\"children\":[{\"text\":\"\"}]}]",
+      "margins": {
+        "top": "5mm",
+        "left": "0mm",
+        "right": "0mm"
+      }
+    },
+    "frontPage": {
+      "enabled": true,
+      "content": "[{\"type\":\"p\",\"children\":[{\"text\":\"\"}],\"id\":\"UderZHYFNX\"},{\"type\":\"vertical_spacer\",\"children\":[{\"text\":\"\"}],\"height\":100,\"id\":\"efcOpsL7KY\"},{\"children\":[{\"text\":\"\"}],\"type\":\"p\",\"id\":\"WRC-RYPxnA\"},{\"children\":[{\"text\":\"\"}],\"type\":\"img\",\"url\":\"https://www.esferize.com/wp-content/uploads/2024/05/esferize-get-connect-to-the-future.png\",\"id\":\"fig-1\",\"width\":342,\"align\":\"center\"},{\"children\":[{\"text\":\"\"}],\"type\":\"p\",\"id\":\"qyoZDaj6-v\"},{\"type\":\"vertical_spacer\",\"children\":[{\"text\":\"\"}],\"height\":150,\"id\":\"GYRMclDfVn\"},{\"type\":\"p\",\"id\":\"Ft_pM8timQ\",\"children\":[{\"text\":\"\"}]},{\"type\":\"p\",\"id\":\"6b1bFQPYdK\",\"children\":[{\"text\":\"Informe Tecnico\",\"fontSize\":\"28px\",\"bold\":true}],\"align\":\"center\"},{\"type\":\"p\",\"id\":\"oZcV-xpKrH\",\"align\":\"center\",\"children\":[{\"fontSize\":\"28px\",\"bold\":true,\"text\":\"\"}]},{\"type\":\"p\",\"id\":\"5rQJQBKAoN\",\"align\":\"center\",\"children\":[{\"text\":\"11/05/2026\",\"fontSize\":\"16px\"}]},{\"type\":\"p\",\"id\":\"AHUweP6OzJ\",\"align\":\"center\",\"children\":[{\"fontSize\":\"16px\",\"text\":\"\"},{\"type\":\"placeholder\",\"children\":[{\"text\":\"\"}],\"placeholderType\":\"variable\",\"variableName\":\"Author\",\"id\":\"H-vvN5EYLt\"},{\"text\":\"\"}]},{\"type\":\"p\",\"id\":\"9twOL_LxAp\",\"align\":\"center\",\"children\":[{\"fontSize\":\"16px\",\"text\":\"\"}]},{\"type\":\"p\",\"id\":\"Emic-Lm4uc\",\"children\":[{\"text\":\"\"}]}]"
+    },
+    "variables": [
+      {
+        "id": "var-1778518699042",
+        "name": "Author"
+      },
+      {
+        "id": "var-1778518705409",
+        "name": "Title"
+      }
+    ]
+  }
+}
