@@ -167,12 +167,16 @@ function parseFontFamilyName(data: Uint8Array): string | null {
             return null;
         }
 
-        // Parse name table
+        // Parse name table — prefer nameID 16 (Typographic Family) over nameID 1.
+        // Variable fonts often put "Montserrat" in 16 and "Montserrat Thin" in 1;
+        // using 1 alone makes Typst default to the wrong face/weight.
         const nameCount = view.getUint16(nameTableOffset + 2, false);
         const stringOffset = view.getUint16(nameTableOffset + 4, false);
 
-        // Look for font family name (nameID 1) - prefer Windows platform
-        let fallbackName: string | null = null;
+        let name16Win: string | null = null;
+        let name16Mac: string | null = null;
+        let name1Win: string | null = null;
+        let name1Mac: string | null = null;
 
         for (let i = 0; i < nameCount; i++) {
             const recordOffset = nameTableOffset + 6 + i * 12;
@@ -182,34 +186,33 @@ function parseFontFamilyName(data: Uint8Array): string | null {
             const length = view.getUint16(recordOffset + 8, false);
             const offset = view.getUint16(recordOffset + 10, false);
 
-            // nameID 1 = Font Family
-            if (nameID === 1) {
-                const strOffset = nameTableOffset + stringOffset + offset;
+            if (nameID !== 1 && nameID !== 16) continue;
 
-                // Platform 3 (Windows), Encoding 1 (Unicode BMP) - UTF-16BE
-                if (platformID === 3 && encodingID === 1) {
-                    let name = '';
-                    for (let j = 0; j < length; j += 2) {
-                        name += String.fromCharCode(view.getUint16(strOffset + j, false));
-                    }
-                    if (name) {
-                        return name; // Windows platform is preferred
-                    }
+            const strOffset = nameTableOffset + stringOffset + offset;
+            let decoded = '';
+
+            if (platformID === 3 && encodingID === 1) {
+                for (let j = 0; j < length; j += 2) {
+                    decoded += String.fromCharCode(view.getUint16(strOffset + j, false));
                 }
-                // Platform 1 (Macintosh), Encoding 0 (Roman) - ASCII
-                else if (platformID === 1 && encodingID === 0) {
-                    let name = '';
-                    for (let j = 0; j < length; j++) {
-                        name += String.fromCharCode(view.getUint8(strOffset + j));
-                    }
-                    if (name && !fallbackName) {
-                        fallbackName = name;
-                    }
+            } else if (platformID === 1 && encodingID === 0) {
+                for (let j = 0; j < length; j++) {
+                    decoded += String.fromCharCode(view.getUint8(strOffset + j));
                 }
+            }
+
+            if (!decoded) continue;
+
+            if (nameID === 16) {
+                if (platformID === 3 && encodingID === 1) name16Win = decoded;
+                else if (platformID === 1 && encodingID === 0) name16Mac = decoded;
+            } else {
+                if (platformID === 3 && encodingID === 1) name1Win = decoded;
+                else if (platformID === 1 && encodingID === 0) name1Mac = decoded;
             }
         }
 
-        return fallbackName;
+        return name16Win || name16Mac || name1Win || name1Mac || null;
     } catch (e) {
         console.error('[Typst] Error parsing font:', e);
         return null;
@@ -788,6 +791,48 @@ function resolveRegisteredCustomFontInternal(cleanedFontLower: string): string |
     return undefined;
 }
 
+/** CSS/web font stack first token → built-in Typst text font (when no custom font matched). */
+const BUILTIN_CSS_TO_TYPST_FONT: Record<string, string> = {
+    'times new roman': 'Libertinus Serif',
+    'georgia': 'Libertinus Serif',
+    'serif': 'Libertinus Serif',
+    'linux libertine': 'Libertinus Serif',
+    'libertinus serif': 'Libertinus Serif',
+    'merriweather': 'Libertinus Serif',
+    'playfair display': 'Libertinus Serif',
+    'lora': 'Libertinus Serif',
+    'inter': 'Libertinus Serif',
+    'arial': 'Libertinus Serif',
+    'helvetica': 'Libertinus Serif',
+    'verdana': 'Libertinus Serif',
+    'sans-serif': 'Libertinus Serif',
+    'roboto': 'Libertinus Serif',
+    'open sans': 'Libertinus Serif',
+    'montserrat': 'Libertinus Serif',
+    'outfit': 'Libertinus Serif',
+    'system-ui': 'Libertinus Serif',
+    'jetbrains mono': 'DejaVu Sans Mono',
+    'fira code': 'DejaVu Sans Mono',
+    'source code pro': 'DejaVu Sans Mono',
+    'consolas': 'DejaVu Sans Mono',
+    'monaco': 'DejaVu Sans Mono',
+    'dejavu sans mono': 'DejaVu Sans Mono',
+    'monospace': 'DejaVu Sans Mono',
+    'computer modern': 'New Computer Modern',
+};
+
+/**
+ * Resolve a CSS-style `font-family` value (possibly a stack) to a Typst `font:` name.
+ * Used by the document preamble and by serialized header/footer/rich text.
+ */
+export function resolveTypstFontFamily(cssFontStack: string): string {
+    const cleaned = cssFontStack.split(',')[0].replace(/['"]/g, '').trim();
+    const cleanedLower = cleaned.toLowerCase();
+    const custom = resolveRegisteredCustomFontInternal(cleanedLower);
+    if (custom) return custom;
+    return BUILTIN_CSS_TO_TYPST_FONT[cleanedLower] || 'Libertinus Serif';
+}
+
 export function generatePreamble(options: TypstOptions): string {
     const {
         margins,
@@ -957,60 +1002,12 @@ export function generatePreamble(options: TypstOptions): string {
         return rules;
     }).join('\n');
 
-    // Map common font names to fonts from typst.ts text assets
-    // Available: DejaVu Sans Mono, Libertinus Serif, New Computer Modern
-    // Plus any custom fonts that have been registered
-    let cleanedFont = fontFamily.split(',')[0].replace(/['"]/g, '').trim();
-    const cleanedFontLower = cleanedFont.toLowerCase();
+    // Map common font names to built-ins, or use registered custom fonts (variable-font aware)
+    const cleanedFirst = fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+    const cleanedFont = resolveTypstFontFamily(fontFamily);
 
-    console.log(`[Typst] [generatePreamble] Input fontFamily: "${fontFamily}", cleaned: "${cleanedFont}"`);
+    console.log(`[Typst] [generatePreamble] Input fontFamily: "${fontFamily}", cleaned: "${cleanedFirst}" -> Typst "${cleanedFont}"`);
     console.log(`[Typst] [generatePreamble] Registered custom fonts:`, Array.from(registeredCustomFontFamilies.entries()));
-
-    // Check if this is a registered custom font (exact key, filename prefix, or internal name)
-    const customFontInternalName = resolveRegisteredCustomFontInternal(cleanedFontLower);
-
-    if (customFontInternalName) {
-        // Use the internal font name that Typst will recognize
-        cleanedFont = customFontInternalName;
-        console.log(`[Typst] [generatePreamble] ✓ Using custom font: "${fontFamily}" -> "${cleanedFont}"`);
-    } else {
-        console.log(`[Typst] [generatePreamble] ✗ Custom font "${fontFamily}" not found in registeredCustomFontFamilies`);
-        // Fall back to built-in fonts
-        const fontMap: Record<string, string> = {
-            // Serif fonts -> Libertinus Serif
-            'times new roman': 'Libertinus Serif',
-            'georgia': 'Libertinus Serif',
-            'serif': 'Libertinus Serif',
-            'linux libertine': 'Libertinus Serif',
-            'libertinus serif': 'Libertinus Serif',
-            'merriweather': 'Libertinus Serif',
-            'playfair display': 'Libertinus Serif',
-            'lora': 'Libertinus Serif',
-            // Sans-serif fonts -> Libertinus Serif (no sans in text assets, use serif as fallback)
-            'inter': 'Libertinus Serif',
-            'arial': 'Libertinus Serif',
-            'helvetica': 'Libertinus Serif',
-            'verdana': 'Libertinus Serif',
-            'sans-serif': 'Libertinus Serif',
-            'roboto': 'Libertinus Serif',
-            'open sans': 'Libertinus Serif',
-            'montserrat': 'Libertinus Serif',
-            'outfit': 'Libertinus Serif',
-            'system-ui': 'Libertinus Serif',
-            // Monospace fonts -> DejaVu Sans Mono
-            'jetbrains mono': 'DejaVu Sans Mono',
-            'fira code': 'DejaVu Sans Mono',
-            'source code pro': 'DejaVu Sans Mono',
-            'consolas': 'DejaVu Sans Mono',
-            'monaco': 'DejaVu Sans Mono',
-            'dejavu sans mono': 'DejaVu Sans Mono',
-            'monospace': 'DejaVu Sans Mono',
-            // Math font
-            'computer modern': 'New Computer Modern',
-        };
-        cleanedFont = fontMap[cleanedFontLower] || 'Libertinus Serif';
-        console.log(`[Typst] Mapped font "${fontFamily}" -> "${cleanedFont}"`);
-    }
 
     // Header/footer margins (simplified):
     // - Header: bottom margin (gap to content), left/right (horizontal inset)

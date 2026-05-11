@@ -1,5 +1,6 @@
 import type { Descendant, TElement, TText } from 'platejs';
 import { fixTypstUnit } from './typst-units';
+import { resolveTypstFontFamily } from './compiler';
 import { escapeSvgForTypst, colorToHex, DEFAULT_ALERT_ICONS } from './lucide-svg';
 
 interface SerializeContext {
@@ -373,7 +374,7 @@ function serializeTextNode(node: TText, nextSibling?: Descendant): string {
     const styles: string[] = [];
     if ((node as any).color) styles.push(`fill: rgb("${(node as any).color}")`);
     if ((node as any).fontSize) styles.push(`size: ${fixTypstUnit((node as any).fontSize)}`);
-    if ((node as any).fontFamily) styles.push(`font: "${(node as any).fontFamily}"`);
+    if ((node as any).fontFamily) styles.push(`font: "${resolveTypstFontFamily(String((node as any).fontFamily))}"`);
 
     if (styles.length > 0) {
         return `#text(${styles.join(', ')})[${text}]`;
@@ -784,8 +785,7 @@ function serializePlaceholder(element: TElement, context: SerializeContext): str
     if (italic) styles.push('style: "italic"');
     if (fontSize) styles.push(`size: ${fixTypstUnit(fontSize)}`);
     if (fontFamily) {
-        const cleanFont = fontFamily.replace(/^['"]|['"]$/g, '').split(',')[0].trim();
-        styles.push(`font: "${cleanFont}"`);
+        styles.push(`font: "${resolveTypstFontFamily(String(fontFamily))}"`);
     }
 
     // Apply styling using #text()[...] wrapper
