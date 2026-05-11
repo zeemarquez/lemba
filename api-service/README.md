@@ -154,13 +154,23 @@ Use a **separate Vercel project** from your main Next.js app, with the
    `npm run dev` / `npm run start:prod` still use `src/index.ts` on your
    machine).
 
-### 2. Routing (`vercel.json`)
+### 2. Monorepo + main Next.js app on Vercel
+
+If the **same repository** also contains the Next.js editor and you deploy
+the app from the **repository root** (default on Vercel), the root
+`tsconfig.json` **excludes `api-service`** so `next build` does not typecheck
+the Express app (which would fail: `express` is not a dependency of the
+Next project). The PDF API is still built and run only when you use a
+**separate Vercel project** with **Root Directory → `api-service`**, or when
+you deploy it on **Render** as documented above.
+
+### 3. Routing (`vercel.json`)
 
 This repo includes `vercel.json` so every path (`/health`, `/v1/convert`,
 etc.) is **rewritten** to the single serverless handler at **`/api`**
 (`api/index.ts`), which mounts the same Express app as locally.
 
-### 3. Environment variables
+### 4. Environment variables
 
 In the Vercel project → **Settings → Environment Variables**, add any of
 these you use locally (same names as in the **Configuration (.env)**
@@ -176,7 +186,7 @@ section below):
 
 Vercel sets `VERCEL=1` automatically; you do not need to set it.
 
-### 4. Timeouts and plans
+### 5. Timeouts and plans
 
 `vercel.json` sets **`maxDuration`: 60** seconds for `api/index.ts`.
 PDF + WASM cold starts can take several seconds; large documents may
@@ -188,7 +198,7 @@ need the full window.
 - If builds fail the limit, upgrade to **Pro** or reduce `maxDuration` to
   match your plan.
 
-### 5. Smoke-test the deployment
+### 6. Smoke-test the deployment
 
 After deploy, your API base URL will look like
 `https://<project>.vercel.app` (or your custom domain):
