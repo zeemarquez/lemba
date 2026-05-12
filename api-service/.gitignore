@@ -7,3 +7,4 @@ dist/
 .cache/
 font-cache/
 tmp/
+# Populated by `np

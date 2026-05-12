@@ -10,6 +10,7 @@ import {
     resetCompiler,
 } from './typst/compiler';
 import { buildTypstSource, TemplateSettings } from './typst/build-source';
+import { getPreloadedFontInputs } from './preloaded-fonts-node';
 import { registerFonts, FontInput } from './typst/fonts';
 
 export interface Template {
@@ -54,7 +55,8 @@ export async function convertMarkdownToPdf(req: ConvertRequest, opts?: { include
             throw new Error('`markdown` is required');
         }
 
-        await registerFonts(fonts || []);
+        const preloaded = await getPreloadedFontInputs();
+        await registerFonts([...preloaded, ...(fonts || [])]);
         await initializeCompiler();
         await resetCompiler();
 
