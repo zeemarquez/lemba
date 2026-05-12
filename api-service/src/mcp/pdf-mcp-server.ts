@@ -26,7 +26,7 @@ import {
     resolveTemplate,
 } from '../lib/source-resolvers';
 import {
-    getUserFileByPath,
+    getUserMarkdownFileByPath,
     listUserFonts,
     listUserMarkdownFiles,
     listUserMarkdownFolderPaths,
@@ -136,9 +136,9 @@ const uploadCloudMarkdownInputShape = {
         .optional()
         .describe(
             [
-                'Exact parent folder path with forward slashes, no leading slash (e.g. `Work/Clients`).',
-                'Omit this field or use an empty string to upload to the vault root.',
-                'Prefer values from `folderPaths` on `list_cloud_files`.',
+                'Parent folder under the vault `Files` root (forward slashes, no leading slash), e.g. `Work/Clients`.',
+                'Stored in cloud as `Files/<folder_path>/…`. Omit or empty string to save at `Files/<filename>`.',
+                'You may pass an explicit `Files/…` path; `Templates/…` is reserved for templates.',
                 'If set to a non-empty string, `folder_query` is ignored.',
             ].join('\n'),
         ),
@@ -482,7 +482,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                 return errorContent(message);
             }
 
-            const file = await getUserFileByPath(userId, resolvedPath!);
+            const file = await getUserMarkdownFileByPath(userId, resolvedPath!);
             if (!file) {
                 return errorContent(
                     `No file at "${resolvedPath}". Call \`list_cloud_files\` to see valid \`filepath\` values.`,

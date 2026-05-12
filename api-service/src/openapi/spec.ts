@@ -464,7 +464,8 @@ export const openApiDocument = {
                     folderPath: {
                         type: 'string',
                         example: 'Projects/Acme',
-                        description: 'Parent folder path without leading slash; empty string for root. Missing segments are created as folders.',
+                        description:
+                            'Parent folder path without leading slash, relative to the vault `Files` root (e.g. `Projects/Acme` → stored as `Files/Projects/Acme`). Omit or empty string for `Files/` root.',
                     },
                 },
             },

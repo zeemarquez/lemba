@@ -7,7 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireUser } from '../middleware/auth';
 import { isFirebaseAdminConfigured } from '../lib/firebase-admin';
 import {
-    getUserFileByPath,
+    getUserMarkdownFileByPath,
     listUserFonts,
     listUserMarkdownFiles,
     listUserTemplates,
@@ -78,7 +78,7 @@ router.get('/files/content', async (req: Request, res: Response) => {
         return;
     }
     try {
-        const file = await getUserFileByPath(req.userId!, filepath);
+        const file = await getUserMarkdownFileByPath(req.userId!, filepath);
         if (!file) {
             res.status(404).json({ error: 'NotFound', message: `No file at path "${filepath}".` });
             return;

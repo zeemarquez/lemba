@@ -8,7 +8,7 @@
  *   artifacts/{appId}/users/{userId}/files/{syncId}
  *   artifacts/{appId}/users/{userId}/fonts/{syncId}
  *
- * Files use `path` as a logical name (e.g. `Templates/Default/Basic.mdt`).
+ * Files use `path` as a logical name (e.g. `Files/Notes/report.md`, `Templates/Default/Basic.mdt`).
  * Fonts use `id` (slugified family) and store base64 in `dataBase64`.
  */
 
@@ -156,6 +156,21 @@ export async function getUserFileByPath(userId: string, filePath: string): Promi
     return latest ?? null;
 }
 
+/**
+ * Resolve a markdown file path for reads. Tries the exact path, then `Files/{path}` when the
+ * caller omitted the vault prefix (legacy API uploads).
+ */
+export async function getUserMarkdownFileByPath(userId: string, filePath: string): Promise<CloudFile | null> {
+    const trimmed = filePath.replace(/^\/+/, '').trim();
+    if (!trimmed) return null;
+    let file = await getUserFileByPath(userId, trimmed);
+    if (file) return file;
+    if (!trimmed.startsWith('Files/') && !trimmed.startsWith('Templates/')) {
+        file = await getUserFileByPath(userId, `Files/${trimmed}`);
+    }
+    return file ?? null;
+}
+
 function stripSlashes(s: string): string {
     return s.replace(/^\/+/g, '').replace(/\/+$/g, '').trim();
 }
@@ -181,8 +196,23 @@ function isMarkdownFilename(name: string): boolean {
 }
 
 /**
+ * The web app explorer only lists markdown under logical path `Files/…` (see `Sidebar.tsx`).
+ * API uploads must use the same prefix unless the caller already used `Files/` or `Templates/`.
+ */
+export function normalizeMarkdownVaultUploadPath(folderPath: string, filename: string): string {
+    const folder = stripSlashes(folderPath);
+    const name = stripSlashes(filename);
+    if (!name) throw new Error('Filename is empty');
+    const joined = folder ? `${folder}/${name}` : name;
+    if (joined.startsWith('Files/') || joined.startsWith('Templates/')) {
+        return joined;
+    }
+    return `Files/${joined}`;
+}
+
+/**
  * Ensures each segment of `folderPath` exists as a `type: 'folder'` document.
- * `folderPath` uses forward slashes, no leading slash (e.g. `Notes/2025`).
+ * `folderPath` uses forward slashes, no leading slash (e.g. `Files/Notes/2025`).
  */
 export async function ensureFolderPathExists(userId: string, folderPath: string): Promise<void> {
     if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
@@ -230,20 +260,24 @@ export async function upsertUserMarkdownFile(
     input: { folderPath: string; filename: string; content: string },
 ): Promise<UpsertMarkdownResult> {
     if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
-    const folder = stripSlashes(input.folderPath);
     const rawName = stripSlashes(input.filename);
     if (!rawName || rawName.includes('/')) {
         throw new Error('Filename must be a single name without slashes');
     }
     assertSafeCloudRelativePath(rawName);
-    if (folder) assertSafeCloudRelativePath(folder);
     if (!isMarkdownFilename(rawName)) {
         throw new Error('Filename must end with .md, .markdown, or .mdx');
     }
-    const fullPath = folder ? `${folder}/${rawName}` : rawName;
+    const folderRaw = stripSlashes(input.folderPath);
+    if (folderRaw) assertSafeCloudRelativePath(folderRaw);
+
+    const fullPath = normalizeMarkdownVaultUploadPath(input.folderPath, rawName);
     assertSafeCloudRelativePath(fullPath);
 
-    await ensureFolderPathExists(userId, folder);
+    const parentEnd = fullPath.lastIndexOf('/');
+    const folderChain = parentEnd > 0 ? fullPath.slice(0, parentEnd) : '';
+
+    await ensureFolderPathExists(userId, folderChain);
 
     const existing = await getUserFileByPath(userId, fullPath);
     if (existing && existing.type === 'folder') {

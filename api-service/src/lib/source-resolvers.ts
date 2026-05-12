@@ -10,6 +10,7 @@ import type { Template } from './converter';
 import type { FontInput } from './typst/fonts';
 import {
     getUserFileByPath,
+    getUserMarkdownFileByPath,
     getUserFontByIdentifier,
 } from './cloud-store';
 
@@ -61,7 +62,7 @@ export async function resolveMarkdown(
     if (!ctx.userId) {
         throw new ResolutionError('`md_cloud_filepath` requires an authenticated user API key.', 401);
     }
-    const file = await getUserFileByPath(ctx.userId, cloudPath);
+    const file = await getUserMarkdownFileByPath(ctx.userId, cloudPath);
     if (!file) {
         throw new ResolutionError(`Markdown file not found in your cloud storage: ${cloudPath}`, 404);
     }
