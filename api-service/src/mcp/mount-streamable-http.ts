@@ -1,15 +1,21 @@
 /**
  * Streamable HTTP MCP transport mounted on Express (multi-session map pattern
- * from @modelcontextprotocol/sdk examples).
+ * from @modelcontextprotocol/sdk examples). Optionally guards POST/GET/DELETE
+ * with the API key middleware so MCP tools can resolve `req.userId`.
  */
 
-import type { IRouter, Request, Response } from 'express';
+import type { IRouter, NextFunction, Request, Response, RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createPdfMcpServer } from './pdf-mcp-server';
 
-const transports = new Map<string, StreamableHTTPServerTransport>();
+interface SessionEntry {
+    transport: StreamableHTTPServerTransport;
+    userId: string | null;
+}
+
+const sessions = new Map<string, SessionEntry>();
 
 function getSessionHeader(req: Request): string | undefined {
     const raw = req.headers['mcp-session-id'];
@@ -26,47 +32,57 @@ function isInitBody(body: unknown): boolean {
     return isInitializeRequest(body);
 }
 
-export function mountStreamableMcpHttp(router: IRouter, mountPath = '/'): void {
+export interface MountStreamableMcpHttpOptions {
+    /** Optional middleware (e.g. apiKeyAuth) applied to every MCP request. */
+    authMiddleware?: RequestHandler;
+}
+
+export function mountStreamableMcpHttp(
+    router: IRouter,
+    mountPath = '/',
+    options: MountStreamableMcpHttpOptions = {},
+): void {
     const postHandler = async (req: Request, res: Response) => {
         const sessionId = getSessionHeader(req);
 
         try {
-            let transport: StreamableHTTPServerTransport;
+            if (sessionId && sessions.has(sessionId)) {
+                const entry = sessions.get(sessionId)!;
+                await entry.transport.handleRequest(req, res, req.body);
+                return;
+            }
 
-            if (sessionId && transports.has(sessionId)) {
-                transport = transports.get(sessionId)!;
-            } else if (!sessionId && isInitBody(req.body)) {
-                transport = new StreamableHTTPServerTransport({
+            if (!sessionId && isInitBody(req.body)) {
+                const transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
                     onsessioninitialized: (sid) => {
-                        transports.set(sid, transport);
+                        sessions.set(sid, { transport, userId: req.userId ?? null });
                     },
                 });
 
                 transport.onclose = () => {
                     const sid = transport.sessionId;
-                    if (sid && transports.has(sid)) {
-                        transports.delete(sid);
+                    if (sid && sessions.has(sid)) {
+                        sessions.delete(sid);
                     }
                 };
 
-                const server = createPdfMcpServer();
+                const server = createPdfMcpServer({
+                    getUserId: () => req.userId ?? null,
+                });
                 await server.connect(transport);
                 await transport.handleRequest(req, res, req.body);
                 return;
-            } else {
-                res.status(400).json({
-                    jsonrpc: '2.0',
-                    error: {
-                        code: -32000,
-                        message: 'Bad Request: expected MCP initialize or a valid Mcp-Session-Id header',
-                    },
-                    id: null,
-                });
-                return;
             }
 
-            await transport.handleRequest(req, res, req.body);
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32000,
+                    message: 'Bad Request: expected MCP initialize or a valid Mcp-Session-Id header',
+                },
+                id: null,
+            });
         } catch (err) {
             console.error('[MCP] POST error:', err);
             if (!res.headersSent) {
@@ -81,13 +97,12 @@ export function mountStreamableMcpHttp(router: IRouter, mountPath = '/'): void {
 
     const getHandler = async (req: Request, res: Response) => {
         const sessionId = getSessionHeader(req);
-        if (!sessionId || !transports.has(sessionId)) {
+        if (!sessionId || !sessions.has(sessionId)) {
             res.status(400).send('Invalid or missing Mcp-Session-Id');
             return;
         }
-        const transport = transports.get(sessionId)!;
         try {
-            await transport.handleRequest(req, res);
+            await sessions.get(sessionId)!.transport.handleRequest(req, res);
         } catch (err) {
             console.error('[MCP] GET error:', err);
             if (!res.headersSent) {
@@ -98,13 +113,12 @@ export function mountStreamableMcpHttp(router: IRouter, mountPath = '/'): void {
 
     const deleteHandler = async (req: Request, res: Response) => {
         const sessionId = getSessionHeader(req);
-        if (!sessionId || !transports.has(sessionId)) {
+        if (!sessionId || !sessions.has(sessionId)) {
             res.status(400).send('Invalid or missing Mcp-Session-Id');
             return;
         }
-        const transport = transports.get(sessionId)!;
         try {
-            await transport.handleRequest(req, res);
+            await sessions.get(sessionId)!.transport.handleRequest(req, res);
         } catch (err) {
             console.error('[MCP] DELETE error:', err);
             if (!res.headersSent) {
@@ -113,7 +127,10 @@ export function mountStreamableMcpHttp(router: IRouter, mountPath = '/'): void {
         }
     };
 
-    router.post(mountPath, postHandler);
-    router.get(mountPath, getHandler);
-    router.delete(mountPath, deleteHandler);
+    const handlers: RequestHandler[] = [];
+    if (options.authMiddleware) handlers.push(options.authMiddleware);
+
+    router.post(mountPath, ...handlers, postHandler);
+    router.get(mountPath, ...handlers, getHandler);
+    router.delete(mountPath, ...handlers, deleteHandler);
 }

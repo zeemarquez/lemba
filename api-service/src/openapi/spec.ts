@@ -8,16 +8,20 @@ export const openApiDocument = {
     info: {
         title: 'Modern Markdown Editor — PDF API',
         description:
-            'Convert Markdown documents to PDF using the same Typst pipeline as the Modern Markdown Editor app. ' +
-            'Templates use the `.mdt` JSON format (`settings` object). ' +
-            'When `API_KEY` is set on the server, send `Authorization: Bearer <key>` or header `x-api-key`.',
-        version: '0.1.0',
+            'Convert Markdown documents to PDF using the same Typst pipeline as the Modern Markdown Editor app.\n\n' +
+            'Authentication (optional): send `Authorization: Bearer <token>` or `x-api-key: <token>`. Two token types are accepted:\n' +
+            '  - The shared `API_KEY` env value (legacy admin mode — no user context).\n' +
+            '  - A personal user token (`mme_*`) generated in the editor under **Settings → API Service**. ' +
+            'Tokens carry a user id, enabling cloud-backed sources (`md_cloud_filepath`, `template_cloud_filepath`, ' +
+            '`font_cloud_filepath`) and the `/v1/me/*` endpoints.',
+        version: '0.2.0',
         license: { name: 'MIT' },
     },
     servers: [{ url: '/', description: 'Current host' }],
     tags: [
         { name: 'Health', description: 'Liveness' },
         { name: 'Convert', description: 'Markdown → PDF' },
+        { name: 'Me', description: 'Cloud-saved files for the authenticated user' },
     ],
     paths: {
         '/health': {
@@ -43,9 +47,10 @@ export const openApiDocument = {
                 tags: ['Convert'],
                 summary: 'Convert (JSON body)',
                 description:
-                    'Send Markdown and optional template settings as JSON. ' +
-                    'Response is `application/pdf` when `output` is `binary` (default), JSON with base64 when `output` is `base64`, ' +
-                    'or JSON with a time-limited `url` when `output` is `url` (fetch PDF from that URL; no API key on GET).',
+                    'Send a markdown source and optional template/fonts as JSON. ' +
+                    'Provide markdown via exactly one of `md_raw` or `md_cloud_filepath`. ' +
+                    'Provide a template via at most one of `template_raw` or `template_cloud_filepath`. ' +
+                    '`*_cloud_filepath` requires a personal user token.',
                 operationId: 'convertJson',
                 security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
                 requestBody: {
@@ -71,6 +76,7 @@ export const openApiDocument = {
                     },
                     '400': { description: 'Bad request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '401': { description: 'Missing or invalid API key', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '404': { description: 'Cloud resource not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '500': { description: 'Conversion failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                 },
             },
@@ -107,8 +113,10 @@ export const openApiDocument = {
                 tags: ['Convert'],
                 summary: 'Convert (multipart)',
                 description:
-                    'Upload `markdown` as a file or text field, optional `template` as `.mdt` file or JSON string, ' +
-                    'optional `fontFiles` (repeatable). Form field `fonts` is a JSON array of `{ "family", "url" }`.',
+                    'Upload markdown as `md_file` (binary part) or send `md_raw` / `md_cloud_filepath` text fields. ' +
+                    'Template can be a `template_file` part, `template_raw` text field (JSON), or `template_cloud_filepath`. ' +
+                    'Fonts: repeatable `font_files` (binary) for inline uploads, plus a `fonts` text field with a JSON array of ' +
+                    '`{ family?, url? | font_raw? | font_cloud_filepath? }`.',
                 operationId: 'convertMultipart',
                 security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
                 requestBody: {
@@ -117,36 +125,35 @@ export const openApiDocument = {
                         'multipart/form-data': {
                             schema: {
                                 type: 'object',
-                                required: [],
                                 properties: {
-                                    markdown: {
+                                    md_raw: { type: 'string', description: 'Raw markdown body' },
+                                    md_file: { type: 'string', format: 'binary', description: 'Markdown file upload' },
+                                    md_cloud_filepath: {
                                         type: 'string',
-                                        description:
-                                            'Markdown source (required). The live API also accepts a **file** part named `markdown`; use curl or your app for file upload.',
+                                        description: 'Cloud filepath, e.g. `notes/report.md`. Requires authenticated user token.',
                                     },
-                                    template: {
+                                    template_raw: { type: 'string', description: 'Inline template JSON' },
+                                    template_file: { type: 'string', format: 'binary', description: 'Upload `.mdt` template file' },
+                                    template_cloud_filepath: {
                                         type: 'string',
-                                        description:
-                                            'Optional `.mdt` JSON as a string, or upload a file part named `template` (not shown as a separate field in all UIs).',
+                                        description: 'Cloud filepath, e.g. `Templates/Default Templates/Basic.mdt`.',
                                     },
                                     title: { type: 'string', example: 'My Report' },
                                     variables: {
                                         type: 'string',
                                         description: 'JSON object of placeholder values, e.g. `{"author":"Ada"}`',
-                                        example: '{"author":"Ada Lovelace"}',
                                     },
                                     fonts: {
                                         type: 'string',
-                                        description: 'JSON array of `{ "family": "Inter", "url": "https://..." }`',
-                                        example: '[{"family":"Inter","url":"https://example.com/Inter.ttf"}]',
+                                        description: 'JSON array, e.g. `[{"family":"Inter","url":"https://..."},{"font_cloud_filepath":"inter"}]`',
                                     },
-                                    fontFiles: {
+                                    font_files: {
                                         type: 'string',
                                         format: 'binary',
-                                        description: 'Optional font file (repeat field `fontFiles` for multiple).',
+                                        description: 'Optional font file (repeat to upload multiple).',
                                     },
                                     output: { type: 'string', enum: ['binary', 'base64', 'url'], default: 'binary' },
-                                    debug: { type: 'string', enum: ['0', '1', 'true', 'false'], description: 'Include Typst source in JSON response (base64 or url output)' },
+                                    debug: { type: 'string', enum: ['0', '1', 'true', 'false'] },
                                     filename: { type: 'string', example: 'report.pdf' },
                                 },
                             },
@@ -168,7 +175,68 @@ export const openApiDocument = {
                     },
                     '400': { description: 'Bad request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '404': { description: 'Cloud resource not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '500': { description: 'Conversion failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                },
+            },
+        },
+        '/v1/me/files': {
+            get: {
+                tags: ['Me'],
+                summary: 'List cloud markdown files',
+                description: 'Returns the authenticated user\'s cloud-synced markdown files (excludes templates).',
+                operationId: 'listMyFiles',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                responses: {
+                    '200': {
+                        description: 'List of files',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/CloudFilesResponse' },
+                            },
+                        },
+                    },
+                    '401': { description: 'Requires user API key' },
+                },
+            },
+        },
+        '/v1/me/templates': {
+            get: {
+                tags: ['Me'],
+                summary: 'List cloud templates',
+                description: 'Returns the authenticated user\'s cloud-saved `.mdt`/`.json` template files under `Templates/`.',
+                operationId: 'listMyTemplates',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                responses: {
+                    '200': {
+                        description: 'List of templates',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/CloudTemplatesResponse' },
+                            },
+                        },
+                    },
+                    '401': { description: 'Requires user API key' },
+                },
+            },
+        },
+        '/v1/me/fonts': {
+            get: {
+                tags: ['Me'],
+                summary: 'List cloud fonts',
+                description: 'Returns the authenticated user\'s cloud-saved custom fonts.',
+                operationId: 'listMyFonts',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                responses: {
+                    '200': {
+                        description: 'List of fonts',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/CloudFontsResponse' },
+                            },
+                        },
+                    },
+                    '401': { description: 'Requires user API key' },
                 },
             },
         },
@@ -179,13 +247,13 @@ export const openApiDocument = {
                 type: 'http',
                 scheme: 'bearer',
                 bearerFormat: 'API key',
-                description: 'Send `Authorization: Bearer <API_KEY>` when the server has `API_KEY` set.',
+                description: 'Send `Authorization: Bearer <token>`. Token is either the shared `API_KEY` or a personal `mme_*` token.',
             },
             apiKeyHeader: {
                 type: 'apiKey',
                 in: 'header',
                 name: 'x-api-key',
-                description: 'Alternative to Bearer: send the same secret in `x-api-key`.',
+                description: 'Alternative to Bearer.',
             },
         },
         schemas: {
@@ -204,11 +272,17 @@ export const openApiDocument = {
                     message: { type: 'string' },
                 },
             },
-            FontUrl: {
+            FontSource: {
                 type: 'object',
+                description: 'One font entry. Exactly one of `font_raw`, `url`, or `font_cloud_filepath` may be set.',
                 properties: {
-                    family: { type: 'string', description: 'CSS font-family name used in template settings' },
-                    url: { type: 'string', format: 'uri', description: 'HTTPS URL to a TTF, OTF, or WOFF file' },
+                    family: { type: 'string', description: 'CSS font-family used in the template settings.' },
+                    font_raw: { type: 'string', description: 'Base64-encoded font file bytes.' },
+                    url: { type: 'string', format: 'uri', description: 'HTTPS URL to a TTF/OTF/WOFF file.' },
+                    font_cloud_filepath: {
+                        type: 'string',
+                        description: 'Cloud font identifier (the font `id` or `family`). Requires a user API key.',
+                    },
                 },
             },
             Template: {
@@ -222,27 +296,31 @@ export const openApiDocument = {
             },
             ConvertJsonRequest: {
                 type: 'object',
-                required: ['markdown'],
+                description:
+                    'Exactly one of `md_raw` / `md_cloud_filepath` is required. At most one of `template_raw` / `template_cloud_filepath`. ' +
+                    'For backwards compatibility, `markdown` and `template` are still accepted as aliases of `md_raw` and `template_raw`.',
                 properties: {
-                    markdown: { type: 'string', description: 'Markdown document (YAML frontmatter allowed)' },
-                    template: { $ref: '#/components/schemas/Template' },
-                    title: { type: 'string', description: 'Document title for `{{title}}` placeholders' },
-                    variables: {
-                        type: 'object',
-                        additionalProperties: { type: 'string' },
-                        description: 'Values for `{{var:name}}`; overrides frontmatter `variables`',
+                    md_raw: { type: 'string', description: 'Inline markdown body (YAML frontmatter allowed).' },
+                    md_cloud_filepath: {
+                        type: 'string',
+                        description: 'Path of a markdown file in the user\'s cloud storage. Requires a user API key.',
                     },
+                    markdown: { type: 'string', description: 'Deprecated alias of `md_raw`.' },
+                    template_raw: { $ref: '#/components/schemas/Template' },
+                    template_cloud_filepath: {
+                        type: 'string',
+                        description: 'Path of a `.mdt`/`.json` template in the user\'s cloud storage.',
+                    },
+                    template: { $ref: '#/components/schemas/Template' },
+                    title: { type: 'string' },
+                    variables: { type: 'object', additionalProperties: { type: 'string' } },
                     fonts: {
                         type: 'array',
-                        items: { $ref: '#/components/schemas/FontUrl' },
-                        description: 'Remote fonts to load before compiling',
+                        items: { $ref: '#/components/schemas/FontSource' },
                     },
                     output: { type: 'string', enum: ['binary', 'base64', 'url'], default: 'binary' },
-                    debug: {
-                        type: 'boolean',
-                        description: 'If true, include generated Typst source in JSON responses (`base64` or `url` output)',
-                    },
-                    filename: { type: 'string', description: 'Suggested download filename for binary PDF' },
+                    debug: { type: 'boolean' },
+                    filename: { type: 'string' },
                 },
             },
             ConvertBase64Response: {
@@ -251,9 +329,9 @@ export const openApiDocument = {
                 properties: {
                     filename: { type: 'string' },
                     mimeType: { type: 'string', example: 'application/pdf' },
-                    base64: { type: 'string', description: 'PDF bytes, base64-encoded' },
+                    base64: { type: 'string' },
                     byteLength: { type: 'integer' },
-                    typstSource: { type: 'string', description: 'Present when debug was enabled' },
+                    typstSource: { type: 'string' },
                 },
             },
             ConvertUrlResponse: {
@@ -262,10 +340,60 @@ export const openApiDocument = {
                 properties: {
                     filename: { type: 'string' },
                     mimeType: { type: 'string', example: 'application/pdf' },
-                    url: { type: 'string', format: 'uri', description: 'GET this URL for raw PDF bytes until expiresAt' },
+                    url: { type: 'string', format: 'uri' },
                     expiresAt: { type: 'string', format: 'date-time' },
                     byteLength: { type: 'integer' },
-                    typstSource: { type: 'string', description: 'Present when debug was enabled' },
+                    typstSource: { type: 'string' },
+                },
+            },
+            CloudFileItem: {
+                type: 'object',
+                properties: {
+                    filename: { type: 'string' },
+                    filepath: { type: 'string' },
+                    lastChanged: { type: 'integer', description: 'Unix millis' },
+                    lastChangedIso: { type: 'string', format: 'date-time' },
+                    byteLength: { type: 'integer' },
+                },
+            },
+            CloudTemplateItem: {
+                type: 'object',
+                properties: {
+                    filename: { type: 'string' },
+                    name: { type: 'string' },
+                    filepath: { type: 'string' },
+                    lastChanged: { type: 'integer' },
+                    lastChangedIso: { type: 'string', format: 'date-time' },
+                },
+            },
+            CloudFontItem: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string' },
+                    family: { type: 'string' },
+                    fileName: { type: 'string' },
+                    filepath: { type: 'string', description: 'Same value as `id`; usable as `font_cloud_filepath`.' },
+                    format: { type: 'string' },
+                    lastChanged: { type: 'integer' },
+                    lastChangedIso: { type: 'string', format: 'date-time' },
+                },
+            },
+            CloudFilesResponse: {
+                type: 'object',
+                properties: {
+                    files: { type: 'array', items: { $ref: '#/components/schemas/CloudFileItem' } },
+                },
+            },
+            CloudTemplatesResponse: {
+                type: 'object',
+                properties: {
+                    templates: { type: 'array', items: { $ref: '#/components/schemas/CloudTemplateItem' } },
+                },
+            },
+            CloudFontsResponse: {
+                type: 'object',
+                properties: {
+                    fonts: { type: 'array', items: { $ref: '#/components/schemas/CloudFontItem' } },
                 },
             },
         },

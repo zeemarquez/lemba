@@ -60,3 +60,12 @@ export {
     type UserAccessLevel,
     type UserAccess,
 } from './user-access';
+
+// API key management (for the external API/MCP service)
+export {
+    createApiKey,
+    listApiKeys,
+    deleteApiKey,
+    generateApiKeyToken,
+    type ApiKey,
+} from './api-keys';

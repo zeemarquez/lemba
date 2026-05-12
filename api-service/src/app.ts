@@ -5,6 +5,7 @@
 
 import express, { type Request, type Response, type NextFunction } from 'express';
 import convertRouter from './routes/convert';
+import meRouter from './routes/me';
 import { handleTempPdfDownload } from './routes/temp-pdf-download';
 import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
@@ -37,12 +38,16 @@ export function createApp(): express.Express {
         app.use('/docs', docsRouter);
     }
 
-    mountStreamableMcpHttp(app, '/mcp');
+    // MCP transport: apply the same optional API-key auth as the REST routes.
+    // Anonymous access still works when `API_KEY` is unset; authenticated tools
+    // can access the caller's cloud files/fonts.
+    mountStreamableMcpHttp(app, '/mcp', { authMiddleware: apiKeyAuth });
 
     /** Time-limited PDF fetch by token (no API key — token is the secret). */
     app.get('/v1/convert/pdf/:token', handleTempPdfDownload);
 
     app.use('/v1', apiKeyAuth, convertRouter);
+    app.use('/v1/me', apiKeyAuth, meRouter);
 
     app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
         console.error('[Unhandled error]', err);

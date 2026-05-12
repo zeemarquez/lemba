@@ -41,6 +41,7 @@ import { validateApiKey, hasEnvApiKey, isTrialOnlyOpenAI } from '@/lib/agent';
 import type { LLMProvider } from '@/lib/agent';
 import { useDebounce } from '@/hooks/use-debounce';
 import { getTrialUserId, checkTrialLimit, TRIAL_TOKEN_LIMIT } from '@/lib/agent/trial-usage';
+import { ApiKeysPanel } from '@/components/settings/ApiKeysPanel';
 
 export function SettingsDialog() {
   const { theme, setTheme } = useTheme();
@@ -215,6 +216,12 @@ export function SettingsDialog() {
               value="agent"
             >
               Agent
+            </TabsTrigger>
+            <TabsTrigger
+              className="w-full justify-start px-4 py-2 h-9 flex-none data-[state=active]:bg-background data-[state=active]:shadow-none border-none"
+              value="api-service"
+            >
+              API Service
             </TabsTrigger>
           </TabsList>
 
@@ -527,6 +534,10 @@ function hello() {
                     })}
                   </div>
                 </div>
+              </TabsContent>
+
+              <TabsContent className="mt-0 outline-none" value="api-service">
+                <ApiKeysPanel />
               </TabsContent>
 
               <TabsContent className="mt-0 outline-none" value="templates">

@@ -1,9 +1,17 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
-import { convertMarkdownToPdf, Template } from '../lib/converter';
+import { convertMarkdownToPdf } from '../lib/converter';
 import { buildTempPdfAbsoluteUrl } from '../lib/pdf-public-url';
 import { storeTempPdf } from '../lib/pdf-temp-store';
-import type { FontInput } from '../lib/typst/fonts';
+import {
+    ResolutionError,
+    resolveFonts,
+    resolveMarkdown,
+    resolveTemplate,
+    type FontSourceEntry,
+    type MarkdownSource,
+    type TemplateSource,
+} from '../lib/source-resolvers';
 
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 
@@ -16,20 +24,12 @@ const router = Router();
 
 type PdfOutputMode = 'binary' | 'base64' | 'url';
 
-interface ConvertJsonBody {
-    markdown?: string;
-    template?: Template | null;
+interface ConvertJsonBody extends MarkdownSource, TemplateSource {
     title?: string;
     variables?: Record<string, string>;
-    fonts?: FontInput[];
-    /**
-     * How to return the PDF: `binary` (default) raw bytes, `base64` JSON wrapper,
-     * `url` JSON with a time-limited HTTPS-style URL to GET the bytes.
-     */
+    fonts?: FontSourceEntry[];
     output?: PdfOutputMode;
-    /** Include the generated Typst source in the response (debugging). */
     debug?: boolean;
-    /** Filename to use in the `Content-Disposition` header. */
     filename?: string;
 }
 
@@ -93,26 +93,27 @@ function sendPdfResponse(
     res.status(200).send(Buffer.from(pdf));
 }
 
+function sendResolutionError(res: Response, err: unknown) {
+    if (err instanceof ResolutionError) {
+        res.status(err.status).json({ error: err.status === 401 ? 'Unauthorized' : 'BadRequest', message: err.message });
+        return true;
+    }
+    return false;
+}
+
 /**
  * POST /v1/convert (application/json)
- *   {
- *     "markdown":   "# Hello",
- *     "template":   { ...mdt template object... },
- *     "title":      "Optional title",
- *     "variables":  { "author": "Jane" },
- *     "fonts":      [ { "family": "Inter", "url": "https://..." } ],
- *     "output":     "binary" | "base64" | "url",
- *     "debug":      false,
- *     "filename":   "report.pdf"
- *   }
+ *
+ * Body accepts exactly one of `md_raw` / `md_file` / `md_cloud_filepath` for
+ * the markdown source, and optionally one of `template_raw` / `template_file`
+ * / `template_cloud_filepath` for the template. `*_cloud_filepath` requires an
+ * authenticated user API key.
+ *
+ * Fonts: array of `{ family?, font_raw? | font_file? | url? | font_cloud_filepath? }`.
  */
 router.post('/convert', async (req: Request, res: Response) => {
     try {
-        const body = req.body as ConvertJsonBody;
-        if (!body || typeof body.markdown !== 'string') {
-            res.status(400).json({ error: 'BadRequest', message: '`markdown` (string) is required in JSON body' });
-            return;
-        }
+        const body = (req.body || {}) as ConvertJsonBody;
 
         const outputRaw = body.output ?? 'binary';
         if (outputRaw !== 'binary' && outputRaw !== 'base64' && outputRaw !== 'url') {
@@ -124,12 +125,22 @@ router.post('/convert', async (req: Request, res: Response) => {
         }
         const output: PdfOutputMode = outputRaw;
 
-        const fonts = (body.fonts || []).map((f: FontInput) => ({ family: f.family, url: f.url }));
+        let markdown: string;
+        let template: Awaited<ReturnType<typeof resolveTemplate>>['template'];
+        let fonts;
+        try {
+            ({ markdown } = await resolveMarkdown(body, { userId: req.userId }));
+            ({ template } = await resolveTemplate(body, { userId: req.userId }));
+            fonts = await resolveFonts(body.fonts, { userId: req.userId });
+        } catch (e) {
+            if (sendResolutionError(res, e)) return;
+            throw e;
+        }
 
         const { pdf, typstSource } = await convertMarkdownToPdf(
             {
-                markdown: body.markdown,
-                template: body.template ?? null,
+                markdown,
+                template: template ?? null,
                 title: body.title,
                 variables: body.variables,
                 fonts,
@@ -147,54 +158,69 @@ router.post('/convert', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /v1/convert/multipart (multipart/form-data)
- *   markdown:     file or text field
- *   template:     file (.mdt JSON) or text field (JSON string)
- *   title:        text
- *   variables:    text (JSON object)
- *   fonts:        text (JSON array of { family, url })
- *   fontFiles:    one or more font files (binary). Filenames become the
- *                 family name unless overridden by a parallel `fonts` entry.
- *   output:       'binary' | 'base64' | 'url' (default binary)
- *   debug:        '1' | 'true' to return Typst source as well
- *   filename:     output filename
+ * POST /v1/convert/multipart
+ *
+ * Form fields (use exactly one for markdown and at most one for template):
+ *
+ *   md_raw, md_file (file part), md_cloud_filepath
+ *   template_raw, template_file (file part), template_cloud_filepath
+ *   fonts        — JSON array of `{ family?, url?, font_raw?, font_cloud_filepath? }`
+ *   font_files   — one or more font file parts (deprecated alias: `fontFiles`)
+ *   title, variables (JSON), output, debug, filename
+ *
+ * Legacy aliases still accepted: `markdown`, `template`, `fontFiles`.
  */
 router.post(
     '/convert/multipart',
     upload.fields([
+        { name: 'md_file', maxCount: 1 },
         { name: 'markdown', maxCount: 1 },
+        { name: 'template_file', maxCount: 1 },
         { name: 'template', maxCount: 1 },
+        { name: 'font_files', maxCount: 20 },
         { name: 'fontFiles', maxCount: 20 },
     ]),
     async (req: Request, res: Response) => {
         try {
             const files = (req.files as Record<string, Express.Multer.File[]>) || {};
 
-            // markdown can be a file OR a text field
-            let markdown: string | undefined;
-            const mdFile = files.markdown?.[0];
+            const mdFile = files.md_file?.[0] ?? files.markdown?.[0];
+            const mdSource: MarkdownSource = {
+                md_raw: typeof req.body.md_raw === 'string' ? req.body.md_raw : undefined,
+                markdown: typeof req.body.markdown === 'string' ? req.body.markdown : undefined,
+                md_cloud_filepath:
+                    typeof req.body.md_cloud_filepath === 'string'
+                        ? req.body.md_cloud_filepath
+                        : undefined,
+            };
             if (mdFile) {
-                markdown = mdFile.buffer.toString('utf8');
-            } else if (typeof req.body.markdown === 'string') {
-                markdown = req.body.markdown;
-            }
-            if (typeof markdown !== 'string') {
-                res.status(400).json({ error: 'BadRequest', message: '`markdown` (file or field) is required' });
-                return;
+                mdSource.md_file = mdFile.buffer.toString('utf8');
             }
 
-            // template can be a file OR a text field with JSON
-            let template: Template | undefined;
-            const templateFile = files.template?.[0];
+            const templateFile = files.template_file?.[0] ?? files.template?.[0];
+            const tplSource: TemplateSource = {
+                template_raw: typeof req.body.template_raw === 'string' ? req.body.template_raw : undefined,
+                template:
+                    typeof req.body.template === 'string'
+                        ? req.body.template
+                        : undefined,
+                template_cloud_filepath:
+                    typeof req.body.template_cloud_filepath === 'string'
+                        ? req.body.template_cloud_filepath
+                        : undefined,
+            };
             if (templateFile) {
-                try {
-                    template = JSON.parse(templateFile.buffer.toString('utf8')) as Template;
-                } catch (e) {
-                    res.status(400).json({ error: 'BadRequest', message: `template file is not valid JSON: ${(e as Error).message}` });
-                    return;
-                }
-            } else if (req.body.template) {
-                template = parseJsonField<Template>(req.body.template, 'template');
+                tplSource.template_file = templateFile.buffer.toString('utf8');
+            }
+
+            let markdown: string;
+            let template;
+            try {
+                ({ markdown } = await resolveMarkdown(mdSource, { userId: req.userId }));
+                ({ template } = await resolveTemplate(tplSource, { userId: req.userId }));
+            } catch (e) {
+                if (sendResolutionError(res, e)) return;
+                throw e;
             }
 
             let variables: Record<string, string> | undefined;
@@ -205,21 +231,29 @@ router.post(
                 return;
             }
 
-            let fontsFromField: FontInput[] = [];
+            let fontEntries: FontSourceEntry[] = [];
             try {
-                fontsFromField = parseJsonField<FontInput[]>(req.body.fonts, 'fonts') || [];
+                fontEntries = parseJsonField<FontSourceEntry[]>(req.body.fonts, 'fonts') || [];
             } catch (e) {
                 res.status(400).json({ error: 'BadRequest', message: (e as Error).message });
                 return;
             }
 
-            const fontFiles = files.fontFiles || [];
-            const fontsFromFiles: FontInput[] = fontFiles.map((f) => ({
-                family: (f.originalname || 'CustomFont').replace(/\.[^/.]+$/, ''),
-                data: new Uint8Array(f.buffer),
-            }));
+            const fontFiles = files.font_files ?? files.fontFiles ?? [];
+            for (const file of fontFiles) {
+                fontEntries.push({
+                    family: (file.originalname || 'CustomFont').replace(/\.[^/.]+$/, ''),
+                    font_file: new Uint8Array(file.buffer),
+                });
+            }
 
-            const fonts: FontInput[] = [...fontsFromField, ...fontsFromFiles];
+            let resolvedFonts;
+            try {
+                resolvedFonts = await resolveFonts(fontEntries, { userId: req.userId });
+            } catch (e) {
+                if (sendResolutionError(res, e)) return;
+                throw e;
+            }
 
             const title = typeof req.body.title === 'string' ? req.body.title : undefined;
             const debug = ['1', 'true', 'yes'].includes(String(req.body.debug || '').toLowerCase());
@@ -233,11 +267,14 @@ router.post(
             }
 
             const { pdf, typstSource } = await convertMarkdownToPdf(
-                { markdown, template, title, variables, fonts },
+                { markdown, template: template ?? null, title, variables, fonts: resolvedFonts },
                 { includeSource: debug },
             );
 
-            const filename = sanitizeFilename(req.body.filename, title || mdFile?.originalname || 'document');
+            const filename = sanitizeFilename(
+                typeof req.body.filename === 'string' ? req.body.filename : undefined,
+                title || mdFile?.originalname || 'document',
+            );
             sendPdfResponse(res, req, pdf, filename, typstSource, output);
         } catch (e) {
             console.error('[POST /v1/convert/multipart] error:', e);
