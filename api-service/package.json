@@ -23,6 +23,7 @@
     "@myriaddreamin/typst.ts": "^0.7.0-rc2",
     "express": "^4.21.2",
     "gray-matter": "^4.0.3",
+    "jose": "^6.2.3",
     "lucide-react": "^0.562.0",
     "marked": "^17.0.1",
     "marked-katex-extension": "^5.1.6",

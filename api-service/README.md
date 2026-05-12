@@ -110,7 +110,18 @@ The service also speaks **Model Context Protocol** over **Streamable HTTP** at *
 
 `https://<your-service-name>.onrender.com/mcp`
 
-If you set **`API_KEY`**, MCP requests must send the same credentials as the REST API (`Authorization: Bearer <key>` or `x-api-key`). In Cursor, add a “Streamable HTTP” MCP server with that URL and headers.
+**Cursor / clients with custom headers:** If you set **`API_KEY`**, send the same value as `Authorization: Bearer <key>` or `x-api-key` (no OAuth needed).
+
+**Perplexity (and other MCP OAuth clients):** Those apps use [MCP OAuth](https://modelcontextprotocol.io/specification/draft/basic/authorization) and expect **protected resource metadata** so they can find your **authorization server** and (if available) **dynamic client registration**. If registration is not offered by your IdP, the client shows an error like *“Server does not support automatic registration — provide client_id and client_secret manually”*: create an OAuth application at your IdP (e.g. Auth0) and paste **Client ID** and **Client Secret** into Perplexity when prompted.
+
+To support that flow on this API:
+
+1. Set **`MCP_OAUTH_ISSUER_URL`** to your IdP issuer (HTTPS), e.g. `https://YOUR_TENANT.us.auth0.com/`  
+2. Set **`MCP_OAUTH_AUDIENCE`** to the **API identifier / audience** your access tokens use (must match the JWT `aud` claim — e.g. the Auth0 API identifier you choose, often the same public URL as the MCP resource: `https://<your-service>.onrender.com/mcp`).  
+3. Optionally set **`PUBLIC_BASE_URL`** to `https://<your-service>.onrender.com` if `Host` / `X-Forwarded-*` headers are wrong so metadata still advertises the correct **`resource`** URL.  
+4. After deploy, confirm metadata loads:  
+   `GET https://<your-service>.onrender.com/.well-known/oauth-protected-resource/mcp`  
+5. In Perplexity, connect to MCP URL `https://<your-service>.onrender.com/mcp` and complete OAuth using the **manual** client credentials from your IdP if dynamic registration is disabled.
 
 The **`convert_markdown_to_pdf`** tool returns the PDF as an MCP **`resource`** block (`mimeType: application/pdf`, `blob` per the JSON-RPC transport). When **`includeTypstSource`** is true, the generated Typst source is appended as a separate **`text`** content item.
 
@@ -122,6 +133,10 @@ In the service → **Environment**, add the same keys you use locally (see
 | Key | Notes |
 | --- | --- |
 | `API_KEY` | Strongly recommended in production. |
+| `MCP_OAUTH_ISSUER_URL` | Optional. IdP issuer URL (HTTPS) for MCP OAuth metadata (Perplexity, etc.). Enables `GET /.well-known/oauth-protected-resource/mcp`. |
+| `MCP_OAUTH_AUDIENCE` | Required with issuer for **JWT** access to `/mcp` (must match JWT `aud`, e.g. Auth0 API identifier). |
+| `PUBLIC_BASE_URL` | Optional. Canonical site URL without path if reverse-proxy headers are wrong (metadata `resource` must be HTTPS). |
+| `MCP_OAUTH_SCOPES` | Optional. Comma-separated scopes listed in protected-resource metadata (default `openid,profile,email`). |
 | `MAX_UPLOAD_SIZE_MB` | e.g. `25`; increase if you send large JSON bodies. |
 | `FONT_FETCH_TIMEOUT_MS` / `IMAGE_FETCH_TIMEOUT_MS` | Optional. |
 | `DOCS_ENABLED` | Set `false` to disable **`/docs`** only. |
@@ -235,6 +250,10 @@ Point your editor or backend integrations at this base URL instead of
 | `HOST`                    | `0.0.0.0`   | HTTP bind address (default is fine on Render)               |
 | `MAX_UPLOAD_SIZE_MB`      | `25`        | Body/file size limit                                         |
 | `API_KEY`                 | _(empty)_   | If set, callers must send `Authorization: Bearer <key>` or `x-api-key` |
+| `MCP_OAUTH_ISSUER_URL`    | _(empty)_   | HTTPS issuer of your OAuth IdP (e.g. Auth0). Enables `/.well-known/oauth-protected-resource/mcp` for MCP clients (Perplexity). |
+| `MCP_OAUTH_AUDIENCE`      | _(empty)_   | With issuer: JWT `aud` this API accepts on **`/mcp`** (e.g. Auth0 API identifier, often `https://your-host/mcp`). |
+| `PUBLIC_BASE_URL`       | _(empty)_   | Canonical origin `https://your-host` without path if `Host` / `X-Forwarded-*` are unreliable (OAuth metadata `resource` URL). |
+| `MCP_OAUTH_SCOPES`      | `openid,profile,email` | Comma-separated scopes advertised in protected-resource metadata (informational for clients). |
 | `FONT_FETCH_TIMEOUT_MS`   | `15000`     | Timeout when downloading remote fonts                         |
 | `IMAGE_FETCH_TIMEOUT_MS`  | `15000`     | Timeout when downloading remote images                        |
 | `DOCS_ENABLED`            | _(unset)_   | Set to `false` to disable **`/docs`** ( **`/openapi.json`** stays enabled) |
