@@ -12,6 +12,7 @@ const app = getApp();
 
 app.listen(PORT, HOST, () => {
     console.log(`[api] modern-markdown-editor-api listening on http://${HOST}:${PORT}`);
+    console.log(`[api] MCP (Streamable HTTP): http://${HOST}:${PORT}/mcp`);
     if (process.env.API_KEY) {
         console.log('[api] API key auth ENABLED (set via API_KEY env var)');
     } else {

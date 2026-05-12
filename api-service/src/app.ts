@@ -8,6 +8,7 @@ import convertRouter from './routes/convert';
 import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
 import { apiKeyAuth } from './middleware/auth';
+import { mountStreamableMcpHttp } from './mcp/mount-streamable-http';
 
 const MAX_BODY_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 
@@ -34,6 +35,11 @@ export function createApp(): express.Express {
     if (process.env.DOCS_ENABLED !== 'false') {
         app.use('/docs', docsRouter);
     }
+
+    const mcpRouter = express.Router();
+    mcpRouter.use(apiKeyAuth);
+    mountStreamableMcpHttp(mcpRouter, '/');
+    app.use('/mcp', mcpRouter);
 
     app.use('/v1', apiKeyAuth, convertRouter);
 

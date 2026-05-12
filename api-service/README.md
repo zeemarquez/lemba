@@ -26,6 +26,7 @@ files by copy. The desktop app keeps working unchanged.
   uploads.
 - **Two output modes.** Raw `application/pdf` bytes (default) or
   base64-wrapped JSON (`output: "base64"`).
+- **MCP.** [Model Context Protocol](https://modelcontextprotocol.io) over **Streamable HTTP** at **`/mcp`** (same process as the REST API — one Render deploy).
 - **Interactive API docs.** [Swagger UI](https://swagger.io/tools/swagger-ui/) at **`/docs`**, OpenAPI 3 JSON at **`/openapi.json`** (disable with `DOCS_ENABLED=false`).
 
 ---
@@ -102,6 +103,14 @@ Click **Create Web Service** and wait for the first deploy.
 ```bash
 curl https://<your-service-name>.onrender.com/health
 ```
+
+### MCP (same deploy)
+
+The service also speaks **Model Context Protocol** over **Streamable HTTP** at **`/mcp`** on the same host (no second Render service). Example URL:
+
+`https://<your-service-name>.onrender.com/mcp`
+
+If you set **`API_KEY`**, MCP requests must send the same credentials as the REST API (`Authorization: Bearer <key>` or `x-api-key`). In Cursor, add a “Streamable HTTP” MCP server with that URL and headers.
 
 ### Environment variables (Render → Environment)
 
