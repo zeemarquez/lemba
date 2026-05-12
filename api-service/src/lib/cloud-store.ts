@@ -89,12 +89,23 @@ function toCloudFont(data: FirebaseFirestore.DocumentData, includeData: boolean)
     return font;
 }
 
+/** Keep only the most-recently-updated document per logical `path`. */
+function deduplicateByPath(files: CloudFile[]): CloudFile[] {
+    const latest = new Map<string, CloudFile>();
+    for (const f of files) {
+        const existing = latest.get(f.path);
+        if (!existing || f.updatedAt > existing.updatedAt) {
+            latest.set(f.path, f);
+        }
+    }
+    return Array.from(latest.values());
+}
+
 export async function listUserFiles(userId: string): Promise<CloudFile[]> {
     if (!isFirebaseAdminConfigured()) return [];
     const snap = await userCollection(userId, 'files').get();
-    return snap.docs
-        .map((d) => toCloudFile(d.data()))
-        .filter((f) => !f.isDeleted && f.type === 'file');
+    const all = snap.docs.map((d) => toCloudFile(d.data()));
+    return deduplicateByPath(all).filter((f) => !f.isDeleted && f.type === 'file');
 }
 
 export async function listUserTemplates(userId: string): Promise<CloudFile[]> {
@@ -110,11 +121,14 @@ export async function listUserMarkdownFiles(userId: string): Promise<CloudFile[]
 export async function getUserFileByPath(userId: string, filePath: string): Promise<CloudFile | null> {
     if (!isFirebaseAdminConfigured()) return null;
     const trimmed = filePath.replace(/^\/+/, '');
-    const snap = await userCollection(userId, 'files').where('path', '==', trimmed).limit(1).get();
+    const snap = await userCollection(userId, 'files').where('path', '==', trimmed).get();
     if (snap.empty) return null;
-    const file = toCloudFile(snap.docs[0]!.data());
-    if (file.isDeleted) return null;
-    return file;
+    const files = snap.docs.map((d) => toCloudFile(d.data()));
+    // Multiple docs can exist for the same path; take the latest non-deleted one.
+    const latest = files
+        .filter((f) => !f.isDeleted)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return latest ?? null;
 }
 
 export async function listUserFonts(userId: string, includeData = false): Promise<CloudFont[]> {

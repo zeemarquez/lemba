@@ -34,8 +34,11 @@ router.get('/files', async (req: Request, res: Response) => {
         const files = await listUserMarkdownFiles(req.userId!);
         res.status(200).json({
             files: files.map((f) => ({
+                fileId: f.syncId,
                 filename: f.path.split('/').pop() || f.path,
                 filepath: f.path,
+                type: f.type,
+                isDeleted: f.isDeleted,
                 lastChanged: f.updatedAt,
                 lastChangedIso: isoFromMs(f.updatedAt),
                 byteLength: f.content.length,
@@ -64,9 +67,12 @@ router.get('/templates', async (req: Request, res: Response) => {
                     /* ignore */
                 }
                 return {
+                    fileId: f.syncId,
                     filename,
                     name,
                     filepath: f.path,
+                    type: f.type,
+                    isDeleted: f.isDeleted,
                     lastChanged: f.updatedAt,
                     lastChangedIso: isoFromMs(f.updatedAt),
                 };
