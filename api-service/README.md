@@ -110,9 +110,9 @@ The service also speaks **Model Context Protocol** over **Streamable HTTP** at *
 
 `https://<your-service-name>.onrender.com/mcp`
 
-**Cursor / clients with custom headers:** If you set **`API_KEY`**, send the same value as `Authorization: Bearer <key>` or `x-api-key` (no OAuth needed).
+**Cursor / clients with custom headers:** `API_KEY` is **not** required on **`/mcp`** (optional: send the same value as `Authorization: Bearer …` or `x-api-key` if you want an extra shared secret there). **`/v1`** still requires `API_KEY` when that env var is set.
 
-**Perplexity (and other MCP OAuth clients):** Those apps use [MCP OAuth](https://modelcontextprotocol.io/specification/draft/basic/authorization) and expect **protected resource metadata** so they can find your **authorization server** and (if available) **dynamic client registration**. If registration is not offered by your IdP, the client shows an error like *“Server does not support automatic registration — provide client_id and client_secret manually”*: create an OAuth application at your IdP (e.g. Auth0) and paste **Client ID** and **Client Secret** into Perplexity when prompted.
+**Perplexity (and other MCP OAuth clients):** Those apps use [MCP OAuth](https://modelcontextprotocol.io/specification/draft/basic/authorization) and expect **protected resource metadata** so they can find your **authorization server** and usually **dynamic client registration** at that server. With **Auth0**, registration is **off by default** — enable it as under [Perplexity and Auth0 (dynamic client registration)](#perplexity-and-auth0-dynamic-client-registration) below, or use an IdP / client flow that matches your policy.
 
 To support that flow on this API:
 
@@ -121,7 +121,20 @@ To support that flow on this API:
 3. Optionally set **`PUBLIC_BASE_URL`** to `https://<your-service>.onrender.com` if `Host` / `X-Forwarded-*` headers are wrong so metadata still advertises the correct **`resource`** URL.  
 4. After deploy, confirm metadata loads:  
    `GET https://<your-service>.onrender.com/.well-known/oauth-protected-resource/mcp`  
-5. In Perplexity, connect to MCP URL `https://<your-service>.onrender.com/mcp` and complete OAuth using the **manual** client credentials from your IdP if dynamic registration is disabled.
+5. In Perplexity, connect to MCP URL `https://<your-service>.onrender.com/mcp` and complete OAuth. Perplexity will try **dynamic client registration** against Auth0 first.
+
+#### Perplexity and Auth0: dynamic client registration
+
+Perplexity registers itself as an OAuth client at Auth0. **Auth0 disables that by default**, which produces HTTP 400 with `dynamic client registration is disabled` and Perplexity shows `CLIENT_REGISTRATION_FAILED`.
+
+**Fix (tenant-level on Auth0):**
+
+1. Open [Auth0 Dashboard](https://manage.auth0.com/) → **Settings** → **Advanced**.
+2. Enable **Dynamic Client Registration** for the tenant (see [Auth0 — Dynamic Client Registration](https://auth0.com/docs/get-started/applications/dynamic-client-registration)).
+3. For the **Auth0 API** whose **Identifier** equals **`MCP_OAUTH_AUDIENCE`**, configure **default permissions / grants** so dynamically registered third-party clients are allowed to request access to that API (Auth0 requires this; details are in the same doc).
+4. Retry the MCP connection in Perplexity.
+
+If you cannot enable DCR (policy, plan, etc.), use an IdP that supports it, or use a client that does not require DCR (e.g. Cursor with **`API_KEY`** headers instead of Perplexity’s hosted OAuth flow).
 
 The **`convert_markdown_to_pdf`** tool returns the PDF as an MCP **`resource`** block (`mimeType: application/pdf`, `blob` per the JSON-RPC transport). When **`includeTypstSource`** is true, the generated Typst source is appended as a separate **`text`** content item.
 

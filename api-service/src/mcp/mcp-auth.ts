@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { apiKeyAuth } from '../middleware/auth';
 
 function normalizeIssuer(url: string): string {
     return url.endsWith('/') ? url : `${url}/`;
@@ -27,10 +26,19 @@ function looksLikeJwt(token: string): boolean {
     return token.split('.').length === 3;
 }
 
+function hasMcpSession(req: Request): boolean {
+    const raw = req.headers['mcp-session-id'];
+    if (typeof raw === 'string') return raw.length > 0;
+    if (Array.isArray(raw)) return Boolean(raw[0]?.length);
+    return false;
+}
+
 /**
- * MCP auth: when `MCP_OAUTH_ISSUER_URL` + `MCP_OAUTH_AUDIENCE` are set, accept
- * `Authorization: Bearer` JWTs from that issuer (e.g. Auth0). Otherwise (or as
- * fallback when the bearer is not a valid JWT) use the same rules as `apiKeyAuth`.
+ * MCP-only auth. `API_KEY` is never required on `/mcp` (REST `/v1` still uses `apiKeyAuth` when set).
+ *
+ * - If `MCP_OAUTH_ISSUER_URL` + `MCP_OAUTH_AUDIENCE` are set: require a valid JWT Bearer,
+ *   or an existing `Mcp-Session-Id` (follow-up GET/DELETE/POST), or an optional matching `API_KEY`.
+ * - Otherwise: allow anonymous access to MCP.
  */
 export function mcpCombinedAuth(req: Request, res: Response, next: NextFunction): void {
     const issuer = process.env.MCP_OAUTH_ISSUER_URL?.trim();
@@ -40,18 +48,7 @@ export function mcpCombinedAuth(req: Request, res: Response, next: NextFunction)
     const bearer = extractBearer(req);
     const headerKey = req.header('x-api-key');
 
-    const tryApiKey = (): void => {
-        if (!apiKey) {
-            next();
-            return;
-        }
-        const provided = headerKey || bearer || '';
-        if (provided && provided === apiKey) {
-            next();
-            return;
-        }
-        res.status(401).json({ error: 'Unauthorized', message: 'Missing or invalid API key' });
-    };
+    const apiKeyMatches = (): boolean => !!(apiKey && (bearer === apiKey || headerKey === apiKey));
 
     if (issuer && audience && bearer && looksLikeJwt(bearer)) {
         void (async () => {
@@ -63,7 +60,7 @@ export function mcpCombinedAuth(req: Request, res: Response, next: NextFunction)
                 });
                 next();
             } catch (e) {
-                if (apiKey && (bearer === apiKey || headerKey === apiKey)) {
+                if (apiKeyMatches()) {
                     next();
                     return;
                 }
@@ -77,5 +74,22 @@ export function mcpCombinedAuth(req: Request, res: Response, next: NextFunction)
         return;
     }
 
-    apiKeyAuth(req, res, next);
+    if (apiKeyMatches()) {
+        next();
+        return;
+    }
+
+    if (issuer && audience) {
+        if (hasMcpSession(req)) {
+            next();
+            return;
+        }
+        res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Missing access token (Authorization: Bearer) or invalid session',
+        });
+        return;
+    }
+
+    next();
 }
