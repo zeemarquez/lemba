@@ -474,6 +474,11 @@ export const openApiDocument = {
                     filepath: { type: 'string' },
                     fileId: { type: 'string' },
                     created: { type: 'boolean', description: 'True when a new document was written; false when an existing path was updated.' },
+                    webUrl: {
+                        type: 'string',
+                        format: 'uri',
+                        description: 'Deep link to open this file in the web app (`WEBAPP_BASE_URL/{fileId}`).',
+                    },
                 },
             },
             CloudTemplatesResponse: {

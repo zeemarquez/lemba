@@ -14,6 +14,7 @@ import {
     normalizeCloudFilepath,
     upsertUserMarkdownFile,
 } from '../lib/cloud-store';
+import { buildWebappFileDeepLink } from '../lib/webapp-file-link';
 
 const router = Router();
 
@@ -132,6 +133,7 @@ router.post('/files/upload', async (req: Request, res: Response) => {
             filepath: result.path,
             fileId: result.syncId,
             created: result.created,
+            webUrl: buildWebappFileDeepLink(result.syncId),
         });
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);

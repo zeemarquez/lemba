@@ -121,6 +121,28 @@ export async function listUserMarkdownFiles(userId: string): Promise<CloudFile[]
     return files.filter((f) => !f.path.startsWith('Templates/'));
 }
 
+/**
+ * Distinct parent folder paths for the user's vault (excludes `Templates/`), from explicit
+ * `type: 'folder'` entries and parent segments of saved markdown file paths.
+ */
+export async function listUserMarkdownFolderPaths(userId: string): Promise<string[]> {
+    if (!isFirebaseAdminConfigured()) return [];
+    const snap = await userCollection(userId, 'files').get();
+    const all = snap.docs.map((d) => toCloudFile(d.data()));
+    const entries = deduplicateByPath(all).filter((f) => !f.isDeleted && !f.path.startsWith('Templates/'));
+    const set = new Set<string>();
+    for (const f of entries) {
+        if (f.type === 'folder') {
+            set.add(f.path);
+        }
+        const parts = f.path.split('/').filter(Boolean);
+        for (let i = 0; i < parts.length - 1; i++) {
+            set.add(parts.slice(0, i + 1).join('/'));
+        }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
 export async function getUserFileByPath(userId: string, filePath: string): Promise<CloudFile | null> {
     if (!isFirebaseAdminConfigured()) return null;
     const trimmed = filePath.replace(/^\/+/, '');

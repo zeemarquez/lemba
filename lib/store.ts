@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { browserStorage } from './browser-storage';
-import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, generateSyncId } from './types';
+import { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, FileEntry, generateSyncId } from './types';
 import { syncService, syncQueue } from './sync';
 import { PRELOADED_FONTS } from './preloaded-fonts';
 import { AgentMessage, DocumentDiff, AgentChat, createMessage, applyDiff as applyDiffToContent, mergeDiffsForFile, sendMessageToAI, runOrchestration, generateId, modelToProvider, isTrialOnlyOpenAI, TRIAL_MODEL, generateDiff, applyPartial } from './agent';
 import type { LLMProvider } from './agent';
 import { agentLog } from './agent/debug';
 import { saveBackupBeforeApply } from './content-backup';
-export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument };
+export type { FileNode, AppStateFile, Template, TemplateVariable, FontEntry, RagDocument, FileEntry };
 export type { AgentMessage, DocumentDiff, AgentChat };
 
 
@@ -105,6 +105,8 @@ export interface AppState {
 
     // Opens a file, fetching content if needed
     openFile: (path: string) => Promise<void>;
+    /** Open a single markdown file by cloud sync id; replaces tabs with this file only. */
+    openFileBySyncIdExclusive: (syncId: string) => Promise<'ok' | 'not_found' | 'deleted'>;
     saveFile: (path: string, content: string) => Promise<void>;
     openTemplate: (id: string) => void;
 
@@ -919,6 +921,67 @@ export const useStore = create<AppState>()(
                         set({ activeFileId: path, currentView: 'file' });
                     }
                     get().ensureActiveChatForDocument();
+                },
+
+                openFileBySyncIdExclusive: async (syncId: string) => {
+                    const sid = syncId.trim();
+                    if (!sid) return 'not_found';
+
+                    let entry: FileEntry | null = await browserStorage.getFileBySyncId(sid);
+                    if (!entry && syncService.isActive) {
+                        try {
+                            await syncService.pullDelta();
+                        } catch (error) {
+                            console.error('[Store] openFileBySyncIdExclusive pullDelta failed:', error);
+                        }
+                        entry = await browserStorage.getFileBySyncId(sid);
+                    }
+                    if (!entry) {
+                        const all = await browserStorage.getAllFiles();
+                        entry = all.find((f) => f.syncId === sid && f.type === 'file') ?? null;
+                    }
+                    if (!entry) return 'not_found';
+                    if (entry.type !== 'file') return 'not_found';
+                    if (entry.isDeleted) return 'deleted';
+
+                    const path = entry.path;
+                    let content: string;
+                    try {
+                        content = await browserStorage.readFile(path);
+                    } catch (error) {
+                        console.error('[Store] openFileBySyncIdExclusive readFile failed:', error);
+                        return 'not_found';
+                    }
+
+                    const newFile: AppStateFile = {
+                        id: path,
+                        name: path.split('/').pop() || path,
+                        content,
+                        language: 'markdown',
+                    };
+
+                    set({
+                        files: [newFile],
+                        activeFileId: path,
+                        currentView: 'file',
+                        openTabs: [{ id: path, type: 'file' }],
+                        editorViewMode: 'editing',
+                    });
+
+                    if (typeof window !== 'undefined') {
+                        try {
+                            localStorage.setItem(
+                                'markdown-editor-file-sync',
+                                JSON.stringify({ fileId: path, content, timestamp: Date.now() }),
+                            );
+                        } catch (error) {
+                            console.error('Failed to sync file content:', error);
+                        }
+                    }
+
+                    get().ensureActiveChatForDocument();
+                    await get().fetchFileTree();
+                    return 'ok';
                 },
 
                 saveFile: async (path: string, content: string) => {

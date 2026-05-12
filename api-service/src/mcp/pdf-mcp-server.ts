@@ -3,10 +3,12 @@
  * cloud-listing tools.
  *
  * Tools:
- *   - convert_markdown_to_pdf : compile markdown to PDF (MCP-only, minimal args)
- *   - list_cloud_files        : list the user's cloud markdown documents
- *   - list_cloud_templates    : list the user's cloud templates (.mdt/.json)
- *   - list_cloud_fonts        : list the user's cloud custom fonts
+ *   - convert_markdown_to_pdf      : compile markdown to PDF (MCP-only, minimal args)
+ *   - list_cloud_files             : list markdown documents + `folderPaths` (vault tree)
+ *   - read_cloud_markdown_document : fetch markdown body by filepath or search query
+ *   - upload_cloud_markdown_document : save markdown to cloud (optional folder)
+ *   - list_cloud_templates         : list the user's cloud templates (.mdt/.json)
+ *   - list_cloud_fonts             : list the user's cloud custom fonts
  *
  * The HTTP transport resolves the caller's `userId` from the API key and
  * provides it via `options.getUserId()`. Cloud-backed inputs return a clear
@@ -24,10 +26,16 @@ import {
     resolveTemplate,
 } from '../lib/source-resolvers';
 import {
+    getUserFileByPath,
     listUserFonts,
     listUserMarkdownFiles,
+    listUserMarkdownFolderPaths,
     listUserTemplates,
+    normalizeCloudFilepath,
+    upsertUserMarkdownFile,
 } from '../lib/cloud-store';
+import { isFirebaseAdminConfigured } from '../lib/firebase-admin';
+import { buildWebappFileDeepLink } from '../lib/webapp-file-link';
 
 // ---------------------------------------------------------------------------
 // Tool input schema — deliberately minimal so AI agents cannot get confused.
@@ -79,6 +87,113 @@ const convertInputShape = {
 const convertInputSchema = z.object(convertInputShape);
 type ConvertMarkdownPdfArgs = z.infer<typeof convertInputSchema>;
 
+const readCloudMarkdownInputShape = {
+    filepath: z
+        .string()
+        .optional()
+        .describe(
+            [
+                'Exact logical `filepath` of the document (same value as `filepath` on `list_cloud_files` entries).',
+                'When the user named a file ambiguously, FIRST call `list_cloud_files`, pick the correct row, then pass its `filepath` here.',
+                'If you pass this, `document_query` is ignored.',
+            ].join('\n'),
+        ),
+    document_query: z
+        .string()
+        .optional()
+        .describe(
+            [
+                'Use when you do not yet know the exact `filepath`.',
+                'Matches against basename or full path (case-insensitive substring).',
+                'If zero matches: tell the user no file matched and suggest `list_cloud_files`.',
+                'If multiple matches: the tool returns `needsClarification` and a `candidates` list — ask the user which one, then call again with `filepath`.',
+                'If exactly one match: the tool returns that document.',
+            ].join('\n'),
+        ),
+} as const;
+
+const readCloudMarkdownInputSchema = z.object(readCloudMarkdownInputShape).refine(
+    (o) => !!(o.filepath?.trim() || o.document_query?.trim()),
+    {
+        message:
+            'Provide `filepath` (from `list_cloud_files`) or `document_query` (filename / path fragment to search).',
+    },
+);
+
+const uploadCloudMarkdownInputShape = {
+    content: z
+        .string()
+        .min(1)
+        .describe('Raw markdown body (UTF-8) to store in the user cloud vault.'),
+    filename: z
+        .string()
+        .min(1)
+        .describe(
+            'Basename only (no slashes), e.g. `report.md`. Must end with `.md`, `.markdown`, or `.mdx`.',
+        ),
+    folder_path: z
+        .string()
+        .optional()
+        .describe(
+            [
+                'Exact parent folder path with forward slashes, no leading slash (e.g. `Work/Clients`).',
+                'Omit this field or use an empty string to upload to the vault root.',
+                'Prefer values from `folderPaths` on `list_cloud_files`.',
+                'If set to a non-empty string, `folder_query` is ignored.',
+            ].join('\n'),
+        ),
+    folder_query: z
+        .string()
+        .optional()
+        .describe(
+            [
+                'When the user described a folder vaguely (e.g. "put it in my Notes folder").',
+                'FIRST call `list_cloud_files` and inspect `folderPaths`; then pass the user\'s words here.',
+                'If multiple folders match, the tool returns `needsClarification` — ask the user, then call again with explicit `folder_path`.',
+                'Omit when uploading to root or when `folder_path` is already known.',
+            ].join('\n'),
+        ),
+} as const;
+
+const uploadCloudMarkdownInputSchema = z.object(uploadCloudMarkdownInputShape);
+
+function matchMarkdownFilesByDocumentQuery(
+    files: Awaited<ReturnType<typeof listUserMarkdownFiles>>,
+    queryRaw: string,
+) {
+    const query = queryRaw.trim();
+    if (!query) return [];
+    const ql = query.toLowerCase();
+    return files.filter((f) => {
+        const base = f.path.split('/').pop() || '';
+        const bl = base.toLowerCase();
+        const pl = f.path.toLowerCase();
+        return (
+            bl === ql ||
+            pl === ql ||
+            pl.endsWith(`/${ql}`) ||
+            bl.includes(ql) ||
+            pl.includes(ql)
+        );
+    });
+}
+
+function matchFolderPathsForQuery(folderPaths: string[], queryRaw: string): string[] {
+    const query = queryRaw.trim();
+    if (!query) return [];
+    const ql = query.toLowerCase();
+    const hits = new Set<string>();
+    for (const p of folderPaths) {
+        if (p === query || p.toLowerCase() === ql) hits.add(p);
+        else {
+            const seg = p.split('/').pop() || '';
+            if (seg.toLowerCase() === ql) hits.add(p);
+            else if (p.toLowerCase().endsWith(`/${ql}`)) hits.add(p);
+        }
+    }
+    return Array.from(hits).sort((a, b) => b.length - a.length);
+}
+
 export interface CreatePdfMcpServerOptions {
     /** Returns the authenticated user id for this MCP session, or null. */
     getUserId?: () => string | null;
@@ -109,7 +224,19 @@ TOOLS
       Use \`filepath\` as the \`template_cloud_filepath\` argument for the converter.
 
   • list_cloud_files
-      Returns the authenticated user's saved markdown documents (not templates). Useful for reference / lookup. Not required to convert.
+      Returns \`files\` (markdown documents, not templates) and \`folderPaths\` (parent folders for uploads).
+      Each file includes \`filepath\` — use that with \`read_cloud_markdown_document\` and when resolving uploads.
+
+  • read_cloud_markdown_document
+      Returns JSON with the markdown \`content\` for one vault document. Requires user API key.
+      Call \`list_cloud_files\` first when the path is unknown; pass \`filepath\`, or use \`document_query\` to search.
+      If several files match, the tool returns \`needsClarification\` and \`candidates\` — ask the user, then retry with \`filepath\`.
+
+  • upload_cloud_markdown_document
+      Saves raw markdown to the user's cloud. Pass \`filename\` (basename, .md/.markdown/.mdx) and \`content\`.
+      For folders: use exact \`folder_path\` from \`list_cloud_files.folderPaths\`, or \`folder_query\` for a vague name.
+      Omit both for vault root. Ambiguous folder → \`needsClarification\` with \`candidates\`.
+      Response includes \`webUrl\` — share this link so the user can open the file in the web app (requires local sync if the file was created only in the cloud).
 
   • list_cloud_fonts
       Returns the authenticated user's custom fonts.
@@ -143,7 +270,7 @@ EXAMPLES
       → tell the user: "I couldn't find a template called \\"report\\". Available templates: Invoice. Which one should I use?"
 
 AUTHENTICATION
-  All cloud features (list_cloud_*, template_cloud_filepath) require a user API key.
+  All cloud features (list_cloud_*, read_cloud_*, upload_cloud_*, template_cloud_filepath) require a user API key.
   Users generate one in the editor under Settings → API Service and pass it as
   \`Authorization: Bearer mme_...\` when connecting to this MCP server.
   Without an API key the converter still works as long as you only provide \`md_raw\`.`;
@@ -154,7 +281,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
     const server = new McpServer(
         {
             name: 'modern-markdown-editor-pdf-api',
-            version: '0.3.0',
+            version: '0.4.0',
         },
         { instructions: SERVER_INSTRUCTIONS },
     );
@@ -219,10 +346,12 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
         {
             title: 'List cloud markdown files',
             description:
-                "List the authenticated user's cloud-saved markdown documents (excludes templates). " +
-                "Returns an array of objects with `fileId`, `filename`, `filepath`, `type`, `isDeleted`, " +
-                "`lastChanged`, `lastChangedIso`, `byteLength`. Use this for reference; it is NOT required " +
-                "to convert a document — pass the markdown body directly via `md_raw`. " +
+                "List the authenticated user's cloud-saved markdown documents (excludes templates) plus " +
+                "`folderPaths` (distinct parent folders under the vault, excluding `Templates/`). " +
+                "Each file object includes `fileId`, `filename`, `filepath`, `type`, `isDeleted`, " +
+                "`lastChanged`, `lastChangedIso`, `byteLength`. " +
+                "CALL THIS BEFORE `read_cloud_markdown_document` or `upload_cloud_markdown_document` when the user " +
+                "did not give an exact `filepath` / folder. " +
                 "Requires a user API key (Settings → API Service in the editor).",
             inputSchema: {} as any,
         },
@@ -233,8 +362,16 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                     'This tool requires a user API key. Generate one in the editor under Settings → API Service.',
                 );
             }
+            if (!isFirebaseAdminConfigured()) {
+                return errorContent(
+                    'Cloud storage is not configured on this API deployment (Firebase Admin SDK).',
+                );
+            }
             try {
-                const files = await listUserMarkdownFiles(userId);
+                const [files, folderPaths] = await Promise.all([
+                    listUserMarkdownFiles(userId),
+                    listUserMarkdownFolderPaths(userId),
+                ]);
                 const payload = {
                     files: files.map((f) => ({
                         fileId: f.syncId,
@@ -246,11 +383,229 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                         lastChangedIso: new Date(f.updatedAt).toISOString(),
                         byteLength: f.content.length,
                     })),
+                    folderPaths,
                 };
                 return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);
                 return errorContent(`Failed to list cloud files: ${message}`);
+            }
+        },
+    );
+
+    // ----- read_cloud_markdown_document ------------------------------------
+    server.registerTool(
+        'read_cloud_markdown_document',
+        {
+            title: 'Read cloud markdown document',
+            description:
+                'Download one markdown document from the user\'s cloud vault as UTF-8 text.\n\n' +
+                'WORKFLOW:\n' +
+                '  1. If you do not already know the exact `filepath`, call `list_cloud_files` first.\n' +
+                '  2. Pass `filepath` (copied from a list row) **or** pass `document_query` to search by name/path fragment.\n' +
+                '  3. If the tool returns `needsClarification` with multiple `candidates`, ask the user which file they mean, then call again with `filepath` only.\n\n' +
+                'Returns JSON: `filepath`, `fileId`, `content` (the markdown), `lastChanged`, `lastChangedIso`, `byteLength`.\n\n' +
+                'Requires a user API key.',
+            inputSchema: readCloudMarkdownInputShape as any,
+        },
+        async (args: unknown) => {
+            const parsed = readCloudMarkdownInputSchema.safeParse(args ?? {});
+            if (!parsed.success) {
+                const msg = parsed.error.issues.map((i) => i.message).join('; ');
+                return errorContent(msg || 'Invalid arguments');
+            }
+            const userId = getUserId();
+            if (!userId) {
+                return errorContent(
+                    'This tool requires a user API key. Generate one in the editor under Settings → API Service.',
+                );
+            }
+            if (!isFirebaseAdminConfigured()) {
+                return errorContent(
+                    'Cloud storage is not configured on this API deployment (Firebase Admin SDK).',
+                );
+            }
+            const { filepath, document_query } = parsed.data;
+            let resolvedPath: string | null = null;
+            try {
+                if (filepath?.trim()) {
+                    resolvedPath = normalizeCloudFilepath(filepath.trim());
+                } else if (document_query?.trim()) {
+                    const files = await listUserMarkdownFiles(userId);
+                    const matches = matchMarkdownFilesByDocumentQuery(files, document_query.trim());
+                    if (matches.length === 0) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text' as const,
+                                    text: JSON.stringify(
+                                        {
+                                            found: false,
+                                            message:
+                                                'No document matched `document_query`. Call `list_cloud_files`, pick a `filepath`, and call this tool again with `filepath`.',
+                                        },
+                                        null,
+                                        2,
+                                    ),
+                                },
+                            ],
+                        };
+                    }
+                    if (matches.length > 1) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text' as const,
+                                    text: JSON.stringify(
+                                        {
+                                            needsClarification: true,
+                                            message:
+                                                'Multiple documents matched. Ask the user which one they mean, then call again with `filepath` set to that row\'s `filepath` (and omit `document_query`).',
+                                            candidates: matches.map((f) => ({
+                                                filepath: f.path,
+                                                filename: f.path.split('/').pop() || f.path,
+                                                byteLength: f.content.length,
+                                                lastChangedIso: new Date(f.updatedAt).toISOString(),
+                                            })),
+                                        },
+                                        null,
+                                        2,
+                                    ),
+                                },
+                            ],
+                        };
+                    }
+                    resolvedPath = matches[0]!.path;
+                }
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                return errorContent(message);
+            }
+
+            const file = await getUserFileByPath(userId, resolvedPath!);
+            if (!file) {
+                return errorContent(
+                    `No file at "${resolvedPath}". Call \`list_cloud_files\` to see valid \`filepath\` values.`,
+                );
+            }
+            if (file.type === 'folder') {
+                return errorContent(`"${resolvedPath}" is a folder, not a file.`);
+            }
+            const payload = {
+                filepath: file.path,
+                fileId: file.syncId,
+                content: file.content,
+                lastChanged: file.updatedAt,
+                lastChangedIso: new Date(file.updatedAt).toISOString(),
+                byteLength: file.content.length,
+            };
+            return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+        },
+    );
+
+    // ----- upload_cloud_markdown_document ----------------------------------
+    server.registerTool(
+        'upload_cloud_markdown_document',
+        {
+            title: 'Upload cloud markdown document',
+            description:
+                'Create or replace a markdown file in the user\'s cloud vault (same behavior as `POST /v1/me/files/upload`).\n\n' +
+                'WORKFLOW:\n' +
+                '  1. Call `list_cloud_files` when the user mentioned a folder vaguely — use the `folderPaths` array.\n' +
+                '  2. Pass exact `folder_path` from that list, **or** pass `folder_query` and let the tool match.\n' +
+                '  3. If the tool returns `needsClarification` for folders, ask the user, then retry with `folder_path`.\n' +
+                '  4. If the user did not specify a folder, omit both `folder_path` and `folder_query` (vault root).\n\n' +
+                '`filename` must be a basename ending in `.md`, `.markdown`, or `.mdx`.\n\n' +
+                'Returns JSON: `filepath`, `fileId`, `created` (true when a new file was written), and `webUrl` (open in the web app).\n\n' +
+                'Requires a user API key.',
+            inputSchema: uploadCloudMarkdownInputShape as any,
+        },
+        async (args: unknown) => {
+            const parsed = uploadCloudMarkdownInputSchema.safeParse(args ?? {});
+            if (!parsed.success) {
+                const msg = parsed.error.issues.map((i) => i.message).join('; ');
+                return errorContent(msg || 'Invalid arguments');
+            }
+            const userId = getUserId();
+            if (!userId) {
+                return errorContent(
+                    'This tool requires a user API key. Generate one in the editor under Settings → API Service.',
+                );
+            }
+            if (!isFirebaseAdminConfigured()) {
+                return errorContent(
+                    'Cloud storage is not configured on this API deployment (Firebase Admin SDK).',
+                );
+            }
+            const a = parsed.data;
+            let folderPath = '';
+            try {
+                if (a.folder_path !== undefined) {
+                    folderPath = a.folder_path.trim();
+                } else if (a.folder_query?.trim()) {
+                    const folders = await listUserMarkdownFolderPaths(userId);
+                    const matches = matchFolderPathsForQuery(folders, a.folder_query.trim());
+                    if (matches.length === 0) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text' as const,
+                                    text: JSON.stringify(
+                                        {
+                                            needsClarification: false,
+                                            message:
+                                                'No folder matched `folder_query`. Call `list_cloud_files`, choose a path from `folderPaths`, and pass it as `folder_path` (or retry with a clearer `folder_query`).',
+                                            folderPaths: folders,
+                                        },
+                                        null,
+                                        2,
+                                    ),
+                                },
+                            ],
+                        };
+                    }
+                    if (matches.length > 1) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text' as const,
+                                    text: JSON.stringify(
+                                        {
+                                            needsClarification: true,
+                                            message:
+                                                'Multiple folders matched. Ask the user which folder they mean, then call again with `folder_path` set to the exact string (omit `folder_query`).',
+                                            candidates: matches,
+                                        },
+                                        null,
+                                        2,
+                                    ),
+                                },
+                            ],
+                        };
+                    }
+                    folderPath = matches[0]!;
+                }
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                return errorContent(message);
+            }
+
+            try {
+                const result = await upsertUserMarkdownFile(userId, {
+                    folderPath,
+                    filename: a.filename,
+                    content: a.content,
+                });
+                const payload = {
+                    filepath: result.path,
+                    fileId: result.syncId,
+                    created: result.created,
+                    webUrl: buildWebappFileDeepLink(result.syncId),
+                };
+                return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                return errorContent(`Upload failed: ${message}`);
             }
         },
     );
