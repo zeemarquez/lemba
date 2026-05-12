@@ -21,7 +21,7 @@ export const openApiDocument = {
     tags: [
         { name: 'Health', description: 'Liveness' },
         { name: 'Convert', description: 'Markdown → PDF' },
-        { name: 'Me', description: 'Cloud-saved files for the authenticated user (read; markdown upload under `/v1/me/files`)' },
+        { name: 'Me', description: 'Cloud-saved files for the authenticated user (read; markdown create `POST /v1/me/files/upload`, replace `POST /v1/me/files/replace`)' },
     ],
     paths: {
         '/health': {
@@ -237,10 +237,11 @@ export const openApiDocument = {
         '/v1/me/files/upload': {
             post: {
                 tags: ['Me'],
-                summary: 'Upload or replace markdown',
+                summary: 'Create markdown file',
                 description:
-                    'Creates or updates a markdown file at `folderPath`/`filename`. Parent folders in `folderPath` are created when missing. ' +
-                    '`filename` must end with `.md`, `.markdown`, or `.mdx`. Use `folderPath: ""` for the vault root.',
+                    'Creates a **new** markdown file at `Files/` + `folderPath`/`filename`. Fails with 409 if a file already exists at that path. ' +
+                    'Parent folders in `folderPath` are created when missing. ' +
+                    '`filename` must end with `.md`, `.markdown`, or `.mdx`. Use `folderPath: ""` for `Files/` root.',
                 operationId: 'uploadMyMarkdown',
                 security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
                 requestBody: {
@@ -252,10 +253,39 @@ export const openApiDocument = {
                     },
                 },
                 responses: {
-                    '200': { description: 'Existing file updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadMarkdownResponse' } } } },
-                    '201': { description: 'New file created', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadMarkdownResponse' } } } },
+                    '201': { description: 'File created', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadMarkdownResponse' } } } },
                     '400': { description: 'Invalid body or path conflict' },
                     '401': { description: 'Requires user API key' },
+                    '409': { description: 'File already exists at target path' },
+                    '503': { description: 'Firebase Admin not configured' },
+                },
+            },
+        },
+        '/v1/me/files/replace': {
+            post: {
+                tags: ['Me'],
+                summary: 'Replace markdown file body',
+                description:
+                    'Overwrites the UTF-8 `content` of an existing file at `filepath` (same logical paths as `md_cloud_filepath` / `GET .../files/content`). ' +
+                    'Returns 404 if no file exists at that path.',
+                operationId: 'replaceMyMarkdown',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/ReplaceMarkdownRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': {
+                        description: 'File updated',
+                        content: { 'application/json': { schema: { $ref: '#/components/schemas/ReplaceMarkdownResponse' } } },
+                    },
+                    '400': { description: 'Invalid body' },
+                    '401': { description: 'Requires user API key' },
+                    '404': { description: 'File not found' },
                     '503': { description: 'Firebase Admin not configured' },
                 },
             },
@@ -455,6 +485,22 @@ export const openApiDocument = {
                     byteLength: { type: 'integer' },
                 },
             },
+            ReplaceMarkdownRequest: {
+                type: 'object',
+                required: ['filepath', 'content'],
+                properties: {
+                    filepath: { type: 'string', example: 'Files/Notes/report.md', description: 'Logical path of an existing file' },
+                    content: { type: 'string', description: 'New markdown body (UTF-8)' },
+                },
+            },
+            ReplaceMarkdownResponse: {
+                type: 'object',
+                properties: {
+                    filepath: { type: 'string' },
+                    fileId: { type: 'string' },
+                    webUrl: { type: 'string', format: 'uri' },
+                },
+            },
             UploadMarkdownRequest: {
                 type: 'object',
                 required: ['content', 'filename'],
@@ -474,7 +520,7 @@ export const openApiDocument = {
                 properties: {
                     filepath: { type: 'string' },
                     fileId: { type: 'string' },
-                    created: { type: 'boolean', description: 'True when a new document was written; false when an existing path was updated.' },
+                    created: { type: 'boolean', description: 'Always true for successful upload.' },
                     webUrl: {
                         type: 'string',
                         format: 'uri',

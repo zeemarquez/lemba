@@ -245,20 +245,19 @@ export async function ensureFolderPathExists(userId: string, folderPath: string)
     }
 }
 
-export interface UpsertMarkdownResult {
+export interface WriteMarkdownResult {
     syncId: string;
     path: string;
-    created: boolean;
 }
 
 /**
- * Writes markdown to the user's `files` collection. Document id is always `syncId`
- * (same convention as the web app). Creates parent folders when missing.
+ * Creates a new markdown file under the vault `Files/…` layout. Parent folders are created when missing.
+ * Throws if a non-deleted file already exists at the target path (use `replaceUserMarkdownFileByPath` to overwrite).
  */
-export async function upsertUserMarkdownFile(
+export async function createUserMarkdownFile(
     userId: string,
     input: { folderPath: string; filename: string; content: string },
-): Promise<UpsertMarkdownResult> {
+): Promise<WriteMarkdownResult> {
     if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
     const rawName = stripSlashes(input.filename);
     if (!rawName || rawName.includes('/')) {
@@ -283,8 +282,13 @@ export async function upsertUserMarkdownFile(
     if (existing && existing.type === 'folder') {
         throw new Error(`Path "${fullPath}" is a folder`);
     }
-    const syncId = existing?.syncId && existing.type === 'file' ? existing.syncId : randomUUID();
-    const created = !existing || existing.type !== 'file';
+    if (existing && existing.type === 'file' && !existing.isDeleted) {
+        throw new Error(
+            `File already exists at "${fullPath}". Use POST /v1/me/files/replace (or the replace_cloud_markdown_document MCP tool) to overwrite.`,
+        );
+    }
+
+    const syncId = randomUUID();
     const col = userCollection(userId, 'files');
     const now = Timestamp.fromMillis(Date.now());
     await col.doc(syncId).set({
@@ -295,7 +299,38 @@ export async function upsertUserMarkdownFile(
         updatedAt: now,
         isDeleted: false,
     });
-    return { syncId, path: fullPath, created };
+    return { syncId, path: fullPath };
+}
+
+/**
+ * Overwrites markdown content for an existing file at `filepath` (logical cloud path).
+ * Resolves the same path rules as reads (`Files/` prefix when omitted).
+ */
+export async function replaceUserMarkdownFileByPath(
+    userId: string,
+    filepath: string,
+    content: string,
+): Promise<WriteMarkdownResult> {
+    if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
+    const normalized = normalizeCloudFilepath(filepath);
+    const file = await getUserMarkdownFileByPath(userId, normalized);
+    if (!file) {
+        throw new Error(`No file at path "${normalized}"`);
+    }
+    if (file.type === 'folder') {
+        throw new Error(`Path "${file.path}" is a folder, not a file`);
+    }
+    const col = userCollection(userId, 'files');
+    const now = Timestamp.fromMillis(Date.now());
+    await col.doc(file.syncId).set({
+        syncId: file.syncId,
+        path: file.path,
+        content,
+        type: 'file',
+        updatedAt: now,
+        isDeleted: false,
+    });
+    return { syncId: file.syncId, path: file.path };
 }
 
 export async function listUserFonts(userId: string, includeData = false): Promise<CloudFont[]> {

@@ -7,12 +7,13 @@ import { Router, type Request, type Response } from 'express';
 import { requireUser } from '../middleware/auth';
 import { isFirebaseAdminConfigured } from '../lib/firebase-admin';
 import {
+    createUserMarkdownFile,
     getUserMarkdownFileByPath,
     listUserFonts,
     listUserMarkdownFiles,
     listUserTemplates,
     normalizeCloudFilepath,
-    upsertUserMarkdownFile,
+    replaceUserMarkdownFileByPath,
 } from '../lib/cloud-store';
 import { buildWebappFileDeepLink } from '../lib/webapp-file-link';
 
@@ -39,6 +40,7 @@ function firebaseUnavailable(res: Response): void {
 function statusForCloudWrite(err: unknown): number {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('Firebase Admin SDK is not configured')) return 503;
+    if (message.includes('No file at path')) return 404;
     if (
         message.includes('Invalid path') ||
         message.includes('Path is empty') ||
@@ -102,9 +104,9 @@ router.get('/files/content', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /v1/me/files/upload — create or replace a markdown file; creates `folderPath` when missing.
+ * POST /v1/me/files/upload — create a new markdown file only (fails if path already exists). Creates `folderPath` when missing.
  *
- * Body: `{ "content": string, "filename": string, "folderPath": string }` (`folderPath` may be `""` for root).
+ * Body: `{ "content": string, "filename": string, "folderPath": string }` (`folderPath` may be `""` for vault root under `Files/`).
  */
 router.post('/files/upload', async (req: Request, res: Response) => {
     if (!isFirebaseAdminConfigured()) {
@@ -124,21 +126,78 @@ router.post('/files/upload', async (req: Request, res: Response) => {
         return;
     }
     try {
-        const result = await upsertUserMarkdownFile(req.userId!, {
+        const result = await createUserMarkdownFile(req.userId!, {
             folderPath,
             filename,
             content,
         });
-        res.status(result.created ? 201 : 200).json({
+        res.status(201).json({
             filepath: result.path,
             fileId: result.syncId,
-            created: result.created,
+            created: true,
+            webUrl: buildWebappFileDeepLink(result.syncId),
+        });
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message.includes('File already exists')) {
+            res.status(409).json({ error: 'Conflict', message });
+            return;
+        }
+        const status = statusForCloudWrite(e);
+        res.status(status).json({
+            error:
+                status === 503
+                    ? 'ServiceUnavailable'
+                    : status === 400
+                      ? 'BadRequest'
+                      : 'CloudWriteFailed',
+            message,
+        });
+    }
+});
+
+/**
+ * POST /v1/me/files/replace — overwrite markdown body of an existing file at `filepath`.
+ *
+ * Body: `{ "filepath": string, "content": string }`
+ */
+router.post('/files/replace', async (req: Request, res: Response) => {
+    if (!isFirebaseAdminConfigured()) {
+        firebaseUnavailable(res);
+        return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const content = typeof body.content === 'string' ? body.content : null;
+    const filepathRaw = typeof body.filepath === 'string' ? body.filepath.trim() : '';
+    if (content === null) {
+        res.status(400).json({ error: 'BadRequest', message: 'Body field `content` (string) is required.' });
+        return;
+    }
+    if (!filepathRaw) {
+        res.status(400).json({ error: 'BadRequest', message: 'Body field `filepath` (non-empty string) is required.' });
+        return;
+    }
+    let filepath: string;
+    try {
+        filepath = normalizeCloudFilepath(filepathRaw);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ error: 'BadRequest', message });
+        return;
+    }
+    try {
+        const result = await replaceUserMarkdownFileByPath(req.userId!, filepath, content);
+        res.status(200).json({
+            filepath: result.path,
+            fileId: result.syncId,
             webUrl: buildWebappFileDeepLink(result.syncId),
         });
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         const status = statusForCloudWrite(e);
-        res.status(status).json({ error: status === 503 ? 'ServiceUnavailable' : status === 400 ? 'BadRequest' : 'CloudWriteFailed', message });
+        const errLabel =
+            status === 503 ? 'ServiceUnavailable' : status === 400 ? 'BadRequest' : status === 404 ? 'NotFound' : 'CloudWriteFailed';
+        res.status(status).json({ error: errLabel, message });
     }
 });
 

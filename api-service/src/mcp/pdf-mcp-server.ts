@@ -6,7 +6,8 @@
  *   - convert_markdown_to_pdf      : compile markdown to PDF (MCP-only, minimal args)
  *   - list_cloud_files             : list markdown documents + `folderPaths` (vault tree)
  *   - read_cloud_markdown_document : fetch markdown body by filepath or search query
- *   - upload_cloud_markdown_document : save markdown to cloud (optional folder)
+ *   - upload_cloud_markdown_document : create new markdown in cloud (no overwrite)
+ *   - replace_cloud_markdown_document : overwrite existing markdown (requires user_confirmed)
  *   - list_cloud_templates         : list the user's cloud templates (.mdt/.json)
  *   - list_cloud_fonts             : list the user's cloud custom fonts
  *
@@ -26,13 +27,14 @@ import {
     resolveTemplate,
 } from '../lib/source-resolvers';
 import {
+    createUserMarkdownFile,
     getUserMarkdownFileByPath,
     listUserFonts,
     listUserMarkdownFiles,
     listUserMarkdownFolderPaths,
     listUserTemplates,
     normalizeCloudFilepath,
-    upsertUserMarkdownFile,
+    replaceUserMarkdownFileByPath,
 } from '../lib/cloud-store';
 import { isFirebaseAdminConfigured } from '../lib/firebase-admin';
 import { buildWebappFileDeepLink } from '../lib/webapp-file-link';
@@ -124,12 +126,20 @@ const uploadCloudMarkdownInputShape = {
     content: z
         .string()
         .min(1)
-        .describe('Raw markdown body (UTF-8) to store in the user cloud vault.'),
+        .describe(
+            [
+                'Raw markdown body (UTF-8) to store in the user cloud vault.',
+                'Do not call this tool until you have the final markdown AND the user-supplied filename/folder (see `filename` / `folder_path`).',
+            ].join(' '),
+        ),
     filename: z
         .string()
         .min(1)
         .describe(
-            'Basename only (no slashes), e.g. `report.md`. Must end with `.md`, `.markdown`, or `.mdx`.',
+            [
+                'Basename only (no slashes), e.g. `report.md`. Must end with `.md`, `.markdown`, or `.mdx`.',
+                'If the user has not told you the filename yet, ask them first — do not guess from the conversation title.',
+            ].join(' '),
         ),
     folder_path: z
         .string()
@@ -137,8 +147,8 @@ const uploadCloudMarkdownInputShape = {
         .describe(
             [
                 'Parent folder under the vault `Files` root (forward slashes, no leading slash), e.g. `Work/Clients`.',
-                'Stored in cloud as `Files/<folder_path>/…`. Omit or empty string to save at `Files/<filename>`.',
-                'You may pass an explicit `Files/…` path; `Templates/…` is reserved for templates.',
+                'Stored as `Files/<folder_path>/…`. Omit or use "" for `Files/<filename>` at vault root.',
+                'If the user has not said which folder to use, call `list_cloud_files`, show `folderPaths`, and ask them to pick one (or confirm root).',
                 'If set to a non-empty string, `folder_query` is ignored.',
             ].join('\n'),
         ),
@@ -156,6 +166,25 @@ const uploadCloudMarkdownInputShape = {
 } as const;
 
 const uploadCloudMarkdownInputSchema = z.object(uploadCloudMarkdownInputShape);
+
+const replaceCloudMarkdownInputShape = {
+    filepath: z
+        .string()
+        .min(1)
+        .describe(
+            'Exact logical `filepath` of an existing file (from `list_cloud_files`), e.g. `Files/Notes/report.md`.',
+        ),
+    content: z.string().min(1).describe('Full replacement markdown body (UTF-8).'),
+    user_confirmed: z.literal(true).describe(
+        [
+            'Must be the JSON boolean `true` only after the human explicitly approved overwriting this file',
+            '(e.g. they said "yes, replace it" or clearly confirmed in chat).',
+            'If you do not have that confirmation yet, ask the user first — do not call this tool.',
+        ].join(' ')
+    ),
+} as const;
+
+const replaceCloudMarkdownInputSchema = z.object(replaceCloudMarkdownInputShape);
 
 function matchMarkdownFilesByDocumentQuery(
     files: Awaited<ReturnType<typeof listUserMarkdownFiles>>,
@@ -233,10 +262,13 @@ TOOLS
       If several files match, the tool returns \`needsClarification\` and \`candidates\` — ask the user, then retry with \`filepath\`.
 
   • upload_cloud_markdown_document
-      Saves raw markdown to the user's cloud. Pass \`filename\` (basename, .md/.markdown/.mdx) and \`content\`.
-      For folders: use exact \`folder_path\` from \`list_cloud_files.folderPaths\`, or \`folder_query\` for a vague name.
-      Omit both for vault root. Ambiguous folder → \`needsClarification\` with \`candidates\`.
-      Response includes \`webUrl\` — share this link so the user can open the file in the web app (requires local sync if the file was created only in the cloud).
+      Creates a **new** cloud markdown file only (fails if the path already exists). Before calling, collect **filename** and **folder**
+      (or vault root) from the user — ask if missing; do not guess. Pass \`filename\`, \`content\`, and \`folder_path\` or \`folder_query\`.
+      Response includes \`webUrl\`.
+
+  • replace_cloud_markdown_document
+      Overwrites an existing file\'s markdown. Requires JSON field \`user_confirmed: true\` only after the human explicitly approved the overwrite.
+      Marked destructive so clients should prompt for approval before execution.
 
   • list_cloud_fonts
       Returns the authenticated user's custom fonts.
@@ -270,7 +302,7 @@ EXAMPLES
       → tell the user: "I couldn't find a template called \\"report\\". Available templates: Invoice. Which one should I use?"
 
 AUTHENTICATION
-  All cloud features (list_cloud_*, read_cloud_*, upload_cloud_*, template_cloud_filepath) require a user API key.
+  All cloud features (list_cloud_*, read_cloud_*, upload_cloud_*, replace_cloud_*, template_cloud_filepath) require a user API key.
   Users generate one in the editor under Settings → API Service and pass it as
   \`Authorization: Bearer mme_...\` when connecting to this MCP server.
   Without an API key the converter still works as long as you only provide \`md_raw\`.`;
@@ -281,7 +313,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
     const server = new McpServer(
         {
             name: 'modern-markdown-editor-pdf-api',
-            version: '0.4.0',
+            version: '0.5.0',
         },
         { instructions: SERVER_INSTRUCTIONS },
     );
@@ -350,7 +382,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                 "`folderPaths` (distinct parent folders under the vault, excluding `Templates/`). " +
                 "Each file object includes `fileId`, `filename`, `filepath`, `type`, `isDeleted`, " +
                 "`lastChanged`, `lastChangedIso`, `byteLength`. " +
-                "CALL THIS BEFORE `read_cloud_markdown_document` or `upload_cloud_markdown_document` when the user " +
+                "CALL THIS BEFORE `read_cloud_markdown_document`, `upload_cloud_markdown_document`, or `replace_cloud_markdown_document` when the user " +
                 "did not give an exact `filepath` / folder. " +
                 "Requires a user API key (Settings → API Service in the editor).",
             inputSchema: {} as any,
@@ -509,14 +541,15 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
         {
             title: 'Upload cloud markdown document',
             description:
-                'Create or replace a markdown file in the user\'s cloud vault (same behavior as `POST /v1/me/files/upload`).\n\n' +
+                'Create a **new** markdown file in the user\'s cloud vault (same as `POST /v1/me/files/upload`). **Fails if a file already exists** at the resolved path — use `replace_cloud_markdown_document` to overwrite.\n\n' +
+                'GATHER INPUT FIRST:\n' +
+                '  • If the user has **not** given an explicit **filename** (e.g. `notes.md`), ask them before calling.\n' +
+                '  • If they have **not** chosen a **folder** (or confirmed vault root), call `list_cloud_files`, show `folderPaths`, and ask which folder to use (or confirm root).\n\n' +
                 'WORKFLOW:\n' +
-                '  1. Call `list_cloud_files` when the user mentioned a folder vaguely — use the `folderPaths` array.\n' +
-                '  2. Pass exact `folder_path` from that list, **or** pass `folder_query` and let the tool match.\n' +
-                '  3. If the tool returns `needsClarification` for folders, ask the user, then retry with `folder_path`.\n' +
-                '  4. If the user did not specify a folder, omit both `folder_path` and `folder_query` (vault root).\n\n' +
-                '`filename` must be a basename ending in `.md`, `.markdown`, or `.mdx`.\n\n' +
-                'Returns JSON: `filepath`, `fileId`, `created` (true when a new file was written), and `webUrl` (open in the web app).\n\n' +
+                '  1. Call `list_cloud_files` when the folder is vague — use `folderPaths`.\n' +
+                '  2. Pass exact `folder_path`, **or** `folder_query` for fuzzy folder matching.\n' +
+                '  3. Ambiguous folder → `needsClarification` with `candidates`.\n\n' +
+                'Returns JSON: `filepath`, `fileId`, `created` (always true on success), `webUrl`.\n\n' +
                 'Requires a user API key.',
             inputSchema: uploadCloudMarkdownInputShape as any,
         },
@@ -591,7 +624,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
             }
 
             try {
-                const result = await upsertUserMarkdownFile(userId, {
+                const result = await createUserMarkdownFile(userId, {
                     folderPath,
                     filename: a.filename,
                     content: a.content,
@@ -599,13 +632,73 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                 const payload = {
                     filepath: result.path,
                     fileId: result.syncId,
-                    created: result.created,
+                    created: true,
                     webUrl: buildWebappFileDeepLink(result.syncId),
                 };
                 return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);
+                if (message.includes('File already exists')) {
+                    return errorContent(
+                        `${message} Use the replace_cloud_markdown_document tool with the same filepath and user_confirmed: true only after the user approves overwriting.`,
+                    );
+                }
                 return errorContent(`Upload failed: ${message}`);
+            }
+        },
+    );
+
+    // ----- replace_cloud_markdown_document ---------------------------------
+    server.registerTool(
+        'replace_cloud_markdown_document',
+        {
+            title: 'Replace cloud markdown document',
+            description:
+                'Overwrite the markdown body of an **existing** cloud file (`POST /v1/me/files/replace`).\n\n' +
+                '**Requires explicit human approval:** argument `user_confirmed` must be the JSON boolean `true` only after the user clearly agreed to replace this file (e.g. "yes, overwrite it").\n\n' +
+                'Clients may treat this tool as destructive and prompt the user for approval before execution.\n\n' +
+                'Returns JSON: `filepath`, `fileId`, `webUrl`.',
+            inputSchema: replaceCloudMarkdownInputShape as any,
+            annotations: {
+                destructiveHint: true,
+                readOnlyHint: false,
+            } as Record<string, unknown>,
+        },
+        async (args: unknown) => {
+            const parsed = replaceCloudMarkdownInputSchema.safeParse(args ?? {});
+            if (!parsed.success) {
+                const msg = parsed.error.issues.map((i) => i.message).join('; ');
+                return errorContent(msg || 'Invalid arguments');
+            }
+            const userId = getUserId();
+            if (!userId) {
+                return errorContent(
+                    'This tool requires a user API key. Generate one in the editor under Settings → API Service.',
+                );
+            }
+            if (!isFirebaseAdminConfigured()) {
+                return errorContent(
+                    'Cloud storage is not configured on this API deployment (Firebase Admin SDK).',
+                );
+            }
+            let filepath: string;
+            try {
+                filepath = normalizeCloudFilepath(parsed.data.filepath.trim());
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                return errorContent(message);
+            }
+            try {
+                const result = await replaceUserMarkdownFileByPath(userId, filepath, parsed.data.content);
+                const payload = {
+                    filepath: result.path,
+                    fileId: result.syncId,
+                    webUrl: buildWebappFileDeepLink(result.syncId),
+                };
+                return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                return errorContent(`Replace failed: ${message}`);
             }
         },
     );
