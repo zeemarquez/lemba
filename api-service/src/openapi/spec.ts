@@ -44,7 +44,8 @@ export const openApiDocument = {
                 summary: 'Convert (JSON body)',
                 description:
                     'Send Markdown and optional template settings as JSON. ' +
-                    'Response is `application/pdf` by default, or JSON with base64 when `output` is `base64`.',
+                    'Response is `application/pdf` when `output` is `binary` (default), JSON with base64 when `output` is `base64`, ' +
+                    'or JSON with a time-limited `url` when `output` is `url` (fetch PDF from that URL; no API key on GET).',
                 operationId: 'convertJson',
                 security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
                 requestBody: {
@@ -57,15 +58,47 @@ export const openApiDocument = {
                 },
                 responses: {
                     '200': {
-                        description: 'PDF bytes (default) or JSON with base64 PDF',
+                        description: 'PDF bytes (binary), JSON with base64, or JSON with temporary URL',
                         content: {
                             'application/pdf': { schema: { type: 'string', format: 'binary' } },
-                            'application/json': { schema: { $ref: '#/components/schemas/ConvertBase64Response' } },
+                            'application/json': {
+                                oneOf: [
+                                    { $ref: '#/components/schemas/ConvertBase64Response' },
+                                    { $ref: '#/components/schemas/ConvertUrlResponse' },
+                                ],
+                            },
                         },
                     },
                     '400': { description: 'Bad request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '401': { description: 'Missing or invalid API key', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                     '500': { description: 'Conversion failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                },
+            },
+        },
+        '/v1/convert/pdf/{token}': {
+            get: {
+                tags: ['Convert'],
+                summary: 'Download temporary PDF',
+                description:
+                    'Returns PDF bytes for a token issued by `POST /v1/convert` with `output: "url"`. ' +
+                    'The token expires after `PDF_TEMP_URL_TTL_SECONDS` (default 900). No API key is required; the token is the credential.',
+                operationId: 'getTempPdf',
+                parameters: [
+                    {
+                        name: 'token',
+                        in: 'path',
+                        required: true,
+                        schema: { type: 'string', pattern: '^[a-fA-F0-9]{48}$' },
+                        description: 'Opaque hex token from the convert response',
+                    },
+                ],
+                responses: {
+                    '200': {
+                        description: 'PDF bytes',
+                        content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
+                    },
+                    '400': { description: 'Invalid token format' },
+                    '404': { description: 'Unknown or expired token' },
                 },
             },
         },
@@ -112,8 +145,8 @@ export const openApiDocument = {
                                         format: 'binary',
                                         description: 'Optional font file (repeat field `fontFiles` for multiple).',
                                     },
-                                    output: { type: 'string', enum: ['binary', 'base64'], default: 'binary' },
-                                    debug: { type: 'string', enum: ['0', '1', 'true', 'false'], description: 'Include Typst source in base64 JSON response' },
+                                    output: { type: 'string', enum: ['binary', 'base64', 'url'], default: 'binary' },
+                                    debug: { type: 'string', enum: ['0', '1', 'true', 'false'], description: 'Include Typst source in JSON response (base64 or url output)' },
                                     filename: { type: 'string', example: 'report.pdf' },
                                 },
                             },
@@ -122,10 +155,15 @@ export const openApiDocument = {
                 },
                 responses: {
                     '200': {
-                        description: 'PDF bytes or JSON (base64)',
+                        description: 'PDF bytes or JSON (base64 or temporary URL)',
                         content: {
                             'application/pdf': { schema: { type: 'string', format: 'binary' } },
-                            'application/json': { schema: { $ref: '#/components/schemas/ConvertBase64Response' } },
+                            'application/json': {
+                                oneOf: [
+                                    { $ref: '#/components/schemas/ConvertBase64Response' },
+                                    { $ref: '#/components/schemas/ConvertUrlResponse' },
+                                ],
+                            },
                         },
                     },
                     '400': { description: 'Bad request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
@@ -199,17 +237,33 @@ export const openApiDocument = {
                         items: { $ref: '#/components/schemas/FontUrl' },
                         description: 'Remote fonts to load before compiling',
                     },
-                    output: { type: 'string', enum: ['binary', 'base64'], default: 'binary' },
-                    debug: { type: 'boolean', description: 'If true, include generated Typst source (base64 mode only)' },
+                    output: { type: 'string', enum: ['binary', 'base64', 'url'], default: 'binary' },
+                    debug: {
+                        type: 'boolean',
+                        description: 'If true, include generated Typst source in JSON responses (`base64` or `url` output)',
+                    },
                     filename: { type: 'string', description: 'Suggested download filename for binary PDF' },
                 },
             },
             ConvertBase64Response: {
                 type: 'object',
+                required: ['filename', 'mimeType', 'base64', 'byteLength'],
                 properties: {
                     filename: { type: 'string' },
                     mimeType: { type: 'string', example: 'application/pdf' },
                     base64: { type: 'string', description: 'PDF bytes, base64-encoded' },
+                    byteLength: { type: 'integer' },
+                    typstSource: { type: 'string', description: 'Present when debug was enabled' },
+                },
+            },
+            ConvertUrlResponse: {
+                type: 'object',
+                required: ['filename', 'mimeType', 'url', 'expiresAt', 'byteLength'],
+                properties: {
+                    filename: { type: 'string' },
+                    mimeType: { type: 'string', example: 'application/pdf' },
+                    url: { type: 'string', format: 'uri', description: 'GET this URL for raw PDF bytes until expiresAt' },
+                    expiresAt: { type: 'string', format: 'date-time' },
                     byteLength: { type: 'integer' },
                     typstSource: { type: 'string', description: 'Present when debug was enabled' },
                 },

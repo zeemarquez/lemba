@@ -4,8 +4,9 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { convertMarkdownToPdf } from '../lib/converter';
-import type { Template } from '../lib/converter';
+import { convertMarkdownToPdf, type Template } from '../lib/converter';
+import { buildTempPdfAbsoluteUrl } from '../lib/pdf-public-url';
+import { storeTempPdf } from '../lib/pdf-temp-store';
 import type { FontInput } from '../lib/typst/fonts';
 
 const fontEntrySchema = z.object({
@@ -64,7 +65,8 @@ export function createPdfMcpServer(): McpServer {
             instructions:
                 'This server converts Markdown to PDF using the Modern Markdown Editor Typst pipeline. ' +
                 'Call `convert_markdown_to_pdf` with `markdown` and optional `template`, `title`, `variables`, and `fonts`. ' +
-                'The tool returns a JSON payload with base64-encoded PDF bytes. ' +
+                'The tool returns a JSON payload with a temporary `url` to download the PDF (same as REST `output: "url"`). ' +
+                'Set `PUBLIC_BASE_URL` when the MCP runs without HTTP request context so URLs are absolute. ' +
                 'For large fonts, prefer `url` over embedding `dataBase64`.',
         },
     );
@@ -74,7 +76,7 @@ export function createPdfMcpServer(): McpServer {
         {
             title: 'Markdown → PDF',
             description:
-                'Compile Markdown to a PDF file. Equivalent to `POST /v1/convert` with `output: "base64"`.',
+                'Compile Markdown to a PDF file. Returns JSON with a time-limited download URL (REST equivalent: `output: "url"`).',
             inputSchema: convertMarkdownInput as any,
         },
         async (args: unknown, _extra: unknown) => {
@@ -94,14 +96,17 @@ export function createPdfMcpServer(): McpServer {
                     { includeSource: !!a.includeTypstSource },
                 );
 
-                const base64 = Buffer.from(pdf).toString('base64');
                 const filename = (a.filename || a.title || 'document').replace(/[^A-Za-z0-9._\- ]+/g, '_').trim() || 'document';
                 const withExt = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
+
+                const { token, expiresAtMs } = storeTempPdf(pdf, withExt);
+                const url = buildTempPdfAbsoluteUrl(token);
 
                 const payload = {
                     filename: withExt,
                     mimeType: 'application/pdf',
-                    base64,
+                    url,
+                    expiresAt: new Date(expiresAtMs).toISOString(),
                     byteLength: pdf.byteLength,
                     ...(typstSource !== undefined ? { typstSource } : {}),
                 };

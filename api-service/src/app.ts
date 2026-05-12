@@ -5,6 +5,7 @@
 
 import express, { type Request, type Response, type NextFunction } from 'express';
 import convertRouter from './routes/convert';
+import { handleTempPdfDownload } from './routes/temp-pdf-download';
 import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
 import { apiKeyAuth } from './middleware/auth';
@@ -37,6 +38,9 @@ export function createApp(): express.Express {
     }
 
     mountStreamableMcpHttp(app, '/mcp');
+
+    /** Time-limited PDF fetch by token (no API key — token is the secret). */
+    app.get('/v1/convert/pdf/:token', handleTempPdfDownload);
 
     app.use('/v1', apiKeyAuth, convertRouter);
 

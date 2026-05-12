@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { convertMarkdownToPdf, Template } from '../lib/converter';
+import { buildTempPdfAbsoluteUrl } from '../lib/pdf-public-url';
+import { storeTempPdf } from '../lib/pdf-temp-store';
 import type { FontInput } from '../lib/typst/fonts';
 
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
@@ -12,14 +14,19 @@ const upload = multer({
 
 const router = Router();
 
+type PdfOutputMode = 'binary' | 'base64' | 'url';
+
 interface ConvertJsonBody {
     markdown?: string;
     template?: Template | null;
     title?: string;
     variables?: Record<string, string>;
     fonts?: FontInput[];
-    /** Output mode: `binary` (default) returns the PDF as bytes; `base64` wraps in JSON. */
-    output?: 'binary' | 'base64';
+    /**
+     * How to return the PDF: `binary` (default) raw bytes, `base64` JSON wrapper,
+     * `url` JSON with a time-limited HTTPS-style URL to GET the bytes.
+     */
+    output?: PdfOutputMode;
     /** Include the generated Typst source in the response (debugging). */
     debug?: boolean;
     /** Filename to use in the `Content-Disposition` header. */
@@ -44,12 +51,33 @@ function sanitizeFilename(name: string | undefined, fallback: string): string {
     return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
 }
 
-function sendPdfResponse(res: Response, pdf: Uint8Array, filename: string, typstSource: string | undefined, output: 'binary' | 'base64') {
+function sendPdfResponse(
+    res: Response,
+    req: Request,
+    pdf: Uint8Array,
+    filename: string,
+    typstSource: string | undefined,
+    output: PdfOutputMode,
+) {
     if (output === 'base64') {
         res.status(200).json({
             filename,
             mimeType: 'application/pdf',
             base64: Buffer.from(pdf).toString('base64'),
+            byteLength: pdf.byteLength,
+            typstSource,
+        });
+        return;
+    }
+
+    if (output === 'url') {
+        const { token, expiresAtMs } = storeTempPdf(pdf, filename);
+        const url = buildTempPdfAbsoluteUrl(token, req);
+        res.status(200).json({
+            filename,
+            mimeType: 'application/pdf',
+            url,
+            expiresAt: new Date(expiresAtMs).toISOString(),
             byteLength: pdf.byteLength,
             typstSource,
         });
@@ -73,7 +101,7 @@ function sendPdfResponse(res: Response, pdf: Uint8Array, filename: string, typst
  *     "title":      "Optional title",
  *     "variables":  { "author": "Jane" },
  *     "fonts":      [ { "family": "Inter", "url": "https://..." } ],
- *     "output":     "binary" | "base64",
+ *     "output":     "binary" | "base64" | "url",
  *     "debug":      false,
  *     "filename":   "report.pdf"
  *   }
@@ -85,6 +113,16 @@ router.post('/convert', async (req: Request, res: Response) => {
             res.status(400).json({ error: 'BadRequest', message: '`markdown` (string) is required in JSON body' });
             return;
         }
+
+        const outputRaw = body.output ?? 'binary';
+        if (outputRaw !== 'binary' && outputRaw !== 'base64' && outputRaw !== 'url') {
+            res.status(400).json({
+                error: 'BadRequest',
+                message: '`output` must be "binary", "base64", or "url"',
+            });
+            return;
+        }
+        const output: PdfOutputMode = outputRaw;
 
         const fonts = (body.fonts || []).map((f: FontInput) => ({ family: f.family, url: f.url }));
 
@@ -100,7 +138,7 @@ router.post('/convert', async (req: Request, res: Response) => {
         );
 
         const filename = sanitizeFilename(body.filename, body.title || 'document');
-        sendPdfResponse(res, pdf, filename, typstSource, body.output || 'binary');
+        sendPdfResponse(res, req, pdf, filename, typstSource, output);
     } catch (e) {
         console.error('[POST /v1/convert] JSON error:', e);
         const message = e instanceof Error ? e.message : String(e);
@@ -117,7 +155,7 @@ router.post('/convert', async (req: Request, res: Response) => {
  *   fonts:        text (JSON array of { family, url })
  *   fontFiles:    one or more font files (binary). Filenames become the
  *                 family name unless overridden by a parallel `fonts` entry.
- *   output:       'binary' | 'base64' (default binary)
+ *   output:       'binary' | 'base64' | 'url' (default binary)
  *   debug:        '1' | 'true' to return Typst source as well
  *   filename:     output filename
  */
@@ -186,7 +224,13 @@ router.post(
             const title = typeof req.body.title === 'string' ? req.body.title : undefined;
             const debug = ['1', 'true', 'yes'].includes(String(req.body.debug || '').toLowerCase());
             const outputRaw = String(req.body.output || 'binary').toLowerCase();
-            const output: 'binary' | 'base64' = outputRaw === 'base64' ? 'base64' : 'binary';
+            let output: PdfOutputMode = 'binary';
+            if (outputRaw === 'base64') output = 'base64';
+            else if (outputRaw === 'url') output = 'url';
+            else if (outputRaw !== 'binary') {
+                res.status(400).json({ error: 'BadRequest', message: '`output` must be binary, base64, or url' });
+                return;
+            }
 
             const { pdf, typstSource } = await convertMarkdownToPdf(
                 { markdown, template, title, variables, fonts },
@@ -194,7 +238,7 @@ router.post(
             );
 
             const filename = sanitizeFilename(req.body.filename, title || mdFile?.originalname || 'document');
-            sendPdfResponse(res, pdf, filename, typstSource, output);
+            sendPdfResponse(res, req, pdf, filename, typstSource, output);
         } catch (e) {
             console.error('[POST /v1/convert/multipart] error:', e);
             const message = e instanceof Error ? e.message : String(e);
