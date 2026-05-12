@@ -10,6 +10,8 @@ import { handleTempPdfDownload } from './routes/temp-pdf-download';
 import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
 import { apiKeyAuth } from './middleware/auth';
+import { mcpAuth } from './middleware/mcp-auth';
+import { isMcpOAuthMetadataEnabled, sendMcpProtectedResourceMetadata } from './lib/mcp-oauth';
 import { mountStreamableMcpHttp } from './mcp/mount-streamable-http';
 
 const MAX_BODY_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
@@ -38,10 +40,18 @@ export function createApp(): express.Express {
         app.use('/docs', docsRouter);
     }
 
-    // MCP transport: apply the same optional API-key auth as the REST routes.
-    // Anonymous access still works when `API_KEY` is unset; authenticated tools
-    // can access the caller's cloud files/fonts.
-    mountStreamableMcpHttp(app, '/mcp', { authMiddleware: apiKeyAuth });
+    if (isMcpOAuthMetadataEnabled()) {
+        app.get('/.well-known/oauth-protected-resource/mcp', (req, res) => {
+            sendMcpProtectedResourceMetadata(req, res, '/mcp');
+        });
+        app.get('/.well-known/oauth-protected-resource', (req, res) => {
+            sendMcpProtectedResourceMetadata(req, res, '/mcp');
+        });
+    }
+
+    // MCP transport: API keys (`API_KEY`, `mme_*`) unchanged; optional OAuth JWT
+    // when `MCP_OAUTH_ISSUER_URL` + `MCP_OAUTH_AUDIENCE` are set (see README).
+    mountStreamableMcpHttp(app, '/mcp', { authMiddleware: mcpAuth });
 
     /** Time-limited PDF fetch by token (no API key — token is the secret). */
     app.get('/v1/convert/pdf/:token', handleTempPdfDownload);
