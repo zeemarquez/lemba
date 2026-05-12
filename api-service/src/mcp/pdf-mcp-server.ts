@@ -1,28 +1,27 @@
 /**
- * MCP server exposing the PDF conversion pipeline plus cloud listing tools.
+ * MCP server exposing the Modern Markdown Editor PDF pipeline plus
+ * cloud-listing tools.
  *
  * Tools:
- *   - convert_markdown_to_pdf : same as POST /v1/convert
- *   - list_cloud_files        : same as GET  /v1/me/files
- *   - list_cloud_templates    : same as GET  /v1/me/templates
- *   - list_cloud_fonts        : same as GET  /v1/me/fonts
+ *   - convert_markdown_to_pdf : compile markdown to PDF (MCP-only, minimal args)
+ *   - list_cloud_files        : list the user's cloud markdown documents
+ *   - list_cloud_templates    : list the user's cloud templates (.mdt/.json)
+ *   - list_cloud_fonts        : list the user's cloud custom fonts
  *
- * The HTTP transport resolves the caller's `userId` (from the API key) and
- * provides it through `options.getUserId()`. Cloud-backed tool inputs error
- * out with a clear message when no user is authenticated.
+ * The HTTP transport resolves the caller's `userId` from the API key and
+ * provides it via `options.getUserId()`. Cloud-backed inputs return a clear
+ * error when no user is authenticated.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { convertMarkdownToPdf, type Template } from '../lib/converter';
+import { convertMarkdownToPdf } from '../lib/converter';
 import { buildTempPdfAbsoluteUrl } from '../lib/pdf-public-url';
 import { storeTempPdf } from '../lib/pdf-temp-store';
 import {
     ResolutionError,
-    resolveFonts,
     resolveMarkdown,
     resolveTemplate,
-    type FontSourceEntry,
 } from '../lib/source-resolvers';
 import {
     listUserFonts,
@@ -30,57 +29,59 @@ import {
     listUserTemplates,
 } from '../lib/cloud-store';
 
-const fontEntrySchema = z.object({
-    family: z.string().optional(),
-    /** Base64-encoded font file bytes (TTF/OTF/WOFF). */
-    font_raw: z.string().optional(),
-    /** Path / id of a font in the caller's cloud storage. Requires auth. */
-    font_cloud_filepath: z.string().optional(),
-    /** Public HTTPS URL to a font file. */
-    url: z.string().optional(),
-});
+// ---------------------------------------------------------------------------
+// Tool input schema — deliberately minimal so AI agents cannot get confused.
+// Only two arguments are exposed:
+//   * md_raw                  (required)  — the markdown body itself
+//   * template_cloud_filepath (optional)  — exact filepath of a saved template
+// ---------------------------------------------------------------------------
 
-const convertMarkdownInput = z.object({
-    md_raw: z.string().optional().describe('Raw markdown content. Provide exactly one of md_raw / md_cloud_filepath.'),
-    md_cloud_filepath: z
-        .string()
-        .optional()
-        .describe('Path of a markdown file in your cloud storage (requires authenticated API key).'),
-    template_raw: z
-        .record(z.unknown())
-        .optional()
-        .nullable()
-        .describe('Optional .mdt template JSON.'),
+const convertInputShape = {
+    md_raw: z.string().min(1).describe(
+        [
+            'REQUIRED. The full markdown body of the document to convert, passed as a string.',
+            '',
+            'Pass the actual markdown text directly (with real newlines). DO NOT pass:',
+            '  • a filepath or filename',
+            '  • a URL',
+            '  • a short description of the document',
+            '  • the name of a file in cloud storage',
+            'You (the assistant) are expected to GENERATE the markdown yourself based on the user\'s request, then pass it here.',
+            '',
+            'Standard markdown is supported: headings (# .. ######), paragraphs, lists, tables, code blocks (```), images, links, blockquotes, footnotes, and math.',
+            '',
+            'Example value:',
+            '  "# Quarterly Report\\n\\nThis quarter we shipped...\\n\\n## Highlights\\n- Item A\\n- Item B\\n"',
+        ].join('\n'),
+    ),
     template_cloud_filepath: z
         .string()
         .optional()
-        .describe('Path of a template (.mdt/.json) in your cloud storage (requires authenticated API key).'),
-    title: z.string().optional().describe('Optional document title'),
-    variables: z.record(z.string()).optional().describe('Override `{{var:name}}` placeholders'),
-    fonts: z
-        .array(fontEntrySchema)
-        .optional()
-        .describe('Custom fonts: each entry uses exactly one of `font_raw` (base64) / `url` / `font_cloud_filepath`.'),
-    includeTypstSource: z.boolean().optional().describe('When true, include generated Typst source in the response'),
-    filename: z.string().optional().describe('Suggested PDF filename'),
-});
+        .describe(
+            [
+                "OPTIONAL. The exact `filepath` of a template the user has saved in their cloud account, e.g. \"Templates/Dark.mdt\" or \"Templates/Reports/Invoice.json\".",
+                '',
+                'When to SET this:',
+                '  • The user explicitly named or described a template (e.g. "use the dark template", "with my Invoice template", "in the Report style").',
+                '  • To get the correct value you MUST FIRST call the `list_cloud_templates` tool, then pick the entry whose `name` or `filename` best matches what the user said (case-insensitive substring match is fine — e.g. user says "dark" → pick `{ name: "Dark", filepath: "Templates/Dark.mdt" }`). Pass that entry\'s `filepath` here, exactly as returned.',
+                '  • If multiple templates plausibly match, ask the user to disambiguate.',
+                '  • If none match, do NOT guess — tell the user which templates exist instead.',
+                '',
+                'When to OMIT this:',
+                '  • The user did not mention a template. Leave the field unset.',
+                '  • Do NOT pass "" (empty string), null, "none", "default", or any made-up path. Just omit the field entirely.',
+                '',
+                'Requires the user to be authenticated with an API key (generated in the editor under Settings → API Service).',
+            ].join('\n'),
+        ),
+} as const;
 
-type ConvertMarkdownPdfArgs = z.infer<typeof convertMarkdownInput>;
-type FontArg = z.infer<typeof fontEntrySchema>;
+const convertInputSchema = z.object(convertInputShape);
+type ConvertMarkdownPdfArgs = z.infer<typeof convertInputSchema>;
 
 export interface CreatePdfMcpServerOptions {
     /** Returns the authenticated user id for this MCP session, or null. */
     getUserId?: () => string | null;
-}
-
-function mapFontEntries(entries: FontArg[] | undefined): FontSourceEntry[] {
-    if (!entries?.length) return [];
-    return entries.map((f) => ({
-        family: f.family,
-        font_raw: f.font_raw,
-        url: f.url,
-        font_cloud_filepath: f.font_cloud_filepath,
-    }));
 }
 
 function errorContent(message: string) {
@@ -90,101 +91,139 @@ function errorContent(message: string) {
     };
 }
 
+const SERVER_INSTRUCTIONS = `Modern Markdown Editor — Markdown → PDF MCP server.
+
+PURPOSE
+  Turn user requests like "write a document about X and convert it to PDF" into a styled PDF the user can download. The assistant generates the markdown body itself; this server compiles it (using Typst under the hood) and returns a temporary download URL.
+
+TOOLS
+  • convert_markdown_to_pdf
+      Inputs:
+        - md_raw (string, required): the full markdown body, generated by YOU (the assistant).
+        - template_cloud_filepath (string, optional): exact cloud filepath of a saved template.
+      Output (JSON): { filename, mimeType, url, expiresAt, byteLength }. Share the \`url\` with the user.
+
+  • list_cloud_templates
+      Returns the authenticated user's saved templates as objects of the form
+      { fileId, filename, name, filepath, type, isDeleted, lastChanged, lastChangedIso }.
+      Use \`filepath\` as the \`template_cloud_filepath\` argument for the converter.
+
+  • list_cloud_files
+      Returns the authenticated user's saved markdown documents (not templates). Useful for reference / lookup. Not required to convert.
+
+  • list_cloud_fonts
+      Returns the authenticated user's custom fonts.
+
+WORKFLOW — MUST FOLLOW
+  When the user asks the assistant to write/generate/produce a document and turn it into a PDF:
+
+  1. WRITE THE MARKDOWN YOURSELF.
+     Compose the document body in standard markdown based on the user's instructions. This text becomes the \`md_raw\` argument. Never put filepaths, URLs, or summaries in \`md_raw\` — put the actual markdown.
+
+  2. RESOLVE THE TEMPLATE.
+     a) Did the user mention a template by name? (e.g. "the dark template", "use my Invoice template", "in the Report style")
+        YES → first call \`list_cloud_templates\`. From the returned list, find the entry whose \`name\` or \`filename\` best matches what the user said (case-insensitive substring match is fine — user says "dark" → match \`{name: "Dark", filepath: "Templates/Dark.mdt"}\`). Use that entry's \`filepath\` as \`template_cloud_filepath\`. If multiple plausibly match, ask the user. If none match, tell the user the available templates instead of guessing.
+        NO  → omit \`template_cloud_filepath\` entirely. Do not invent a default and do not send an empty string.
+
+  3. CALL convert_markdown_to_pdf with the markdown from step 1 and (if step 2 produced one) the template filepath.
+
+  4. SHARE THE RESULT.
+     Give the user the returned \`url\` and mention it expires at \`expiresAt\`.
+
+EXAMPLES
+  • User: "Write a one-page summary of last week's standup and convert it to PDF using the dark template."
+      → call list_cloud_templates → find { name: "Dark", filepath: "Templates/Dark.mdt" }
+      → call convert_markdown_to_pdf({ md_raw: "# Standup Summary\\n\\n...", template_cloud_filepath: "Templates/Dark.mdt" })
+
+  • User: "Convert this to PDF" (no template named)
+      → call convert_markdown_to_pdf({ md_raw: "..." })   // no template_cloud_filepath
+
+  • User: "Make me a PDF with the report template"
+      → call list_cloud_templates → only template is "Invoice"
+      → tell the user: "I couldn't find a template called \\"report\\". Available templates: Invoice. Which one should I use?"
+
+AUTHENTICATION
+  All cloud features (list_cloud_*, template_cloud_filepath) require a user API key.
+  Users generate one in the editor under Settings → API Service and pass it as
+  \`Authorization: Bearer mme_...\` when connecting to this MCP server.
+  Without an API key the converter still works as long as you only provide \`md_raw\`.`;
+
 export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): McpServer {
     const getUserId = options.getUserId ?? (() => null);
 
     const server = new McpServer(
         {
             name: 'modern-markdown-editor-pdf-api',
-            version: '0.2.0',
+            version: '0.3.0',
         },
-        {
-            instructions:
-                'This server converts Markdown to PDF using the Modern Markdown Editor Typst pipeline.\n' +
-                '- `convert_markdown_to_pdf` accepts exactly one of `md_raw` / `md_cloud_filepath`, and at most one of ' +
-                '`template_raw` / `template_cloud_filepath`. Returns JSON with a temporary `url` to download the PDF.\n' +
-                '- `list_cloud_files`, `list_cloud_templates`, `list_cloud_fonts` enumerate the authenticated user\'s ' +
-                'cloud-synced assets (requires a user API key — generate one in the editor under Settings → API Service).\n' +
-                'Set `PUBLIC_BASE_URL` so URLs are absolute.',
-        },
+        { instructions: SERVER_INSTRUCTIONS },
     );
 
+    // ----- convert_markdown_to_pdf -----------------------------------------
     server.registerTool(
         'convert_markdown_to_pdf',
         {
-            title: 'Markdown → PDF',
+            title: 'Convert Markdown to PDF',
             description:
-                'Compile Markdown to a PDF. Provide markdown via `md_raw` or `md_cloud_filepath` (cloud), ' +
-                'optionally a template via `template_raw` or `template_cloud_filepath`, and optional `fonts`. ' +
-                'Returns a time-limited download URL.',
-            inputSchema: convertMarkdownInput as any,
+                "Compile a markdown document to a styled PDF and return a temporary download URL.\n\n" +
+                "Arguments:\n" +
+                "  • md_raw (required): the FULL markdown body, generated by you (the assistant). Pass the actual markdown text, not a filepath or description.\n" +
+                "  • template_cloud_filepath (optional): exact cloud `filepath` of one of the user's saved templates. " +
+                "If the user mentions a template by name, FIRST call `list_cloud_templates` to look up its real `filepath`, then pass it here. " +
+                "If the user did not mention a template, OMIT this field (don't send empty string or null).\n\n" +
+                "Returns JSON: { filename, mimeType, url, expiresAt, byteLength }. Share `url` with the user.",
+            inputSchema: convertInputShape as any,
         },
-        async (args: unknown, _extra: unknown) => {
+        async (args: unknown) => {
             const a = (args || {}) as ConvertMarkdownPdfArgs;
             const userId = getUserId() || undefined;
 
             try {
-                const { markdown } = await resolveMarkdown(
-                    { md_raw: a.md_raw, md_cloud_filepath: a.md_cloud_filepath },
-                    { userId },
-                );
+                const { markdown } = await resolveMarkdown({ md_raw: a.md_raw }, { userId });
                 const { template } = await resolveTemplate(
-                    {
-                        template_raw: a.template_raw as Template | null | undefined,
-                        template_cloud_filepath: a.template_cloud_filepath,
-                    },
+                    { template_cloud_filepath: a.template_cloud_filepath },
                     { userId },
                 );
-                const fonts = await resolveFonts(mapFontEntries(a.fonts), { userId });
 
-                const { pdf, typstSource } = await convertMarkdownToPdf(
-                    {
-                        markdown,
-                        template: template ?? null,
-                        title: a.title,
-                        variables: a.variables,
-                        fonts,
-                    },
-                    { includeSource: !!a.includeTypstSource },
+                const { pdf } = await convertMarkdownToPdf(
+                    { markdown, template: template ?? null },
+                    { includeSource: false },
                 );
 
-                const filename =
-                    (a.filename || a.title || 'document').replace(/[^A-Za-z0-9._\- ]+/g, '_').trim() ||
-                    'document';
-                const withExt = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
-
-                const { token, expiresAtMs } = storeTempPdf(pdf, withExt);
+                const filename = 'document.pdf';
+                const { token, expiresAtMs } = storeTempPdf(pdf, filename);
                 const url = buildTempPdfAbsoluteUrl(token);
 
                 const payload = {
-                    filename: withExt,
+                    filename,
                     mimeType: 'application/pdf',
                     url,
                     expiresAt: new Date(expiresAtMs).toISOString(),
                     byteLength: pdf.byteLength,
-                    ...(typstSource !== undefined ? { typstSource } : {}),
                 };
 
                 return {
                     content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
                 };
             } catch (e) {
-                if (e instanceof ResolutionError) {
-                    return errorContent(e.message);
-                }
+                if (e instanceof ResolutionError) return errorContent(e.message);
                 const message = e instanceof Error ? e.message : String(e);
                 return errorContent(`Conversion failed: ${message}`);
             }
         },
     );
 
+    // ----- list_cloud_files ------------------------------------------------
     server.registerTool(
         'list_cloud_files',
         {
             title: 'List cloud markdown files',
             description:
-                'List the authenticated user\'s cloud-saved markdown files (excludes templates). ' +
-                'Requires a user API key (generated under Settings → API Service).',
+                "List the authenticated user's cloud-saved markdown documents (excludes templates). " +
+                "Returns an array of objects with `fileId`, `filename`, `filepath`, `type`, `isDeleted`, " +
+                "`lastChanged`, `lastChangedIso`, `byteLength`. Use this for reference; it is NOT required " +
+                "to convert a document — pass the markdown body directly via `md_raw`. " +
+                "Requires a user API key (Settings → API Service in the editor).",
             inputSchema: {} as any,
         },
         async () => {
@@ -198,8 +237,11 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                 const files = await listUserMarkdownFiles(userId);
                 const payload = {
                     files: files.map((f) => ({
+                        fileId: f.syncId,
                         filename: f.path.split('/').pop() || f.path,
                         filepath: f.path,
+                        type: f.type,
+                        isDeleted: f.isDeleted,
                         lastChanged: f.updatedAt,
                         lastChangedIso: new Date(f.updatedAt).toISOString(),
                         byteLength: f.content.length,
@@ -213,13 +255,20 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
         },
     );
 
+    // ----- list_cloud_templates -------------------------------------------
     server.registerTool(
         'list_cloud_templates',
         {
             title: 'List cloud templates',
             description:
-                'List the authenticated user\'s cloud-saved templates (`Templates/**/*.mdt|.json`). ' +
-                'Requires a user API key.',
+                "List the authenticated user's saved templates (under `Templates/`, suffix `.mdt` or `.json`).\n\n" +
+                "CALL THIS BEFORE `convert_markdown_to_pdf` whenever the user mentions a template by name " +
+                "(e.g. \"the dark template\", \"my Invoice template\"). Match the user's words to a returned " +
+                "entry by comparing against `name` (preferred) or `filename`, then pass that entry's `filepath` " +
+                "as `template_cloud_filepath` in the converter call.\n\n" +
+                "Returns objects with `fileId`, `filename`, `name` (human-readable), `filepath`, `type`, " +
+                "`isDeleted`, `lastChanged`, `lastChangedIso`.\n\n" +
+                "Requires a user API key (Settings → API Service in the editor).",
             inputSchema: {} as any,
         },
         async () => {
@@ -237,14 +286,19 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
                         let name = filename.replace(/\.(mdt|json)$/i, '');
                         try {
                             const parsed = JSON.parse(f.content) as { name?: string };
-                            if (parsed && typeof parsed.name === 'string' && parsed.name) name = parsed.name;
+                            if (parsed && typeof parsed.name === 'string' && parsed.name) {
+                                name = parsed.name;
+                            }
                         } catch {
                             /* ignore */
                         }
                         return {
+                            fileId: f.syncId,
                             filename,
                             name,
                             filepath: f.path,
+                            type: f.type,
+                            isDeleted: f.isDeleted,
                             lastChanged: f.updatedAt,
                             lastChangedIso: new Date(f.updatedAt).toISOString(),
                         };
@@ -258,14 +312,16 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
         },
     );
 
+    // ----- list_cloud_fonts ------------------------------------------------
     server.registerTool(
         'list_cloud_fonts',
         {
             title: 'List cloud fonts',
             description:
-                'List the authenticated user\'s cloud-saved custom fonts. ' +
-                'Use `id` or `family` as `font_cloud_filepath` when calling `convert_markdown_to_pdf`. ' +
-                'Requires a user API key.',
+                "List the authenticated user's saved custom fonts. Returns objects with `id`, `family`, " +
+                "`fileName`, `filepath`, `format`, `lastChanged`, `lastChangedIso`. Informational only — " +
+                "fonts cannot be selected through this MCP server's converter (they are configured inside " +
+                "the template itself). Requires a user API key.",
             inputSchema: {} as any,
         },
         async () => {
