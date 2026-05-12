@@ -64,7 +64,7 @@ export function createPdfMcpServer(): McpServer {
             instructions:
                 'This server converts Markdown to PDF using the Modern Markdown Editor Typst pipeline. ' +
                 'Call `convert_markdown_to_pdf` with `markdown` and optional `template`, `title`, `variables`, and `fonts`. ' +
-                'The tool returns the PDF as an MCP embedded resource (`application/pdf`), not a text JSON wrapper. ' +
+                'The tool returns a JSON payload with base64-encoded PDF bytes. ' +
                 'For large fonts, prefer `url` over embedding `dataBase64`.',
         },
     );
@@ -74,7 +74,7 @@ export function createPdfMcpServer(): McpServer {
         {
             title: 'Markdown → PDF',
             description:
-                'Compile Markdown to a PDF file. Returns the PDF as an MCP resource (`application/pdf`), same bytes as `POST /v1/convert` with `output: "binary"`.',
+                'Compile Markdown to a PDF file. Equivalent to `POST /v1/convert` with `output: "base64"`.',
             inputSchema: convertMarkdownInput as any,
         },
         async (args: unknown, _extra: unknown) => {
@@ -94,28 +94,21 @@ export function createPdfMcpServer(): McpServer {
                     { includeSource: !!a.includeTypstSource },
                 );
 
+                const base64 = Buffer.from(pdf).toString('base64');
                 const filename = (a.filename || a.title || 'document').replace(/[^A-Za-z0-9._\- ]+/g, '_').trim() || 'document';
                 const withExt = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
-                const uriPath = withExt.replace(/\s+/g, '_');
 
-                const content: Array<
-                    | { type: 'resource'; resource: { uri: string; mimeType: string; blob: string } }
-                    | { type: 'text'; text: string }
-                > = [
-                    {
-                        type: 'resource',
-                        resource: {
-                            uri: `file:///${uriPath}`,
-                            mimeType: 'application/pdf',
-                            blob: Buffer.from(pdf).toString('base64'),
-                        },
-                    },
-                ];
-                if (typstSource !== undefined) {
-                    content.push({ type: 'text', text: typstSource });
-                }
+                const payload = {
+                    filename: withExt,
+                    mimeType: 'application/pdf',
+                    base64,
+                    byteLength: pdf.byteLength,
+                    ...(typstSource !== undefined ? { typstSource } : {}),
+                };
 
-                return { content };
+                return {
+                    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+                };
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);
                 return {

@@ -26,7 +26,7 @@ files by copy. The desktop app keeps working unchanged.
   uploads.
 - **Two output modes.** Raw `application/pdf` bytes (default) or
   base64-wrapped JSON (`output: "base64"`).
-- **MCP.** [Model Context Protocol](https://modelcontextprotocol.io) over **Streamable HTTP** at **`/mcp`** (same process as the REST API — one Render deploy). The conversion tool returns the PDF as an embedded **`application/pdf`** resource.
+- **MCP.** [Model Context Protocol](https://modelcontextprotocol.io) over **Streamable HTTP** at **`/mcp`** (same process as the REST API — one Render deploy).
 - **Interactive API docs.** [Swagger UI](https://swagger.io/tools/swagger-ui/) at **`/docs`**, OpenAPI 3 JSON at **`/openapi.json`** (disable with `DOCS_ENABLED=false`).
 
 ---
@@ -135,8 +135,6 @@ Perplexity registers itself as an OAuth client at Auth0. **Auth0 disables that b
 4. Retry the MCP connection in Perplexity.
 
 If you cannot enable DCR (policy, plan, etc.), use an IdP that supports it, or use a client that does not require DCR (e.g. Cursor with **`API_KEY`** headers instead of Perplexity’s hosted OAuth flow).
-
-The **`convert_markdown_to_pdf`** tool returns the PDF as an MCP **`resource`** block (`mimeType: application/pdf`, `blob` per the JSON-RPC transport). When **`includeTypstSource`** is true, the generated Typst source is appended as a separate **`text`** content item.
 
 ### Environment variables (Render → Environment)
 
