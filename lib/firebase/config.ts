@@ -4,10 +4,9 @@
  * This module initializes Firebase with your project configuration.
  * Environment variables should be set in a .env.local file.
  * 
- * Note: This implementation uses only Firestore (free tier compatible).
- * Firebase Storage is NOT used to stay within the free Spark plan.
- * Only text-based files (markdown, templates) are synced to the cloud.
- * Images and fonts remain local-only.
+ * Note: This implementation uses Firestore only (no Firebase Storage).
+ * Markdown, templates, and custom fonts (base64, size-capped) sync for signed-in users.
+ * Images remain local-only.
  */
 
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';

@@ -423,7 +423,7 @@ function showHelp(): void {
   console.log('Description:\n');
   console.log('  This tool manages user access levels for the Modern Markdown Editor.');
   console.log('  Users not in the users_access collection default to "basic" access.');
-  console.log('  Only "premium" users have access to cloud sync features.\n');
+  console.log('  Cloud sync is available to any signed-in user; basic/premium is for other product tiers.\n');
   console.log(`Current Configuration:\n`);
   console.log(`  APP_ID: ${APP_ID}`);
   console.log(`  Collection Path: artifacts/${APP_ID}/users_access\n`);

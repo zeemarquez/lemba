@@ -1,27 +1,29 @@
 /**
  * Cloud Sync Service
- * 
+ *
  * Orchestrates synchronization between IndexedDB (local) and Firebase (cloud).
  * Implements a parallel/sidecar architecture where IndexedDB is the primary store.
- * 
+ *
  * Features:
  * - Background push of local changes to cloud
  * - Periodic pull of remote changes (every 5 minutes)
  * - Hydration on first login
  * - Last-Write-Wins (LWW) conflict resolution
- * 
- * Note: Only text-based files (markdown, templates) are synced.
- * Images and fonts remain local-only (no Firebase Storage on free tier).
+ *
+ * Synced: markdown files, templates (as files), and custom fonts (Firestore base64, size-capped).
+ * Images remain local-only.
  */
 
 import { browserStorage } from '../browser-storage';
-import { FileEntry } from '../types';
+import { FileEntry, FontEntry } from '../types';
 import {
     isFirebaseConfigured,
-    // Firestore operations
     saveFile as saveFileToCloud,
     getFilesUpdatedSince as getCloudFilesUpdatedSince,
     getAllFiles as getAllCloudFiles,
+    saveFontEntry as saveFontEntryToCloud,
+    getFontEntriesUpdatedSince as getCloudFontsUpdatedSince,
+    getAllFontEntries as getAllCloudFonts,
 } from '../firebase';
 
 // Sync interval in milliseconds (1 minute)
@@ -45,6 +47,8 @@ export interface SyncEventCallbacks {
 export interface SyncStats {
     filesUploaded: number;
     filesDownloaded: number;
+    fontsUploaded: number;
+    fontsDownloaded: number;
     lastSyncTime: number;
 }
 
@@ -130,6 +134,23 @@ class SyncService {
         }
     }
 
+    /**
+     * Push a font to the cloud
+     */
+    async pushFont(entry: FontEntry): Promise<void> {
+        if (!this.isActive || !this.userId) return;
+
+        try {
+            const ok = await saveFontEntryToCloud(this.userId, entry);
+            if (!ok) {
+                console.warn('[SyncService] Font push skipped:', entry.family, entry.id);
+            }
+        } catch (error) {
+            console.error('Error pushing font to cloud:', error);
+            throw error;
+        }
+    }
+
     // ==================== Inbound Sync (Pull from Cloud) ====================
 
     /**
@@ -137,7 +158,7 @@ class SyncService {
      */
     async pullDelta(): Promise<SyncStats> {
         console.log('[SyncService] pullDelta called, isActive:', this.isActive, 'userId:', this.userId, 'isSyncing:', this.isSyncing);
-        
+
         if (!this.isActive || !this.userId || this.isSyncing) {
             console.log('[SyncService] pullDelta skipped - conditions not met');
             return this.createEmptyStats();
@@ -150,22 +171,29 @@ class SyncService {
         const stats: SyncStats = {
             filesUploaded: 0,
             filesDownloaded: 0,
+            fontsUploaded: 0,
+            fontsDownloaded: 0,
             lastSyncTime: Date.now(),
         };
 
         try {
-            console.log('[SyncService] Fetching cloud files since:', this.lastSyncTimestamp);
-            // Pull file changes
-            const cloudFiles = await getCloudFilesUpdatedSince(
-                this.userId,
-                this.lastSyncTimestamp
-            );
-            console.log('[SyncService] Found', cloudFiles.length, 'files to sync');
+            console.log('[SyncService] Fetching cloud changes since:', this.lastSyncTimestamp);
+            const [cloudFiles, cloudFonts] = await Promise.all([
+                getCloudFilesUpdatedSince(this.userId, this.lastSyncTimestamp),
+                getCloudFontsUpdatedSince(this.userId, this.lastSyncTimestamp),
+            ]);
+            console.log('[SyncService] Found', cloudFiles.length, 'files,', cloudFonts.length, 'fonts to merge');
 
             for (const cloudFile of cloudFiles) {
                 console.log('[SyncService] Merging file:', cloudFile.path);
                 await this.mergeFile(cloudFile);
                 stats.filesDownloaded++;
+            }
+
+            for (const cloudFont of cloudFonts) {
+                console.log('[SyncService] Merging font:', cloudFont.id);
+                await this.mergeFont(cloudFont);
+                stats.fontsDownloaded++;
             }
 
             // Update last sync timestamp
@@ -192,7 +220,7 @@ class SyncService {
      */
     async hydrate(): Promise<SyncStats> {
         console.log('[SyncService] hydrate called, isActive:', this.isActive, 'userId:', this.userId);
-        
+
         if (!this.isActive || !this.userId) {
             console.log('[SyncService] hydrate skipped - conditions not met');
             return this.createEmptyStats();
@@ -205,37 +233,37 @@ class SyncService {
         const stats: SyncStats = {
             filesUploaded: 0,
             filesDownloaded: 0,
+            fontsUploaded: 0,
+            fontsDownloaded: 0,
             lastSyncTime: Date.now(),
         };
 
         try {
-            // Get all local files
             const localFiles = await browserStorage.getAllFiles();
-            console.log('[SyncService] Local files:', localFiles.length);
+            const localFonts = await browserStorage.getAllFonts();
+            console.log('[SyncService] Local files:', localFiles.length, 'fonts:', localFonts.length);
 
-            // Get all cloud files
-            const cloudFiles = await getAllCloudFiles(this.userId);
-            console.log('[SyncService] Cloud files:', cloudFiles.length);
+            const [cloudFiles, cloudFonts] = await Promise.all([
+                getAllCloudFiles(this.userId),
+                getAllCloudFonts(this.userId),
+            ]);
+            console.log('[SyncService] Cloud files:', cloudFiles.length, 'fonts:', cloudFonts.length);
 
-            // Merge files (LWW)
             const localFileSyncIds = new Set(localFiles.map(f => f.syncId));
             const cloudFileSyncIds = new Set(cloudFiles.map(f => f.syncId));
 
-            // Download files that exist in cloud but not locally
             for (const cloudFile of cloudFiles) {
                 if (!localFileSyncIds.has(cloudFile.syncId)) {
                     console.log('[SyncService] Downloading new file:', cloudFile.path);
                     await browserStorage.upsertFile(cloudFile);
                     stats.filesDownloaded++;
                 } else {
-                    // File exists in both - use LWW
                     console.log('[SyncService] Merging existing file:', cloudFile.path);
                     await this.mergeFile(cloudFile);
                     stats.filesDownloaded++;
                 }
             }
 
-            // Upload local files that don't exist in cloud
             for (const localFile of localFiles) {
                 if (!cloudFileSyncIds.has(localFile.syncId)) {
                     console.log('[SyncService] Uploading local file:', localFile.path);
@@ -244,7 +272,30 @@ class SyncService {
                 }
             }
 
-            // Update user ID on all local file entries
+            const localFontSyncIds = new Set(localFonts.map(f => f.syncId));
+            const cloudFontSyncIds = new Set(cloudFonts.map(f => f.syncId));
+
+            for (const cloudFont of cloudFonts) {
+                if (!localFontSyncIds.has(cloudFont.syncId)) {
+                    console.log('[SyncService] Downloading new font:', cloudFont.id);
+                    await browserStorage.upsertFont(cloudFont);
+                    stats.fontsDownloaded++;
+                } else {
+                    console.log('[SyncService] Merging existing font:', cloudFont.id);
+                    await this.mergeFont(cloudFont);
+                    stats.fontsDownloaded++;
+                }
+            }
+
+            for (const localFont of localFonts) {
+                if (!cloudFontSyncIds.has(localFont.syncId)) {
+                    console.log('[SyncService] Uploading local font:', localFont.id);
+                    const ok = await saveFontEntryToCloud(this.userId, localFont);
+                    if (ok) stats.fontsUploaded++;
+                }
+            }
+
+            // Update user ID on all local entries
             await browserStorage.setUserIdForAllEntries(this.userId);
 
             // Update last sync timestamp
@@ -298,6 +349,29 @@ class SyncService {
     }
 
     /**
+     * Merge a cloud font with local storage using LWW
+     */
+    private async mergeFont(cloudFont: FontEntry): Promise<void> {
+        const localBySyncId = await browserStorage.getFontBySyncId(cloudFont.syncId);
+        const localById = await browserStorage.getFontById(cloudFont.id);
+        const localFont = localBySyncId ?? localById;
+
+        if (localFont && cloudFont.updatedAt <= localFont.updatedAt) {
+            return;
+        }
+
+        if (cloudFont.isDeleted) {
+            const target = localBySyncId ?? localById;
+            if (target) {
+                await browserStorage.softDeleteFont(target.id);
+            }
+            return;
+        }
+
+        await browserStorage.upsertFont(cloudFont);
+    }
+
+    /**
      * Set sync status and notify callbacks
      */
     private setStatus(status: SyncStatus): void {
@@ -310,10 +384,10 @@ class SyncService {
      */
     private getLastSyncTimestamp(): number {
         if (typeof window === 'undefined') return 0;
-        
+
         const stored = localStorage.getItem(LAST_SYNC_KEY);
         if (!stored) return 0;
-        
+
         try {
             const data = JSON.parse(stored);
             return data[this.userId || ''] || 0;
@@ -327,7 +401,7 @@ class SyncService {
      */
     private saveLastSyncTimestamp(timestamp: number): void {
         if (typeof window === 'undefined' || !this.userId) return;
-        
+
         try {
             const stored = localStorage.getItem(LAST_SYNC_KEY);
             const data = stored ? JSON.parse(stored) : {};
@@ -345,6 +419,8 @@ class SyncService {
         return {
             filesUploaded: 0,
             filesDownloaded: 0,
+            fontsUploaded: 0,
+            fontsDownloaded: 0,
             lastSyncTime: this.lastSyncTimestamp,
         };
     }

@@ -1,20 +1,20 @@
 /**
  * Sync Queue
- * 
+ *
  * Manages a queue of pending sync operations for offline support.
  * Operations are persisted to localStorage and processed when online.
- * 
- * Note: Only files are synced (images and fonts remain local-only).
+ *
+ * Queues file and font pushes to Firestore for signed-in users.
  */
 
-import { FileEntry } from '../types';
+import { FileEntry, FontEntry } from '../types';
 import { syncService } from './sync-service';
 
 // Queue storage key
 const SYNC_QUEUE_KEY = 'markdown-editor-sync-queue';
 
-// Operation types (only files are synced)
-export type SyncOperationType = 'file';
+// Operation types
+export type SyncOperationType = 'file' | 'font';
 
 export interface SyncQueueItem {
     id: string;
@@ -34,7 +34,7 @@ class SyncQueue {
 
     constructor() {
         this.loadQueue();
-        
+
         // Listen for online events to process queue
         if (typeof window !== 'undefined') {
             window.addEventListener('online', () => {
@@ -50,6 +50,19 @@ class SyncQueue {
         this.addToQueue({
             id: `file-${entry.syncId}-${Date.now()}`,
             type: 'file',
+            syncId: entry.syncId,
+            timestamp: Date.now(),
+            retries: 0,
+        });
+    }
+
+    /**
+     * Add a font to the sync queue
+     */
+    enqueueFont(entry: FontEntry): void {
+        this.addToQueue({
+            id: `font-${entry.syncId}-${Date.now()}`,
+            type: 'font',
             syncId: entry.syncId,
             timestamp: Date.now(),
             retries: 0,
@@ -161,6 +174,13 @@ class SyncQueue {
                 const entry = await browserStorage.getFileBySyncId(item.syncId);
                 if (entry) {
                     await syncService.pushFile(entry);
+                }
+                break;
+            }
+            case 'font': {
+                const fontEntry = await browserStorage.getFontBySyncId(item.syncId);
+                if (fontEntry) {
+                    await syncService.pushFont(fontEntry);
                 }
                 break;
             }

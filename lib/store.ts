@@ -829,9 +829,12 @@ export const useStore = create<AppState>()(
 
                 addFont: async (family, file) => {
                     try {
-                        await browserStorage.storeFont(family, file);
+                        const entry = await browserStorage.storeFont(family, file);
                         await get().fetchFonts();
-                        // Note: Fonts are NOT synced to cloud (local-only)
+                        if (syncService.isActive) {
+                            syncQueue.enqueueFont(entry);
+                            syncService.pullDelta().catch(console.error);
+                        }
                     } catch (error) {
                         console.error('Failed to add font:', error);
                     }
@@ -839,9 +842,11 @@ export const useStore = create<AppState>()(
 
                 deleteFont: async (id) => {
                     try {
-                        await browserStorage.deleteFont(id);
+                        const updated = await browserStorage.deleteFont(id);
                         await get().fetchFonts();
-                        // Note: Fonts are NOT synced to cloud (local-only)
+                        if (syncService.isActive && updated) {
+                            syncQueue.enqueueFont(updated);
+                        }
                     } catch (error) {
                         console.error('Failed to delete font:', error);
                     }

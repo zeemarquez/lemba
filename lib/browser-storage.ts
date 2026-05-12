@@ -676,19 +676,31 @@ class BrowserStorage {
             const request = store.getAll();
 
             request.onsuccess = () => {
-                resolve(request.result as FontEntry[]);
+                const all = request.result as FontEntry[];
+                resolve(all.filter(f => !f.isDeleted));
             };
             request.onerror = () => reject(request.error);
         });
     }
 
     /**
-     * Delete a font from IndexedDB
+     * Get a font by primary key (id)
      */
-    async deleteFont(id: string): Promise<void> {
-        await this.transaction(STORE_FONTS, 'readwrite', store => {
-            store.delete(id);
-        });
+    async getFontById(id: string): Promise<FontEntry | null> {
+        try {
+            const entry = await this.transaction<FontEntry>(STORE_FONTS, 'readonly', store => store.get(id));
+            return entry ?? null;
+        } catch (e) {
+            console.error('Error retrieving font:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Soft-delete a font (for sync). Removes active font from UI via listFonts filter.
+     */
+    async deleteFont(id: string): Promise<FontEntry | null> {
+        return this.softDeleteFont(id);
     }
 
     // ==================== Sync Helper Methods ====================

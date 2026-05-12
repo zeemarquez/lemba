@@ -3,8 +3,7 @@
  * 
  * Centralized exports for all Firebase-related functionality.
  * 
- * Note: This implementation uses only Firestore (free tier compatible).
- * Firebase Storage is NOT used - images and fonts remain local-only.
+ * Firestore sync for files and fonts; images remain local-only.
  */
 
 // Configuration
@@ -28,7 +27,7 @@ export {
     type User,
 } from './auth';
 
-// Firestore Operations (Files only - images/fonts are local-only)
+// Firestore Operations (files + fonts; images are local-only)
 export {
     // Files
     saveFile,
@@ -37,10 +36,18 @@ export {
     getFilesUpdatedSince,
     deleteFile,
     batchSaveFiles,
+    // Fonts
+    saveFontEntry,
+    getFontEntry,
+    getAllFontEntries,
+    getFontEntriesUpdatedSince,
+    deleteFontEntry,
+    MAX_FONT_BYTES_FOR_FIRESTORE,
     // Real-time (future)
     subscribeToFileChanges,
     // Types
     type FirestoreFileEntry,
+    type FirestoreFontEntry,
 } from './firestore';
 
 // User Access Management

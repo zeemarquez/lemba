@@ -5,8 +5,8 @@
  * Collection: users_access/{userId}
  * 
  * Access Levels:
- * - "basic": Default tier, no sync access
- * - "premium": Full access including cloud sync
+ * - "basic": Default tier (billing / product tier; cloud sync is not gated on this)
+ * - "premium": Higher product tier
  * 
  * Note: User access levels are set manually in Firebase Console.
  */
@@ -143,11 +143,14 @@ export async function createUserAccessRecord(
 }
 
 /**
- * Check if user has sync access (premium users only)
+ * Returns whether the given user id should use cloud sync from this app.
+ * Sync is enabled for any signed-in user; this matches that policy when Firebase is configured.
  */
 export async function hasSyncAccess(userId: string): Promise<boolean> {
-    const accessLevel = await getUserAccessLevel(userId);
-    return accessLevel === 'premium';
+    if (!isFirebaseConfigured() || !userId) {
+        return false;
+    }
+    return true;
 }
 
 /**
