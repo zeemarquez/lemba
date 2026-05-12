@@ -13,15 +13,15 @@ export const openApiDocument = {
             '  - The shared `API_KEY` env value (legacy admin mode — no user context).\n' +
             '  - A personal user token (`mme_*`) generated in the editor under **Settings → API Service**. ' +
             'Tokens carry a user id, enabling cloud-backed sources (`md_cloud_filepath`, `template_cloud_filepath`, ' +
-            '`font_cloud_filepath`) and the `/v1/me/*` endpoints.',
-        version: '0.2.0',
+            '`font_cloud_filepath`) and the `/v1/me/*` endpoints (including markdown read/write).',
+        version: '0.2.1',
         license: { name: 'MIT' },
     },
     servers: [{ url: '/', description: 'Current host' }],
     tags: [
         { name: 'Health', description: 'Liveness' },
         { name: 'Convert', description: 'Markdown → PDF' },
-        { name: 'Me', description: 'Cloud-saved files for the authenticated user' },
+        { name: 'Me', description: 'Cloud-saved files for the authenticated user (read; markdown upload under `/v1/me/files`)' },
     ],
     paths: {
         '/health': {
@@ -197,6 +197,66 @@ export const openApiDocument = {
                         },
                     },
                     '401': { description: 'Requires user API key' },
+                },
+            },
+        },
+        '/v1/me/files/content': {
+            get: {
+                tags: ['Me'],
+                summary: 'Get cloud file body',
+                description:
+                    'Returns the UTF-8 `content` of a file at `filepath` (same logical path as `md_cloud_filepath`). ' +
+                    'Folders return 400.',
+                operationId: 'getMyFileContent',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                parameters: [
+                    {
+                        name: 'filepath',
+                        in: 'query',
+                        required: true,
+                        schema: { type: 'string', example: 'notes/report.md' },
+                        description: 'Logical path in the user\'s cloud (no leading slash)',
+                    },
+                ],
+                responses: {
+                    '200': {
+                        description: 'File metadata and body',
+                        content: {
+                            'application/json': {
+                                schema: { $ref: '#/components/schemas/CloudFileContentResponse' },
+                            },
+                        },
+                    },
+                    '400': { description: 'Missing filepath or path is a folder' },
+                    '401': { description: 'Requires user API key' },
+                    '404': { description: 'File not found' },
+                    '503': { description: 'Firebase Admin not configured' },
+                },
+            },
+        },
+        '/v1/me/files/upload': {
+            post: {
+                tags: ['Me'],
+                summary: 'Upload or replace markdown',
+                description:
+                    'Creates or updates a markdown file at `folderPath`/`filename`. Parent folders in `folderPath` are created when missing. ' +
+                    '`filename` must end with `.md`, `.markdown`, or `.mdx`. Use `folderPath: ""` for the vault root.',
+                operationId: 'uploadMyMarkdown',
+                security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: { $ref: '#/components/schemas/UploadMarkdownRequest' },
+                        },
+                    },
+                },
+                responses: {
+                    '200': { description: 'Existing file updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadMarkdownResponse' } } } },
+                    '201': { description: 'New file created', content: { 'application/json': { schema: { $ref: '#/components/schemas/UploadMarkdownResponse' } } } },
+                    '400': { description: 'Invalid body or path conflict' },
+                    '401': { description: 'Requires user API key' },
+                    '503': { description: 'Firebase Admin not configured' },
                 },
             },
         },
@@ -382,6 +442,38 @@ export const openApiDocument = {
                 type: 'object',
                 properties: {
                     files: { type: 'array', items: { $ref: '#/components/schemas/CloudFileItem' } },
+                },
+            },
+            CloudFileContentResponse: {
+                type: 'object',
+                properties: {
+                    filepath: { type: 'string' },
+                    fileId: { type: 'string', description: 'Firestore sync id (document id)' },
+                    content: { type: 'string' },
+                    lastChanged: { type: 'integer' },
+                    lastChangedIso: { type: 'string', format: 'date-time' },
+                    byteLength: { type: 'integer' },
+                },
+            },
+            UploadMarkdownRequest: {
+                type: 'object',
+                required: ['content', 'filename'],
+                properties: {
+                    content: { type: 'string', description: 'Raw markdown (UTF-8)' },
+                    filename: { type: 'string', example: 'report.md', description: 'Basename only; must end with .md, .markdown, or .mdx' },
+                    folderPath: {
+                        type: 'string',
+                        example: 'Projects/Acme',
+                        description: 'Parent folder path without leading slash; empty string for root. Missing segments are created as folders.',
+                    },
+                },
+            },
+            UploadMarkdownResponse: {
+                type: 'object',
+                properties: {
+                    filepath: { type: 'string' },
+                    fileId: { type: 'string' },
+                    created: { type: 'boolean', description: 'True when a new document was written; false when an existing path was updated.' },
                 },
             },
             CloudTemplatesResponse: {

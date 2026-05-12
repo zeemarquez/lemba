@@ -1,5 +1,6 @@
 /**
- * Read-only accessors for a user's cloud-saved markdown, templates, and fonts.
+ * Accessors for a user's cloud-saved markdown, templates, and fonts (read;
+ * markdown upload and folder creation use the same Firestore layout as the web app).
  *
  * Mirrors the schema used by the web app's Firestore sync layer
  * (`lib/firebase/firestore.ts`). All paths live under:
@@ -11,6 +12,8 @@
  * Fonts use `id` (slugified family) and store base64 in `dataBase64`.
  */
 
+import { randomUUID } from 'node:crypto';
+import { Timestamp, type DocumentData } from 'firebase-admin/firestore';
 import {
     FIREBASE_APP_ID,
     getFirebaseAdminFirestore,
@@ -50,7 +53,7 @@ function userCollection(userId: string, name: 'files' | 'fonts') {
         .collection(name);
 }
 
-function toCloudFile(data: FirebaseFirestore.DocumentData): CloudFile {
+function toCloudFile(data: DocumentData): CloudFile {
     const updatedAt = typeof data.updatedAt === 'object' && data.updatedAt?.toMillis
         ? data.updatedAt.toMillis()
         : (typeof data.updatedAt === 'number' ? data.updatedAt : Date.now());
@@ -68,7 +71,7 @@ function decodeBase64(b64: string): Uint8Array {
     return new Uint8Array(Buffer.from(b64, 'base64'));
 }
 
-function toCloudFont(data: FirebaseFirestore.DocumentData, includeData: boolean): CloudFont {
+function toCloudFont(data: DocumentData, includeData: boolean): CloudFont {
     const updatedAt = typeof data.updatedAt === 'object' && data.updatedAt?.toMillis
         ? data.updatedAt.toMillis()
         : (typeof data.updatedAt === 'number' ? data.updatedAt : Date.now());
@@ -129,6 +132,114 @@ export async function getUserFileByPath(userId: string, filePath: string): Promi
         .filter((f) => !f.isDeleted)
         .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     return latest ?? null;
+}
+
+function stripSlashes(s: string): string {
+    return s.replace(/^\/+/g, '').replace(/\/+$/g, '').trim();
+}
+
+/** Normalize and validate a logical cloud `path` (same rules as upload targets). */
+export function normalizeCloudFilepath(input: string): string {
+    const trimmed = stripSlashes(input.replace(/^\/+/, ''));
+    if (!trimmed) throw new Error('Path is empty');
+    assertSafeCloudRelativePath(trimmed);
+    return trimmed;
+}
+
+/** Rejects traversal, backslashes, and control characters in a single path segment or full relative path. */
+function assertSafeCloudRelativePath(p: string): void {
+    if (!p) throw new Error('Path is empty');
+    if (p.includes('..') || p.includes('\\') || /[\x00-\x1f\x7f]/.test(p)) {
+        throw new Error('Invalid path');
+    }
+}
+
+function isMarkdownFilename(name: string): boolean {
+    return /\.(md|markdown|mdx)$/i.test(name);
+}
+
+/**
+ * Ensures each segment of `folderPath` exists as a `type: 'folder'` document.
+ * `folderPath` uses forward slashes, no leading slash (e.g. `Notes/2025`).
+ */
+export async function ensureFolderPathExists(userId: string, folderPath: string): Promise<void> {
+    if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
+    const base = stripSlashes(folderPath);
+    if (!base) return;
+    assertSafeCloudRelativePath(base);
+    const parts = base.split('/').filter((p) => p.length > 0);
+    let acc = '';
+    for (const part of parts) {
+        if (part === '.' || part === '..') throw new Error('Invalid folder path');
+        acc = acc ? `${acc}/${part}` : part;
+        const existing = await getUserFileByPath(userId, acc);
+        if (existing) {
+            if (existing.type === 'file') {
+                throw new Error(`A file already exists at "${acc}"; cannot create folder here`);
+            }
+            continue;
+        }
+        const syncId = randomUUID();
+        const col = userCollection(userId, 'files');
+        const now = Timestamp.fromMillis(Date.now());
+        await col.doc(syncId).set({
+            syncId,
+            path: acc,
+            content: '',
+            type: 'folder',
+            updatedAt: now,
+            isDeleted: false,
+        });
+    }
+}
+
+export interface UpsertMarkdownResult {
+    syncId: string;
+    path: string;
+    created: boolean;
+}
+
+/**
+ * Writes markdown to the user's `files` collection. Document id is always `syncId`
+ * (same convention as the web app). Creates parent folders when missing.
+ */
+export async function upsertUserMarkdownFile(
+    userId: string,
+    input: { folderPath: string; filename: string; content: string },
+): Promise<UpsertMarkdownResult> {
+    if (!isFirebaseAdminConfigured()) throw new Error('Firebase Admin SDK is not configured on the API service');
+    const folder = stripSlashes(input.folderPath);
+    const rawName = stripSlashes(input.filename);
+    if (!rawName || rawName.includes('/')) {
+        throw new Error('Filename must be a single name without slashes');
+    }
+    assertSafeCloudRelativePath(rawName);
+    if (folder) assertSafeCloudRelativePath(folder);
+    if (!isMarkdownFilename(rawName)) {
+        throw new Error('Filename must end with .md, .markdown, or .mdx');
+    }
+    const fullPath = folder ? `${folder}/${rawName}` : rawName;
+    assertSafeCloudRelativePath(fullPath);
+
+    await ensureFolderPathExists(userId, folder);
+
+    const existing = await getUserFileByPath(userId, fullPath);
+    if (existing && existing.type === 'folder') {
+        throw new Error(`Path "${fullPath}" is a folder`);
+    }
+    const syncId = existing?.syncId && existing.type === 'file' ? existing.syncId : randomUUID();
+    const created = !existing || existing.type !== 'file';
+    const col = userCollection(userId, 'files');
+    const now = Timestamp.fromMillis(Date.now());
+    await col.doc(syncId).set({
+        syncId,
+        path: fullPath,
+        content: input.content,
+        type: 'file',
+        updatedAt: now,
+        isDeleted: false,
+    });
+    return { syncId, path: fullPath, created };
 }
 
 export async function listUserFonts(userId: string, includeData = false): Promise<CloudFont[]> {
