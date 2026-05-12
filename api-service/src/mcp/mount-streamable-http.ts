@@ -4,11 +4,10 @@
  * with the API key middleware so MCP tools can resolve `req.userId`.
  */
 
-import type { IRouter, Request, Response, RequestHandler } from 'express';
+import type { IRouter, NextFunction, Request, Response, RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { extractToken } from '../middleware/auth';
 import { createPdfMcpServer } from './pdf-mcp-server';
 
 interface SessionEntry {
@@ -49,11 +48,6 @@ export function mountStreamableMcpHttp(
         try {
             if (sessionId && sessions.has(sessionId)) {
                 const entry = sessions.get(sessionId)!;
-                // Only refresh identity when the client sent credentials; some
-                // transports omit Authorization on follow-up GET/SSE polls.
-                if (extractToken(req)) {
-                    entry.userId = req.userId ?? null;
-                }
                 await entry.transport.handleRequest(req, res, req.body);
                 return;
             }
@@ -74,13 +68,7 @@ export function mountStreamableMcpHttp(
                 };
 
                 const server = createPdfMcpServer({
-                    getUserId: () => {
-                        const sid = transport.sessionId;
-                        if (sid && sessions.has(sid)) {
-                            return sessions.get(sid)!.userId;
-                        }
-                        return req.userId ?? null;
-                    },
+                    getUserId: () => req.userId ?? null,
                 });
                 await server.connect(transport);
                 await transport.handleRequest(req, res, req.body);
@@ -114,11 +102,7 @@ export function mountStreamableMcpHttp(
             return;
         }
         try {
-            const entry = sessions.get(sessionId)!;
-            if (extractToken(req)) {
-                entry.userId = req.userId ?? null;
-            }
-            await entry.transport.handleRequest(req, res);
+            await sessions.get(sessionId)!.transport.handleRequest(req, res);
         } catch (err) {
             console.error('[MCP] GET error:', err);
             if (!res.headersSent) {
@@ -134,11 +118,7 @@ export function mountStreamableMcpHttp(
             return;
         }
         try {
-            const entry = sessions.get(sessionId)!;
-            if (extractToken(req)) {
-                entry.userId = req.userId ?? null;
-            }
-            await entry.transport.handleRequest(req, res);
+            await sessions.get(sessionId)!.transport.handleRequest(req, res);
         } catch (err) {
             console.error('[MCP] DELETE error:', err);
             if (!res.headersSent) {
