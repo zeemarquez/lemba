@@ -30,6 +30,17 @@ router.get('/.well-known/oauth-authorization-server', (req: Request, res: Respon
     });
 });
 
+// RFC 9728 — Protected Resource Metadata.
+// MCP clients use this to discover which authorization server protects the resource.
+router.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+    const issuer = getIssuer(req);
+    res.json({
+        resource: issuer,
+        authorization_servers: [issuer],
+        bearer_methods_supported: ['header'],
+    });
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Dynamic Client Registration (RFC 7591)
 // ──────────────────────────────────────────────────────────────────────────────

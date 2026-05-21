@@ -9,7 +9,7 @@ import meRouter from './routes/me';
 import { handleTempPdfDownload } from './routes/temp-pdf-download';
 import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
-import { apiKeyAuth } from './middleware/auth';
+import { apiKeyAuth, mcpAuth } from './middleware/auth';
 import { mountStreamableMcpHttp } from './mcp/mount-streamable-http';
 import oauthRouter from './oauth/router';
 
@@ -45,7 +45,7 @@ export function createApp(): express.Express {
     // MCP transport: apply the same optional API-key auth as the REST routes.
     // Anonymous access still works when `API_KEY` is unset; authenticated tools
     // can access the caller's cloud files/fonts.
-    mountStreamableMcpHttp(app, '/mcp', { authMiddleware: apiKeyAuth });
+    mountStreamableMcpHttp(app, '/mcp', { authMiddleware: mcpAuth });
 
     /** Time-limited PDF fetch by token (no API key — token is the secret). */
     app.get('/v1/convert/pdf/:token', handleTempPdfDownload);

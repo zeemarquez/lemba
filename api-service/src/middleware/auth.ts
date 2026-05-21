@@ -78,3 +78,43 @@ export function requireUser(req: Request, res: Response, next: NextFunction): vo
     }
     next();
 }
+
+/**
+ * Strict auth for the MCP endpoint. Always requires a valid user token and
+ * returns a 401 with a WWW-Authenticate Bearer challenge when missing or
+ * invalid. This causes MCP clients (Claude Code, claude.ai) to automatically
+ * trigger the OAuth flow via /.well-known/oauth-protected-resource.
+ */
+export async function mcpAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const token = extractToken(req);
+    if (!token) {
+        const resourceUrl = `${req.protocol}://${req.get('host')}`;
+        res.setHeader(
+            'WWW-Authenticate',
+            `Bearer realm="Modern Markdown Editor", resource_metadata="${resourceUrl}/.well-known/oauth-protected-resource"`,
+        );
+        res.status(401).json({ error: 'Unauthorized', message: 'Authentication required' });
+        return;
+    }
+
+    // Accept the legacy shared key too (e.g. for server-to-server integrations).
+    const sharedKey = process.env.API_KEY;
+    if (sharedKey && token === sharedKey) {
+        req.usedSharedKey = true;
+        next();
+        return;
+    }
+
+    try {
+        const verified = await verifyApiKey(token);
+        if (verified) {
+            req.userId = verified.userId;
+            next();
+            return;
+        }
+    } catch (e) {
+        console.error('[auth] verifyApiKey failed:', e);
+    }
+
+    res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+}
