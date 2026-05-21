@@ -11,6 +11,7 @@ import docsRouter from './routes/docs';
 import { openApiDocument } from './openapi/spec';
 import { apiKeyAuth } from './middleware/auth';
 import { mountStreamableMcpHttp } from './mcp/mount-streamable-http';
+import oauthRouter from './oauth/router';
 
 const MAX_BODY_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 
@@ -37,6 +38,9 @@ export function createApp(): express.Express {
     if (process.env.DOCS_ENABLED !== 'false') {
         app.use('/docs', docsRouter);
     }
+
+    // OAuth 2.1 endpoints for Claude.ai MCP connector (discovery, register, authorize, token).
+    app.use('/', oauthRouter);
 
     // MCP transport: apply the same optional API-key auth as the REST routes.
     // Anonymous access still works when `API_KEY` is unset; authenticated tools

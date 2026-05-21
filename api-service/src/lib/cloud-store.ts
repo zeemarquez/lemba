@@ -404,3 +404,15 @@ export async function verifyApiKey(token: string): Promise<VerifiedApiKey | null
         createdAt: typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
     };
 }
+
+/** Persist an OAuth-issued or programmatically-created API key to Firestore. */
+export async function storeApiKey(token: string, userId: string, name: string): Promise<void> {
+    const db = getFirebaseAdminFirestore();
+    if (!db) throw new Error('Firebase Admin SDK is not configured on the API service');
+    await db
+        .collection('artifacts')
+        .doc(FIREBASE_APP_ID)
+        .collection('api_keys')
+        .doc(token)
+        .set({ userId, name, createdAt: Date.now() });
+}
