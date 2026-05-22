@@ -1,15 +1,22 @@
 import { Router, type Request, type Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
-import { clientStore, codeStore, createClient, createAuthCode, cleanupExpiredCodes } from './store';
-import { buildAuthorizePage } from './authorize-page';
-import { verifyApiKey, storeApiKey } from '../lib/cloud-store';
+import {
+    clientStore,
+    codeStore,
+    pendingAuthStore,
+    createClient,
+    createAuthCode,
+    createPendingAuth,
+    cleanupExpiredCodes,
+} from './store';
+import { buildGoogleAuthUrl, exchangeGoogleCode, getFirebaseUid } from './google-auth';
+import { storeApiKey } from '../lib/cloud-store';
 
 const router = Router();
 
 function getIssuer(req: Request): string {
     const env = process.env.OAUTH_ISSUER;
     if (env) return env.replace(/\/$/, '');
-    // Fallback: derive from request (works for local dev)
     return `${req.protocol}://${req.get('host')}`;
 }
 
@@ -70,10 +77,11 @@ router.post('/oauth/register', (req: Request, res: Response) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Authorization endpoint — GET renders the consent page
+// Authorization endpoint — validate MCP params, then redirect to Google sign-in
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/oauth/authorize', (req: Request, res: Response) => {
-    const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } = req.query as Record<string, string>;
+    const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } =
+        req.query as Record<string, string>;
 
     if (response_type !== 'code') {
         res.status(400).json({ error: 'unsupported_response_type' });
@@ -97,55 +105,59 @@ router.get('/oauth/authorize', (req: Request, res: Response) => {
         return;
     }
 
-    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'");
-    res.send(buildAuthorizePage({ clientName: client.client_name, client_id, redirect_uri, state, code_challenge }));
+    // Store MCP OAuth params and redirect user to Google sign-in.
+    const pendingId = createPendingAuth(client_id, redirect_uri, state, code_challenge);
+    res.redirect(buildGoogleAuthUrl(pendingId));
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Authorization endpoint — POST processes consent form
+// Google OAuth callback — complete sign-in, issue MCP auth code
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/oauth/authorize', async (req: Request, res: Response) => {
-    const { client_id, redirect_uri, state, code_challenge, api_key } = req.body ?? {};
+router.get('/oauth/google/callback', async (req: Request, res: Response) => {
+    const { code, state: pendingId, error: googleError } = req.query as Record<string, string>;
 
-    if (!client_id || !clientStore.has(client_id)) {
-        res.status(400).json({ error: 'invalid_client' });
-        return;
-    }
-    const client = clientStore.get(client_id)!;
-    if (!redirect_uri || !client.redirect_uris.includes(redirect_uri)) {
-        res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri mismatch' });
+    if (googleError) {
+        res.status(400).send(`Google sign-in failed: ${googleError}`);
         return;
     }
 
-    const renderError = (msg: string) => {
-        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'");
-        res.send(buildAuthorizePage({ clientName: client.client_name, client_id, redirect_uri, state, code_challenge, error: msg }));
-    };
+    const pending = pendingId ? pendingAuthStore.get(pendingId) : undefined;
+    if (!pending || pending.expiresAt < Date.now()) {
+        res.status(400).send('Authorization session expired or invalid. Please try again.');
+        return;
+    }
+    pendingAuthStore.delete(pendingId);
 
-    if (typeof api_key !== 'string' || !api_key.trim()) {
-        renderError('Please enter your API key.');
+    if (!code) {
+        res.status(400).send('Missing authorization code from Google.');
         return;
     }
 
-    let userId: string;
+    let googleUid: string;
     try {
-        const verified = await verifyApiKey(api_key.trim());
-        if (!verified) {
-            renderError('Invalid API key — please try again.');
-            return;
-        }
-        userId = verified.userId;
-    } catch {
-        renderError('Could not verify the API key. Please try again.');
+        const payload = await exchangeGoogleCode(code);
+        googleUid = payload.sub;
+    } catch (err) {
+        console.error('[OAuth] Google code exchange failed:', err);
+        res.status(502).send('Failed to complete Google sign-in. Please try again.');
         return;
     }
 
-    const code = randomBytes(32).toString('base64url');
-    createAuthCode(client_id, redirect_uri, userId, code_challenge, code);
+    const firebaseUid = await getFirebaseUid(googleUid);
+    if (!firebaseUid) {
+        res.status(403).send(
+            'Your Google account is not linked to a Lemba account. ' +
+            'Please sign in to the web app first.',
+        );
+        return;
+    }
 
-    const callback = new URL(redirect_uri);
-    callback.searchParams.set('code', code);
-    if (state) callback.searchParams.set('state', state);
+    const authCode = randomBytes(32).toString('base64url');
+    createAuthCode(pending.client_id, pending.redirect_uri, firebaseUid, pending.code_challenge, authCode);
+
+    const callback = new URL(pending.redirect_uri);
+    callback.searchParams.set('code', authCode);
+    callback.searchParams.set('state', pending.state);
     res.redirect(callback.toString());
 });
 
@@ -176,7 +188,6 @@ router.post('/oauth/token', async (req: Request, res: Response) => {
         return;
     }
 
-    // Verify PKCE S256
     if (typeof code_verifier !== 'string' || !code_verifier) {
         res.status(400).json({ error: 'invalid_request', error_description: 'code_verifier is required' });
         return;
@@ -187,12 +198,10 @@ router.post('/oauth/token', async (req: Request, res: Response) => {
         return;
     }
 
-    // Consume the code (one-time use)
     codeStore.delete(code);
 
-    // Issue a new mme_* token and persist to Firestore
     const accessToken = 'mme_' + randomBytes(32).toString('hex');
-    const tokenName = `Claude (OAuth) — ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' })}`;
+    const tokenName = `Claude (OAuth) — ${new Date().toLocaleDateString('en-US')}`;
 
     try {
         await storeApiKey(accessToken, entry.userId, tokenName);
@@ -202,11 +211,7 @@ router.post('/oauth/token', async (req: Request, res: Response) => {
         return;
     }
 
-    res.json({
-        access_token: accessToken,
-        token_type: 'Bearer',
-        scope: '',
-    });
+    res.json({ access_token: accessToken, token_type: 'Bearer', scope: '' });
 });
 
 export default router;

@@ -17,6 +17,7 @@
  */
 
 import { App, applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -97,6 +98,12 @@ export function getFirebaseAdminFirestore(): Firestore | null {
     const adminApp = getFirebaseAdminApp();
     if (!adminApp) return null;
     return getFirestore(adminApp);
+}
+
+export function getFirebaseAdminAuth(): Auth | null {
+    const adminApp = getFirebaseAdminApp();
+    if (!adminApp) return null;
+    return getAuth(adminApp);
 }
 
 export function getFirebaseAdminInitError(): string | null {
