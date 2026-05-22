@@ -8,8 +8,12 @@ import * as LucideIcons from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
 import { Input } from "@/components/plate-ui/input";
 import { Button } from "@/components/plate-ui/button";
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/auth";
+import { getAuth } from "firebase/auth";
+import { uploadImageToCloud, getApiServiceUrl } from "@/lib/r2-image-upload";
+import { compressImage } from "@/lib/image-compression";
 import { HeaderFooterPlateEditor } from "@/components/plate-editor/header-footer-plate-editor";
 import {
     DropdownMenu,
@@ -54,6 +58,48 @@ const PAGE_SIZES = [
 export function TemplateEditor() {
     const { activeTemplateId, templates, updateTemplate, setActiveTemplateCss, closeTab, customFonts } = useStore();
     const template = templates.find(t => t.id === activeTemplateId);
+    const { user } = useAuth();
+    const [frontPageUploading, setFrontPageUploading] = useState(false);
+    const cloudEnabled = !!user && !!getApiServiceUrl();
+
+    const handleFrontPageImageUpload = useCallback(async (file: File) => {
+        setFrontPageUploading(true);
+        try {
+            let compressed: File;
+            try {
+                compressed = await compressImage(file, 10 * 1024 * 1024);
+            } catch {
+                compressed = file;
+            }
+
+            if (cloudEnabled) {
+                const idToken = await getAuth().currentUser?.getIdToken();
+                if (!idToken) throw new Error('Could not get auth token.');
+                const result = await uploadImageToCloud(compressed, idToken);
+                updateSetting('frontPage.uploadedImage', result.url);
+            } else {
+                // Fallback: store as base64 data URL (local-only mode)
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => resolve(ev.target?.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(compressed);
+                });
+                updateSetting('frontPage.uploadedImage', dataUrl);
+            }
+        } catch (err) {
+            console.error('[FrontPage] Image upload failed:', err);
+            // Last-resort fallback: raw base64
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const dataUrl = ev.target?.result as string;
+                if (dataUrl) updateSetting('frontPage.uploadedImage', dataUrl);
+            };
+            reader.readAsDataURL(file);
+        } finally {
+            setFrontPageUploading(false);
+        }
+    }, [cloudEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const allFontFamilies = useMemo(() => {
         const preloadedMapped = PRELOADED_FONTS.map(pf => {
@@ -1705,12 +1751,19 @@ export function TemplateEditor() {
                                                     htmlFor="front-page-upload"
                                                     className={cn(
                                                         "flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-2xl cursor-pointer transition-colors",
-                                                        settings.frontPage?.uploadedImage
+                                                        frontPageUploading
+                                                            ? "border-primary/50 bg-primary/5 cursor-wait"
+                                                            : settings.frontPage?.uploadedImage
                                                             ? "border-primary/50 bg-primary/5"
                                                             : "border-border hover:border-primary/50 hover:bg-muted/50"
                                                     )}
                                                 >
-                                                    {settings.frontPage?.uploadedImage ? (
+                                                    {frontPageUploading ? (
+                                                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                                            <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                                            <span className="text-sm font-medium">Uploading…</span>
+                                                        </div>
+                                                    ) : settings.frontPage?.uploadedImage ? (
                                                         <div className="flex flex-col items-center gap-2">
                                                             <img
                                                                 src={settings.frontPage.uploadedImage}
@@ -1730,16 +1783,12 @@ export function TemplateEditor() {
                                                         type="file"
                                                         accept="image/png,image/jpeg"
                                                         className="hidden"
+                                                        disabled={frontPageUploading}
                                                         onChange={(e) => {
                                                             const file = e.target.files?.[0];
                                                             if (!file) return;
-                                                            const reader = new FileReader();
-                                                            reader.onload = (ev) => {
-                                                                const dataUrl = ev.target?.result as string;
-                                                                if (dataUrl) updateSetting('frontPage.uploadedImage', dataUrl);
-                                                            };
-                                                            reader.readAsDataURL(file);
                                                             e.target.value = '';
+                                                            void handleFrontPageImageUpload(file);
                                                         }}
                                                     />
                                                 </label>
