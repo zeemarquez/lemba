@@ -4,6 +4,7 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
+import cors from 'cors';
 import convertRouter from './routes/convert';
 import meRouter from './routes/me';
 import { handleTempPdfDownload } from './routes/temp-pdf-download';
@@ -15,10 +16,37 @@ import oauthRouter from './oauth/router';
 
 const MAX_BODY_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 
+// Origins allowed to call the API from a browser.
+// Add any additional webapp origins to CORS_ORIGINS (comma-separated).
+const DEFAULT_ORIGINS = [
+    'https://write.lemba.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+];
+
+function buildCorsOrigins(): string[] {
+    const env = process.env.CORS_ORIGINS;
+    if (!env) return DEFAULT_ORIGINS;
+    const extra = env.split(',').map((s) => s.trim()).filter(Boolean);
+    return [...new Set([...DEFAULT_ORIGINS, ...extra])];
+}
+
 export function createApp(): express.Express {
     const app = express();
 
     app.disable('x-powered-by');
+
+    // CORS — must be before any route or auth middleware so preflight OPTIONS
+    // requests are handled and 'Access-Control-Allow-Origin' is always present.
+    app.use(
+        cors({
+            origin: buildCorsOrigins(),
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+            credentials: true,
+        }),
+    );
+
     app.use(express.json({ limit: `${MAX_BODY_MB}mb` }));
     app.use(express.urlencoded({ extended: true, limit: `${MAX_BODY_MB}mb` }));
 
