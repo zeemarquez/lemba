@@ -5,6 +5,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { requireUser } from '../middleware/auth';
+import imagesRouter from './images';
 import { isFirebaseAdminConfigured } from '../lib/firebase-admin';
 import {
     createUserMarkdownFile,
@@ -281,5 +282,7 @@ router.get('/fonts', async (req: Request, res: Response) => {
         res.status(500).json({ error: 'CloudReadFailed', message });
     }
 });
+
+router.use('/images', imagesRouter);
 
 export default router;

@@ -313,7 +313,7 @@ export function createPdfMcpServer(options: CreatePdfMcpServerOptions = {}): Mcp
     const server = new McpServer(
         {
             name: 'modern-markdown-editor-pdf-api',
-            version: '0.5.0',
+            version: '0.6.0',
         },
         { instructions: SERVER_INSTRUCTIONS },
     );

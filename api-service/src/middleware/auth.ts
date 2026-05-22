@@ -16,6 +16,7 @@
 
 import type { NextFunction, Request, Response } from 'express';
 import { verifyApiKey } from '../lib/cloud-store';
+import { getFirebaseAdminAuth } from '../lib/firebase-admin';
 
 declare module 'express-serve-static-core' {
     interface Request {
@@ -32,6 +33,22 @@ function extractToken(req: Request): string {
     const auth = req.header('authorization') || '';
     if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
     return '';
+}
+
+/**
+ * Verify a Firebase ID token and return the userId, or null if invalid.
+ * Used as a fallback when the token is not an mme_* API key.
+ */
+async function verifyFirebaseIdToken(token: string): Promise<string | null> {
+    if (!token || token.startsWith('mme_')) return null;
+    const auth = getFirebaseAdminAuth();
+    if (!auth) return null;
+    try {
+        const decoded = await auth.verifyIdToken(token);
+        return decoded.uid;
+    } catch {
+        return null;
+    }
 }
 
 export async function apiKeyAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -62,6 +79,14 @@ export async function apiKeyAuth(req: Request, res: Response, next: NextFunction
         }
     } catch (e) {
         console.error('[auth] verifyApiKey failed:', e);
+    }
+
+    // Fall back to Firebase ID token (used by the web app frontend for image uploads).
+    const firebaseUserId = await verifyFirebaseIdToken(token);
+    if (firebaseUserId) {
+        req.userId = firebaseUserId;
+        next();
+        return;
     }
 
     res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
@@ -114,6 +139,13 @@ export async function mcpAuth(req: Request, res: Response, next: NextFunction): 
         }
     } catch (e) {
         console.error('[auth] verifyApiKey failed:', e);
+    }
+
+    const firebaseUserId = await verifyFirebaseIdToken(token);
+    if (firebaseUserId) {
+        req.userId = firebaseUserId;
+        next();
+        return;
     }
 
     res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
